@@ -107,8 +107,10 @@ function useFavoriteCycle(binding: ModelBinding, panelOpen: boolean, change: Cha
  * opens at window level so the transcript cannot clip it. Nothing changes in
  * the browser until Pi answers, and a change is never retried.
  */
-export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem }: {
+export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, word }: {
   binding: ModelBinding; anchor: RefObject<HTMLElement | null>;
+  /** Draw the trigger as this one word, such as Change, inside a sentence that already names the model. */
+  word?: string | undefined;
   open: PickerOpen | undefined; onOpenChange: (open: PickerOpen | undefined) => void;
   /** The panel's least width, for an anchor narrower than a usable panel, such as a trigger alone in a row. */
   minWidthRem?: number | undefined;
@@ -133,10 +135,12 @@ export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem }
     <button ref={trigger} type="button" className="model-trigger" disabled={binding.disabled}
       aria-haspopup="dialog" aria-expanded={open !== undefined} aria-controls={open ? panelId : undefined}
       aria-label={`${label}${level ? ` ${thinkingLabel(level)}` : ""}, change model and thinking level`}
-      title="Model and thinking level" onClick={() => { if (!changing) onOpenChange(open ? undefined : { query: "" }); }}>
-      <span className="model-trigger-name">{label}</span>
-      {level && <span className="model-trigger-level">{thinkingLabel(level)}</span>}
-      <ChevronDownIcon aria-hidden size={14} />
+      title="Model and thinking level" data-look={word === undefined ? undefined : "word"} onClick={() => { if (!changing) onOpenChange(open ? undefined : { query: "" }); }}>
+      {word === undefined ? <>
+        <span className="model-trigger-name">{label}</span>
+        {level && <span className="model-trigger-level">{thinkingLabel(level)}</span>}
+        <ChevronDownIcon aria-hidden size={14} />
+      </> : <span className="model-trigger-name">{word}</span>}
     </button>
     {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger} minWidthRem={minWidthRem}
       initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, layer)}

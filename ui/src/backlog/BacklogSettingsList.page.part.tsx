@@ -4,6 +4,8 @@ import type { StateChecks } from "@simonwjackson/caliper/checks";
 import { BacklogSettingsList } from "./BacklogSettingsList";
 import { catalogWith, notRoutedSource, overlapping, routedSource } from "./fixtures/backlogSources";
 import type { BacklogSettingsCatalog } from "./backlogSettingsApi";
+import type { SuggestionModel } from "./suggestions/suggestionsApi";
+import { MODELS } from "./suggestions/fixtures/suggestions";
 
 export const name = "BacklogSettingsList";
 export const note = "Azure DevOps sources above the projects, each source with its destination, and a GitHub username";
@@ -23,7 +25,8 @@ const close = <button type="button" className="picker-icon" aria-label="Close se
 function Stateful({ catalog }: { catalog: BacklogSettingsCatalog }) {
   const [login, setLogin] = useState(catalog.settings.githubLogin ?? "");
   const [opened, setOpened] = useState<string>();
-  return <BacklogSettingsList back={back} close={close} load={{ type: "ready", value: catalog }} error={opened ? `Opens ${opened}` : undefined} busy={false}
+  const [model, setModel] = useState<SuggestionModel | undefined>({ modelSpec: "anthropic/claude-haiku-4-5" });
+  return <BacklogSettingsList suggestionModel={{ value: model, known: MODELS, list: async () => MODELS, onChange: setModel }} back={back} close={close} load={{ type: "ready", value: catalog }} error={opened ? `Opens ${opened}` : undefined} busy={false}
     login={login} onLogin={setLogin} onSaveLogin={() => undefined} onOpen={setOpened} onReload={() => setOpened(undefined)} />;
 }
 export default function RoutedSource() { return <Stateful catalog={catalogWith([routedSource])} />; }

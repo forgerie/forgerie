@@ -1,7 +1,7 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, groupPartByType, MessagePrimitive, useAui, useAuiState, type GroupByContext, type PartState } from "@assistant-ui/react";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { artifactDoor, artifactIssue, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
+import { artifactDoor, artifactIssue, artifactSuggestion, type HistorySummaryKind, type PullNoticeArtifact, type ShellArtifact, type SummaryArtifact } from "../transcript";
 import { PullNoticeRow } from "./PullNoticeRow";
 import { SessionDoorCall } from "./SessionDoor";
 import { EventSentence } from "./EventSentence";
@@ -55,6 +55,8 @@ function activityPath(part: PartState, context: GroupByContext): readonly GroupK
 function groupAssistantParts(rowOf: ReadonlyMap<string, string>) {
   const hasSteps = rowOf.size > 0;
   return (part: PartState, context: GroupByContext): readonly GroupKey[] => {
+    // A card a call made, such as a backlog suggestion, is something to act on, not work to skim: it stands in the reply.
+    if (part.type === "tool-call" && artifactSuggestion(part.artifact)) return [];
     const step = stepIdOf(part);
     if (step !== undefined) return [...WORK, `${STEP_GROUP}${rowOf.get(step) ?? step}`];
     if (!hasSteps) return activityPath(part, context);
@@ -119,9 +121,17 @@ export function UserMessage() {
   </MessagePrimitive.Root>;
 }
 
-/** `fileLinks` opens the files a reply names in a `files` block. */
-export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefined }) {
+/**
+ * Draws a tool call's artifact as a feature's own view, such as a card the call made, or returns undefined to leave
+ * the call to the default line. Supplied by the binding, so this shared component names no feature.
+ */
+export type ToolArtifactView = (artifact: unknown) => ReactNode | undefined;
+const NO_TOOL_VIEW = createLatest<ToolArtifactView | undefined>(undefined);
+
+/** `fileLinks` opens the files a reply names in a `files` block. `toolView` may draw a call as a view of its own. */
+export function AssistantMessage({ fileLinks, toolView = NO_TOOL_VIEW }: { fileLinks?: FileLinks | undefined; toolView?: Latest<ToolArtifactView | undefined> | undefined }) {
   const steps = useToolSteps();
+  const viewTool = useLatest(toolView);
   const stepParts = useMemo<StepParts>(() => ({
     text: { Text: () => <MarkdownText fileLinks={fileLinks} /> },
     thought: { Reasoning: () => <MarkdownText fileLinks={fileLinks} /> },
@@ -150,6 +160,8 @@ export function AssistantMessage({ fileLinks }: { fileLinks?: FileLinks | undefi
               ? <TraceLine live label="working" /> : <MarkdownText fileLinks={fileLinks} />;
             case "reasoning": return <div className="reasoning-text"><MarkdownText fileLinks={fileLinks} /></div>;
             case "tool-call": {
+              const own = viewTool?.(part.artifact);
+              if (own !== undefined) return own;
               const door = artifactDoor(part.artifact);
               const issue = artifactIssue(part.artifact);
               // A file_issue call keeps the ordinary tool line, so its input and output stay one tap away, and says under it what it did.

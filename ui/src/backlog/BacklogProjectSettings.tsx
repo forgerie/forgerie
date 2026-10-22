@@ -10,6 +10,7 @@ import { ActionFooter } from "../ui/ActionFooter";
 import { Lede } from "../ui/Lede";
 import { backlogSettingsOrigin, TRUSTED_BOT_LIMIT } from "./backlogSettingsModel";
 import { TrustedBotsField } from "./TrustedBotsField";
+import { SuggestionModelField, type SuggestionModelChoice } from "./suggestions/SuggestionModelField";
 
 /** The providers a project owns. Azure DevOps boards are sources of their own, set up in the Sources list. */
 const PROJECT_PROVIDERS = [{ id: "markdown", label: "Markdown" }, { id: "github", label: "GitHub" }] as const;
@@ -19,7 +20,9 @@ const PROJECT_PROVIDERS = [{ id: "markdown", label: "Markdown" }, { id: "github"
  * has an Azure DevOps section says so above the fields, because Forgerie no longer reads it. Trusted bots show only
  * while GitHub lists trusted authors only: with all authors listed, every bot's text already reaches the agent.
  */
-export function BacklogProjectSettings({ entry, name, back, close, busy, error, valid, providers, onSources, repo, onRepo, trusted, onTrusted, bots, botProblems, onBots, onSave, onRemove, onReload }: {
+export function BacklogProjectSettings({ entry, name, back, close, busy, error, valid, providers, onSources, repo, onRepo, trusted, onTrusted, bots, botProblems, onBots, onSave, onRemove, onReload, suggestionModel }: {
+  /** This project's model for a suggestion's File and act. Absent: the field is not shown. */
+  suggestionModel?: SuggestionModelChoice | undefined;
   entry: ProjectSettingsEntry; name: string; back: ReactNode; close: ReactNode; busy: boolean; error: string | undefined; valid: boolean;
   providers: string[]; onSources: (sources: string[]) => void; repo: string; onRepo: (value: string) => void; trusted: boolean; onTrusted: (value: boolean) => void;
   bots: readonly string[]; botProblems: readonly (string | undefined)[]; onBots: (bots: string[]) => void;
@@ -35,6 +38,9 @@ export function BacklogProjectSettings({ entry, name, back, close, busy, error, 
       <SettingsField hintTone="readable" label="Trusted authors only" hint={trusted ? "List repo owners, members, and collaborators." : "List all authors. Their text is untrusted agent context."}><SettingsToggle label="Trusted authors only" checked={trusted} onChange={onTrusted} disabled={busy} /></SettingsField>
       {trusted ? <TrustedBotsField bots={bots} problems={botProblems} limit={TRUSTED_BOT_LIMIT} disabled={busy} onChange={onBots} /> : null}
     </> : null}
+    {suggestionModel ? <SuggestionModelField label="Background model" value={suggestionModel.value} fallback={suggestionModel.fallback} disabled={busy}
+      hint={`File and act on this project's backlog suggestions starts its background session on this model. Unset: ${suggestionModel.fallback.charAt(0).toLowerCase()}${suggestionModel.fallback.slice(1)}.`}
+      knownModels={suggestionModel.known} listModels={suggestionModel.list} onChange={suggestionModel.onChange} /> : null}
     {!valid ? <Lede>Select at least one provider and fill in its valid settings.</Lede> : null}
     <ActionFooter actions={[{ label: "Use the repo file", onPress: onRemove, disabled: busy || entry.source !== "forgerie" }]} note="Forgerie replaces the whole repo backlog section. Turning Markdown off leaves its files on disk. Add Azure DevOps boards under Sources in Settings → Backlog." />
   </SettingsFrame>;

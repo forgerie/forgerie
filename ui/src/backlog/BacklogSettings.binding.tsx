@@ -3,7 +3,10 @@ import { Check } from "typebox/value";
 import { BacklogAzureDevopsConfigSchema, BacklogConfigSchema, type BacklogConfig } from "@shared/backlog";
 import type { BacklogProjectSettings as ProjectSettingsEntry } from "@shared/backlogSettings";
 import { azureSourcesOverlap, sourceOverlapMessage, type BacklogSourceInput, type BacklogSourceSettings as SourceSettingsEntry } from "@shared/backlogSources";
-import { BacklogSettingsRefusal, type BacklogSettingsApi, type BacklogSettingsCatalog } from "./backlogSettingsApi";
+import { BacklogSettingsRefusal, projectSuggestionsOf, suggestionsDefaultOf, type BacklogSettingsApi, type BacklogSettingsCatalog } from "./backlogSettingsApi";
+import type { SessionModel } from "../contracts";
+import type { SuggestionModel } from "./suggestions/suggestionsApi";
+import { modelFromSpec, modelWords } from "./suggestions/suggestionsModel";
 import { BacklogSettingsList } from "./BacklogSettingsList";
 import { BacklogProjectSettings } from "./BacklogProjectSettings";
 import { BacklogSourceSettings, NO_DESTINATION, type SourceDraft, type SourceProblems } from "./BacklogSourceSettings";
@@ -17,8 +20,17 @@ export function BacklogSettingsView({ api, selected, onOpen, back, close }: { ap
   const [login, setLogin] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [knownModels, setKnownModels] = useState<readonly SessionModel[]>([]);
   const refresh = useCallback(async () => { try { const value = await api.list(); setLoad({ type: "ready", value }); setLogin(value.settings.githubLogin ?? ""); } catch (error) { setLoad({ type: "failed", message: message(error) }); } }, [api]);
   useEffect(() => { let active = true; api.list().then((value) => { if (active) { setLoad({ type: "ready", value }); setLogin(value.settings.githubLogin ?? ""); } }, (error: unknown) => { if (active) setLoad({ type: "failed", message: message(error) }); }); return () => { active = false; }; }, [api]);
+  // Model names for the suggestion model fields: Pi's list for the first registered project.
+  const firstPath = load.type === "ready" ? load.value.projects[0]?.path : undefined;
+  useEffect(() => {
+    if (firstPath === undefined) return;
+    const controller = new AbortController();
+    api.models(firstPath, controller.signal).then((models) => { if (!controller.signal.aborted) setKnownModels(models); }, () => undefined);
+    return () => controller.abort();
+  }, [api, firstPath]);
   // A page change leaves the last page's refusal behind.
   useEffect(() => { setError(undefined); }, [selected]);
   const mutate = async (action: () => Promise<unknown>, refusals: Refusals = "project", then?: () => void) => {
@@ -39,12 +51,25 @@ export function BacklogSettingsView({ api, selected, onOpen, back, close }: { ap
         onDelete={() => { if (source) void mutate(() => api.removeSource(source.id, source.revision), "source", () => onOpen(undefined)); }} />;
     }
   }
+  const globalModel = load.type === "ready" ? suggestionsDefaultOf(load.value.settings) : undefined;
+  /** Model names and choices come from Pi's list for one project folder; any registered project's will do for the global default. */
+  const listModels = (cwd: string | undefined) => async (signal: AbortSignal): Promise<SessionModel[]> => {
+    if (cwd === undefined) throw new Error("Register a project to choose a model.");
+    const models = await api.models(cwd, signal);
+    setKnownModels(models);
+    return models;
+  };
   const entry = load.type === "ready" && place.kind === "project" ? load.value.settings.projects.find((p) => p.projectId === place.projectId) : undefined;
   const name = load.type === "ready" && place.kind === "project" ? load.value.projects.find((p) => p.id === place.projectId)?.name : undefined;
+  const projectPath = load.type === "ready" && place.kind === "project" ? load.value.projects.find((p) => p.id === place.projectId)?.path : undefined;
+  const globalName = modelWords(modelFromSpec(globalModel?.modelSpec, knownModels));
   if (entry && !("error" in entry)) return <ProjectEditorBinding key={`${entry.projectId}:${entry.source}:${entry.revision ?? 0}`} entry={entry} name={name ?? entry.projectId} back={back} close={close} busy={busy} error={error}
+    models={{ known: knownModels, list: listModels(projectPath), fallback: globalName ? `The global default, ${globalName}` : "The chat's model" }}
     onSave={(backlog) => void mutate(() => api.save(entry.projectId, backlog, entry.revision ?? 0))}
     onRemove={() => void mutate(() => api.remove(entry.projectId, entry.revision ?? 0))} onReload={reload} />;
   return <BacklogSettingsList back={back} close={close} load={load} error={error} busy={busy} login={login} onLogin={setLogin}
+    suggestionModel={{ value: globalModel, known: knownModels, list: listModels(load.type === "ready" ? load.value.projects[0]?.path : undefined),
+      onChange: (value) => void mutate(() => api.suggestionsDefault(value ?? null)) }}
     onSaveLogin={() => void mutate(() => api.githubLogin(login.trim() || null))} onOpen={onOpen} onReload={() => void refresh()} />;
 }
 
@@ -81,8 +106,11 @@ function SourceEditorBinding({ source, catalog, back, close, busy, error, onSave
     draft={draft} problems={problems} projects={catalog.projects} valid={valid} onDraft={setDraft} onSave={() => onSave(input)} onDelete={onDelete} />;
 }
 
-function ProjectEditorBinding({ entry, name, back, close, busy, error, onSave, onRemove, onReload }: {
-  entry: ProjectSettingsEntry; name: string; back: ReactNode; close: ReactNode; busy: boolean; error: string | undefined;
+/** The model fields' list: names Pi knows, a read for the picker, and what an unset field falls back to. */
+interface ModelChoices { known: readonly SessionModel[]; list: (signal: AbortSignal) => Promise<SessionModel[]>; fallback: string }
+
+function ProjectEditorBinding({ entry, name, back, close, busy, error, models, onSave, onRemove, onReload }: {
+  entry: ProjectSettingsEntry; name: string; back: ReactNode; close: ReactNode; busy: boolean; error: string | undefined; models: ModelChoices;
   onSave: (backlog: BacklogConfig) => void; onRemove: () => void; onReload: () => void;
 }) {
   // Azure DevOps is a source of its own now. A project keeps only the providers it owns.
@@ -90,6 +118,7 @@ function ProjectEditorBinding({ entry, name, back, close, busy, error, onSave, o
   const [repo, setRepo] = useState(entry.backlog.github?.repo ?? "");
   const [trusted, setTrusted] = useState(entry.backlog.github?.authors !== "all");
   const [bots, setBots] = useState<string[]>(entry.backlog.github?.trustedBots ?? []);
+  const [suggestions, setSuggestions] = useState<SuggestionModel | undefined>(projectSuggestionsOf(entry.backlog));
   const github = providers.includes("github");
   // The bots field shows only while GitHub lists trusted authors only, so only then can its problems hold Save.
   const botProblems = trustedBotProblems(bots);
@@ -101,8 +130,11 @@ function ProjectEditorBinding({ entry, name, back, close, busy, error, onSave, o
   const backlog: BacklogConfig = { ...(entry.backlog.dir === undefined ? {} : { dir: entry.backlog.dir }), providers,
     ...(github ? { github: { ...(repo.trim() ? { repo: repo.trim() } : {}), authors: trusted ? "trusted" : "all", ...(trustedBots.length ? { trustedBots } : {}) } } : {}) };
   const valid = providers.length > 0 && Check(BacklogConfigSchema, backlog) && !(botsShown && botProblems.some(Boolean));
+  // The project's own model for suggestions rides along with the rest. Unset is left out, so the global default applies.
+  const saved: BacklogConfig = suggestions?.modelSpec ? { ...backlog, suggestions } as BacklogConfig : backlog;
   return <BacklogProjectSettings entry={entry} name={name} back={back} close={close} busy={busy} error={error} valid={valid}
     providers={providers} onSources={(sources) => setProviders(sources.filter((p): p is "markdown" | "github" => p === "markdown" || p === "github"))}
     repo={repo} onRepo={setRepo} trusted={trusted} onTrusted={setTrusted} bots={bots} botProblems={botProblems} onBots={setBots}
-    onSave={() => onSave(backlog)} onRemove={onRemove} onReload={onReload} />;
+    suggestionModel={{ value: suggestions, known: models.known, list: models.list, fallback: models.fallback, onChange: setSuggestions }}
+    onSave={() => onSave(saved)} onRemove={onRemove} onReload={onReload} />;
 }

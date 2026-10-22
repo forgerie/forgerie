@@ -30,6 +30,10 @@ import { SEARCH_KEYS, SearchBox, searchHint } from "./search/SearchBox";
 import { SearchResults } from "./search/SearchResults";
 import { readTarget, targetParam, type SettingsPlace } from "./agents/agentPlace";
 import { createBacklogApi, type BacklogItem } from "./backlog/backlogApi";
+import { createSuggestionsApi, type Suggestion } from "./backlog/suggestions/suggestionsApi";
+import { createSuggestionsStore } from "./backlog/suggestions/suggestionsStore";
+import { isOpen as suggestionWaits } from "./backlog/suggestions/suggestionsModel";
+import { SuggestedInChats } from "./backlog/suggestions/SuggestedInChats";
 import { heldSessions, itemParam, launchFolder, listOf, openCount, readBacklogPlace, readItemParam, refOf, type BacklogPlace } from "./backlog/backlogModel";
 import { createGitHubApi, readSetupReturn, submitToGitHub } from "./backlog/githubApi";
 import type { GitHubAppPage } from "./backlog/useGitHubApp";
@@ -78,6 +82,7 @@ const clearSettings = (url: URL) => {
 const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
 const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
+const suggestionsApi = createSuggestionsApi((path, init) => fetch(path, init));
 const githubApi = createGitHubApi((path, init) => fetch(path, init));
 /** GitHub returns from creating the app to this page's root; the backlog finishes the setup. */
 const githubPage: GitHubAppPage = {
@@ -181,7 +186,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const query = search?.state.query ?? "";
   const mode = queryMode(query);
   const picker = usePicker(selectedId, { onDeleted, starting, projectScope, projectCatalog, titleFilter: mode === "title" ? query : undefined });
-  const { onStartup, onWorktree, onTriggersChanged } = picker;
+  const { onStartup, onWorktree, onTriggersChanged, onSuggestionsChanged } = picker;
   const [registry] = useState(() => createSessionRegistry(browserTransport, { onUnread: picker.onUnread }));
   registryRef.current = registry;
   const kept = useSyncExternalStore(registry.subscribe, registry.getSnapshot);
@@ -197,6 +202,17 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const triggersChanged = triggers?.onChanged;
   useEffect(() => triggersChanged ? onTriggersChanged(triggersChanged) : undefined, [onTriggersChanged, triggersChanged]);
   useEffect(() => onWorktree(worktreeEvents.emit), [onWorktree, worktreeEvents]);
+  // Every chat's suggestions, for the Backlog view's "Suggested in chats". Each open chat keeps its own.
+  const [everySuggestion] = useState(() => createSuggestionsStore(suggestionsApi, () => ({})));
+  useEffect(() => () => everySuggestion.dispose(), [everySuggestion]);
+  const suggested = useSyncExternalStore(everySuggestion.subscribe, everySuggestion.getSnapshot);
+  // A suggestion changed: the chat it belongs to reads its own again (every chat after a rejoin), and so does the Backlog view.
+  useEffect(() => onSuggestionsChanged((change) => {
+    for (const record of registry.getSnapshot()) if (change.sessionId === undefined || record.entry.session.id === change.sessionId) record.entry.suggestionsChanged();
+    if (readBacklog() !== undefined) void everySuggestion.refresh();
+  }), [onSuggestionsChanged, registry, everySuggestion]);
+  /** Show in chat: the chat opens with the card in view. A new key asks again for the same card. */
+  const [shownSuggestion, setShownSuggestion] = useState<{ sessionId: string; suggestionId: string; key: number }>();
   useEffect(() => () => launches.dispose(), [launches]);
   useEffect(() => {
     const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setComposeItem(readItem()); setSettings(readSettings()); setBacklog(readBacklog()); setTriggerPlace(readTriggers()); };
@@ -383,13 +399,13 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     if (place) url.searchParams.set("backlog", place.item ? itemParam(place.item) : "");
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     // Opening the list reads the folders again: an agent may have written an item since.
-    if (place && !place.item) refreshBacklog();
+    if (place && !place.item) { refreshBacklog(); void everySuggestion.refresh(); }
     setBacklog(place);
     setSettings(undefined);
     setTriggerPlace(undefined);
     if (place) setOpen(false);
     else if (!readSelected()) setOpen(true);
-  }, [refreshBacklog]);
+  }, [refreshBacklog, everySuggestion]);
   // The triggers take the thread's place the same way; the session stays in the URL underneath.
   const placeTriggers = useCallback((place: TriggerPlace | undefined, options: { replace?: boolean } = {}) => {
     const url = new URL(window.location.href);
@@ -493,6 +509,10 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onDismiss={() => { /* No transcript problems exist before resolution. */ }} /> } : undefined} />}>
     <div className="thread-empty" />
   </SessionFrame> : null;
+  // A suggestion's background session opens only on the reader's press; the Backlog opens from the chat's list.
+  const lookSession = picker.look;
+  const suggestionLinks = useMemo(() => ({ look: lookSession, openSession: (sessionId: string) => switchSession(find(sessionId) ?? { id: sessionId, cwd: "" }),
+    openBacklog: () => placeBacklog({}) }), [lookSession, find, switchSession, placeBacklog]);
   const chats = kept.filter(record => record.visited).map(record => {
     const entry = record.entry;
     const id = entry.session.id;
@@ -504,7 +524,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         initialError={commandSelection?.session.id === id ? commandSelection.error : undefined}
         drafts={drafts} onSwitchSession={switchSession}
         worktree={picker.find(id)?.worktree} pullRequests={picker.find(id)?.pullRequests} actionRuns={picker.find(id)?.actionRuns} worktrees={worktreeApi} onNewSession={() => { void startNew(); }}
-        archive={{ availability: picker.archiveState(id), onArchive: () => { void archiveNext(id); } }} />
+        archive={{ availability: picker.archiveState(id), onArchive: () => { void archiveNext(id); } }}
+        suggestionLinks={suggestionLinks} revealSuggestion={shownSuggestion?.sessionId === id ? shownSuggestion : undefined} />
     </Activity>;
   });
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
@@ -514,7 +535,13 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         projects: projectCatalog ?? backlogProjects,
         onPlace: placeBacklog, onClose: () => placeBacklog(undefined),
         onLaunch: (item) => { void startNew("switch", item); },
-        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage }} /></Suspense>
+        onOpenSession: (claim) => switchSession({ id: claim.sessionId, cwd: claim.cwd }), github: githubApi, githubPage,
+        before: <SuggestedInChats suggestions={suggested.suggestions?.filter((record: Suggestion) => suggestionWaits(record.state))} readError={suggested.readError}
+          pending={suggested.pending} problems={suggested.problems} drafts={suggested.drafts} now={Date.now()} actions={{
+            onFile: (id) => { void everySuggestion.file(id); }, onFileAndAct: (id) => { void everySuggestion.fileAndAct(id); },
+            onRetry: () => { void everySuggestion.refresh(); },
+            onShow: (record) => { switchSession(picker.find(record.sessionId) ?? { id: record.sessionId, cwd: "" });
+              setShownSuggestion((current) => ({ sessionId: record.sessionId, suggestionId: record.id, key: (current?.key ?? 0) + 1 })); } }} /> }} /></Suspense>
     : triggerPlace && triggers ? triggers.render({ place: triggerPlace, onPlace: placeTriggers,
       onOpenSession: (session) => switchSession(session), sessionName: (id) => picker.find(id)?.name })
     : composing === "" && !composeItem && !selectedId

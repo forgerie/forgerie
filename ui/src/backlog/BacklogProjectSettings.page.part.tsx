@@ -4,6 +4,8 @@ import type { BacklogProjectSettings as ProjectSettingsEntry } from "@shared/bac
 import { BacklogProjectSettings } from "./BacklogProjectSettings";
 import { trustedBotProblems } from "./backlogSettingsModel";
 import { retiredAzureProject, trustedBotsProject } from "./fixtures/backlogSources";
+import type { SuggestionModel } from "./suggestions/suggestionsApi";
+import { MODELS } from "./suggestions/fixtures/suggestions";
 
 export const name = "BacklogProjectSettings";
 export const note = "One project's backlog: Markdown and GitHub, and the bots GitHub trusts. A repo file's Azure DevOps section is retired, and says so";
@@ -36,7 +38,8 @@ function Stateful({ entry, rows }: { entry: ProjectSettingsEntry; rows?: string[
   const [trusted, setTrusted] = useState(true);
   const [bots, setBots] = useState<string[]>(rows ?? entry.backlog.github?.trustedBots ?? []);
   const problems = trustedBotProblems(bots);
-  return <BacklogProjectSettings entry={entry} name="design-system" back={null} close={null} busy={false} error={undefined}
+  const [model, setModel] = useState<SuggestionModel>();
+  return <BacklogProjectSettings suggestionModel={{ value: model, known: MODELS, list: async () => MODELS, fallback: "The global default, Claude Haiku 4.5", onChange: setModel }} entry={entry} name="design-system" back={null} close={null} busy={false} error={undefined}
     valid={providers.length > 0 && !(providers.includes("github") && trusted && problems.some(Boolean))}
     providers={providers} onSources={setProviders} repo={repo} onRepo={setRepo} trusted={trusted} onTrusted={setTrusted}
     bots={bots} botProblems={problems} onBots={setBots}

@@ -3,3 +3,6 @@
   margin: 0; padding-block: var(--space-1); color: var(--quiet-foreground); font-size: var(--small-text); line-height: 1.5; }
 .readout-line-text { flex: 1 1 10rem; min-inline-size: 0; overflow-wrap: anywhere; }
 .readout-line-action { flex: none; display: inline-flex; gap: var(--space-1); margin-inline-start: auto; }
+/* A path or a name the sentence is about reads in full ink; a path in the code face, whole at any width. */
+.readout-line-text code { color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; overflow-wrap: anywhere; }
+.readout-line-text strong { color: var(--foreground); font-weight: 550; }

@@ -6,7 +6,7 @@ import { createLatest } from "./latest";
 import { Composer, type ShellBinding } from "./Composer";
 import type { AskBinding } from "./useAskMode";
 import type { MentionSource } from "../mentionSource";
-import { AssistantMessage, SystemMessage, UserMessage, type SystemArtifactView } from "./Messages";
+import { AssistantMessage, SystemMessage, UserMessage, type SystemArtifactView, type ToolArtifactView } from "./Messages";
 import type { CommandBinding } from "./SlashCommands";
 import { CommandResultPanel, type CommandResultBinding } from "./CommandResultPanel";
 import { ImageViewerProvider } from "./ImageViewer";
@@ -26,7 +26,7 @@ import { useReaderAnchor } from "./useReaderAnchor";
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, toolArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
   /**
    * Whether older messages exist above the first loaded one. The runtime's
    * `hasEarlier` and `onLoadEarlier` load them; this only describes the state.
@@ -52,6 +52,8 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   onOpenFile?: ((path: string) => boolean) | undefined;
   /** A feature view for a system message's custom metadata, such as a process event. */
   systemArtifact?: SystemArtifactView | undefined;
+  /** Draws a tool call the binding knows, such as a card the call made. Calls it leaves alone keep their line. */
+  toolArtifact?: ToolArtifactView | undefined;
   /** Which files a reply names exist, and how one opens, for the rows of a `files` block. Keep it stable: a new object remounts every message. */
   fileLinks?: FileLinks | undefined; ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean; notes?: NotesBinding | undefined;
   /** A line above the input bar that belongs to this thread, such as a new session's destination. */
@@ -67,10 +69,12 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   const [artifactView] = useState(() => createLatest(systemArtifact));
   useLayoutEffect(() => { artifactView.set(systemArtifact); }, [artifactView, systemArtifact]);
   const hasArtifact = systemArtifact !== undefined;
+  const [toolView] = useState(() => createLatest(toolArtifact));
+  useLayoutEffect(() => { toolView.set(toolArtifact); }, [toolView, toolArtifact]);
   // One component identity per view function, so messages do not remount on each render.
   const components = useMemo(() => ({ UserMessage,
-    AssistantMessage: fileLinks ? () => <AssistantMessage fileLinks={fileLinks} /> : AssistantMessage,
-    SystemMessage: hasArtifact ? () => <SystemMessage artifact={artifactView} /> : SystemMessage }), [hasArtifact, artifactView, fileLinks]);
+    AssistantMessage: () => <AssistantMessage fileLinks={fileLinks} toolView={toolView} />,
+    SystemMessage: hasArtifact ? () => <SystemMessage artifact={artifactView} /> : SystemMessage }), [hasArtifact, artifactView, fileLinks, toolView]);
   const linkScope = useMemo(() => linkBase === undefined ? undefined : { base: linkBase, error: linkError, openFile: onOpenFile }, [linkBase, linkError, onOpenFile]);
   const column = useRef<HTMLDivElement>(null);
   useReaderAnchor(column);

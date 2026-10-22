@@ -14,6 +14,7 @@
   line-height: calc(1rem - 2 * var(--hairline)); font-weight: 550; }
 .badge-button-dot { position: absolute; inset-block-start: 0.125rem; inset-inline-end: 0.125rem; inline-size: 0.4375rem; block-size: 0.4375rem;
   border-radius: 50%; background: var(--live); pointer-events: none; animation: badge-button-pulse 1.6s ease-in-out infinite; }
+.badge-button-dot[data-foot] { inset-block: auto -0.125rem; inset-inline-end: -0.125rem; }
 @keyframes badge-button-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { /* A quiet count: no signal colour, since nothing waits on it; a muted chip with a hairline, in the text's ink. */
 .badge-button[data-quiet] .badge-button-count { border: var(--hairline) solid var(--line-focus); background: var(--muted); color: var(--foreground);

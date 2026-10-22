@@ -248,6 +248,27 @@ describe("trigger changes", () => {
   });
 });
 
+describe("backlog suggestion changes", () => {
+  it("hands backlog.suggestions.changed to its listeners with the chat it names, and counts a rejoin as a change to every chat", async () => {
+    const api = await machine();
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    const before = store.getSnapshot();
+    const changes: unknown[] = [];
+    const stop = store.onSuggestionsChanged((change) => { changes.push(change); });
+    api.emit({ type: "backlog.suggestions.changed", sessionId: "s-chat", suggestionId: "sg-1" });
+    await expect.poll(() => changes.length, { timeout: 2000 }).toBe(1);
+    expect(changes[0]).toEqual({ sessionId: "s-chat", suggestionId: "sg-1" });
+    expect(store.getSnapshot()).toBe(before);
+    api.drop();
+    await until(store, () => store.getSnapshot().connection.type === "reconnecting");
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    await expect.poll(() => changes.length, { timeout: 2000 }).toBe(2);
+    expect(changes[1]).toEqual({});
+    stop();
+  });
+});
+
 describe("machine catalog", () => {
   it("clears an undeclared completion's attention mark when its unread event clears", async () => {
     const api = await machine();

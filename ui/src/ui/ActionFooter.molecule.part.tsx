@@ -21,3 +21,8 @@ export function Failed() {
   return <ActionFooter note="Say what should change. The rest stays as it is." problem="The server is unavailable. Try again in a moment."
     actions={[]} input={<ReplyBox label="What should change?" placeholder="Say what to change" sendLabel="Send changes" onSend={() => Promise.reject(new Error("Not sent"))} />} />;
 }
+export function WithQuiet() {
+  const [note, setNote] = useState("Keep it for later, or leave it.");
+  return <ActionFooter note={note} actions={[{ label: "Keep", tone: "primary", onPress: () => setNote("Kept") },
+    { label: "Keep and start", onPress: () => setNote("Kept and started") }, { label: "Dismiss", tone: "quiet", onPress: () => setNote("Dismissed") }]} />;
+}

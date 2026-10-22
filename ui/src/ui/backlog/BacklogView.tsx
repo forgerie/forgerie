@@ -45,6 +45,8 @@ export interface BacklogBinding {
   /** How the page leaves for GitHub and reads what GitHub sent back. */
   githubPage?: GitHubAppPage | undefined;
   onClose?: (() => void) | undefined;
+  /** A group the host draws above the list's own, such as items still waiting to join it. */
+  before?: ReactNode;
 }
 
 /**
@@ -225,6 +227,7 @@ function ListPage({ binding }: { binding: BacklogBinding }) {
       {empty ? <Empty /> : null}
       {blocked.length || githubNews ? <GitHubConnect load={github.load} warnings={blocked} busy={github.busy} error={github.error}
         onSetUp={github.setUp} onRefresh={onRefresh} /> : null}
+      {binding.before}
       {!list ? <p className="settings-hint" role="status">Reading every project's backlog…</p>
         : groups.length === 0 ? list.items.length === 0 ? null
           : <p className="settings-hint">{filter.trim() ? <>No items match “{filter.trim()}”.</> : "Every item is done."}</p>

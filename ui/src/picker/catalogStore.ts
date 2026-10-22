@@ -176,6 +176,14 @@ function isTriggersChanged(value: unknown): boolean {
   return typeof value === "object" && value !== null && (value as { type?: unknown }).type === "triggers.changed";
 }
 
+/** A backlog suggestion changed (`backlog.suggestions.changed`). Suggestions are not catalog state: whoever shows them reads them again. */
+export interface SuggestionsChange { sessionId?: string | undefined; suggestionId?: string | undefined }
+function suggestionsChangeOf(value: unknown): SuggestionsChange | undefined {
+  if (typeof value !== "object" || value === null || (value as { type?: unknown }).type !== "backlog.suggestions.changed") return undefined;
+  const { sessionId, suggestionId } = value as { sessionId?: unknown; suggestionId?: unknown };
+  return { ...(typeof sessionId === "string" ? { sessionId } : {}), ...(typeof suggestionId === "string" ? { suggestionId } : {}) };
+}
+
 /**
  * One machine's session catalog, kept live.
  *
@@ -208,6 +216,9 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
   /** The trigger document changed. Triggers are not catalog state: whoever shows them reads them again. */
   const triggerListeners = new Set<() => void>();
   const triggersChanged = () => { for (const listener of triggerListeners) listener(); };
+  /** A suggestion changed. A rejoin may have missed some, so it reports a change with no session: read them all. */
+  const suggestionListeners = new Set<(change: SuggestionsChange) => void>();
+  const suggestionsChanged = (change: SuggestionsChange) => { for (const listener of suggestionListeners) listener(change); };
   /** A rejoin may have missed a `triggers.changed`, so it counts as one. */
   let joined = false;
   const lifetime = new AbortController();
@@ -270,6 +281,8 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
         try {
           const value: unknown = JSON.parse(text);
           if (isTriggersChanged(value)) { triggersChanged(); return; }
+          const suggestions = suggestionsChangeOf(value);
+          if (suggestions) { suggestionsChanged(suggestions); return; }
           const startup = startupEventSchema.safeParse(value);
           if (startup.success) { for (const listener of startupListeners) listener(startup.data); return; }
           const worktree = parseWorktreeEvent(value);
@@ -349,7 +362,7 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
       current.buffer = undefined;
       retryDelay = initialDelay;
       update(next);
-      if (joined) triggersChanged();
+      if (joined) { triggersChanged(); suggestionsChanged({}); }
       joined = true;
     } catch (error) {
       if (!live()) return;
@@ -419,10 +432,11 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
     onStartup: (listener: (event: StartupEvent) => void) => { startupListeners.add(listener); return () => { startupListeners.delete(listener); }; },
     onWorktree: (listener: (record: WorktreeRecord) => void) => { worktreeListeners.add(listener); return () => { worktreeListeners.delete(listener); }; },
     onTriggersChanged: (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; },
+    onSuggestionsChanged: (listener: (change: SuggestionsChange) => void) => { suggestionListeners.add(listener); return () => { suggestionListeners.delete(listener); }; },
     start: () => { unwatch = watchConnectionRecovery(transport, () => attempt?.socket, recover); return join(); },
     retry: () => { update({ ...state, connection: { type: "loading" } }); recover(); },
     ...mutations,
-    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); triggerListeners.clear(); },
+    dispose: () => { lifetime.abort(); clearTimeout(retryTimer); clearTimeout(frame); closeAttempt(); unwatch?.(); listeners.clear(); unreadListeners.clear(); triggerListeners.clear(); suggestionListeners.clear(); },
   };
 }
 export type CatalogStore = ReturnType<typeof createCatalogStore>;

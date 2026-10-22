@@ -96,6 +96,24 @@ import { NoticeBar } from "./ui/NoticeBar";
 import { PinnedDock } from "./ui/PinnedDock";
 import { EventLine } from "./ui/EventLine";
 import { OldIssueProposalLine } from "./issues/OldIssueProposalLine";
+import type { ToolArtifactView } from "./ui/Messages";
+import { artifactSuggestion } from "./transcript";
+import { SuggestionCard } from "./backlog/suggestions/SuggestionCard";
+import { SuggestionsOpener } from "./backlog/suggestions/SuggestionsOpener";
+import { SuggestionsSheet } from "./backlog/suggestions/SuggestionsSheet";
+import { cardInputs } from "./backlog/suggestions/cardInputs";
+import { openerView } from "./backlog/suggestions/suggestionsModel";
+import type { SessionLook } from "./backlog/backlogModel";
+import { writeClipboardText } from "./clipboard";
+
+/** How this chat's backlog suggestions reach the rest of the app. Only an explicit Open or Show moves the reader. */
+export interface SuggestionLinks {
+  look: (sessionId: string) => SessionLook | undefined;
+  openSession: (sessionId: string) => void;
+  openBacklog?: (() => void) | undefined;
+}
+const NO_LOOK = () => undefined;
+const openLink = (url: string) => { window.open(url, "_blank", "noopener,noreferrer"); };
 
 const pullRequests = createPullRequestApi(browserTransport.request);
 const NO_LINKS: readonly PullLink[] = [];
@@ -103,7 +121,11 @@ const actionRunApi = createActionRunApi(browserTransport.request);
 const NO_RUN_LINKS: readonly ActionRunLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, found }: {
+export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, found, suggestionLinks, revealSuggestion }: {
+  /** Where a suggestion's background session and the Backlog open. Absent: the card offers no Open. */
+  suggestionLinks?: SuggestionLinks | undefined;
+  /** A suggestion to bring into view, such as one the Backlog view showed in this chat. A new key asks again. */
+  revealSuggestion?: { suggestionId: string; key: number } | undefined;
   entry?: SessionEntry | undefined;
   visible?: boolean | undefined;
   /** The search hit the reader opened in this session: a message to mark and step from, or an off-branch entry for the history tree. */
@@ -132,7 +154,9 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   onSwitchSession: (session: Session, draft?: string) => void;
 }) {
   const [entry] = useState(() => retainedEntry ?? createSessionEntry(known ?? { id, cwd: "" }, browserTransport, { onUnread }));
-  const { store, childAgents, processes, workflows, decisions, gated, taskActivity } = entry;
+  const { store, childAgents, processes, workflows, decisions, gated, taskActivity, suggestions } = entry;
+  const suggestionsView = useSyncExternalStore(suggestions.subscribe, suggestions.getSnapshot);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const tasks = useSyncExternalStore(taskActivity.subscribe, taskActivity.getSnapshot);
   const processState = useSyncExternalStore(processes.subscribe, processes.getSnapshot);
   const [processesOpen, setProcessesOpen] = useState(false);
@@ -398,6 +422,42 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
   }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, proposalView, gatedView]);
+  // Backlog suggestions: cards in the thread and the header's list read the server's records, never the transcript alone.
+  const look = suggestionLinks?.look ?? NO_LOOK;
+  const openSuggestionSession = suggestionLinks?.openSession;
+  const suggestionList = suggestionsView.suggestions;
+  const [suggestionModels, setSuggestionModels] = useState<readonly SessionModel[]>([]);
+  const hasSuggestions = (suggestionList?.length ?? 0) > 0;
+  // Model names for the cards' "starts a new session on" line: read once the chat has a suggestion.
+  useEffect(() => {
+    if (!hasSuggestions || !connected) return;
+    const controller = new AbortController();
+    store.listModels(controller.signal).then((models) => { if (!controller.signal.aborted) setSuggestionModels(models); }, () => undefined);
+    return () => controller.abort();
+  }, [hasSuggestions, connected, store]);
+  const chatModel = state.status?.model;
+  const chatThinking = state.status?.thinkingLevel;
+  const toolArtifact = useCallback<ToolArtifactView>((artifact) => {
+    const reference = artifactSuggestion(artifact);
+    if (reference === undefined) return undefined;
+    // The agent may have made the record after the last read: one more read finds it.
+    queueMicrotask(() => suggestions.want(reference.suggestionId));
+    return <div data-suggestion={reference.suggestionId}><SuggestionCard {...cardInputs({ reference, view: suggestionsView, store: suggestions,
+      links: { look, openSession: openSuggestionSession ?? (() => undefined), openLink, copy: writeClipboardText },
+      chat: { model: chatModel, thinkingLevel: chatThinking }, knownModels: suggestionModels, listModels: connected ? store.listModels : undefined, now: Date.now() })} /></div>;
+  }, [suggestions, suggestionsView, look, openSuggestionSession, chatModel, chatThinking, suggestionModels, connected, store]);
+  // Show in chat: bring the card into view once the thread has drawn it.
+  const [revealing, setRevealing] = useState<string>();
+  const revealSuggestionKey = revealSuggestion?.key;
+  const revealSuggestionId = revealSuggestion?.suggestionId;
+  useEffect(() => { if (revealSuggestionId !== undefined) setRevealing(revealSuggestionId); }, [revealSuggestionId, revealSuggestionKey]);
+  useEffect(() => {
+    if (revealing === undefined || !visible) return;
+    const card = document.querySelector(`[data-suggestion="${CSS.escape(revealing)}"]`);
+    if (card === null) return;
+    card.scrollIntoView({ block: "center" });
+    setRevealing(undefined);
+  }, [revealing, visible, messages, suggestionsView]);
   const running = activeRun(runs);
   // Flagged guesses never pin in the dock and never ask for a response; the header counts them quietly.
   // Before the log is read, the session's status says how many there are.
@@ -525,6 +585,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
             the sheet is where the reader sees why and retries. */}
         {childrenAvailable && ((log.decisions?.length ?? 0) > 0 || flagged > 0 || log.readError !== undefined || decisionsOpen) && <DecisionsOpener flagged={flagged}
           onOpen={() => { decisions.refresh(); setDecisionsOpen(true); }} />}
+        {(hasSuggestions || suggestionsOpen) && <SuggestionsOpener {...openerView(suggestionList ?? [], look)}
+          onOpen={() => { void suggestions.refresh(); setSuggestionsOpen(true); }} />}
         {childrenAvailable && (children.children.length > 0 || childrenOpen) && <ChildAgentsOpener children={children.children}
           onOpen={() => { childAgents.refresh(); setChildrenOpen(true); }} />}
         {sessionId && !readOnly && <BadgeButton icon={<TerminalIcon aria-hidden />} label="Managed processes"
@@ -541,7 +603,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           : visible ? <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} /> : null}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
-      <Thread earlier={state.earlier} followTail={!state.transcript.isRunning && state.connection.type !== "loading"} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact}
+      <Thread earlier={state.earlier} followTail={!state.transcript.isRunning && state.connection.type !== "loading"} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact} toolArtifact={toolArtifact}
         reveal={reveal}
         beforeComposer={<>
           {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}
@@ -653,6 +715,14 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
         onDismissRecordError={childAgents.dismissError}
         onModel={(worker, model) => workflows.setWorkerModel(sheetRun.id, worker, model)}
         onClose={() => { decisions.dismissError(); workflows.dismissError(); childAgents.close(); setWorkflowSheet(undefined); }} />}
+      {visible && suggestionsOpen && <SuggestionsSheet suggestions={suggestionList} readError={suggestionsView.readError} pending={suggestionsView.pending}
+        problems={suggestionsView.problems} drafts={suggestionsView.drafts} look={look} knownModels={suggestionModels} now={Date.now()} actions={{
+          onFile: (suggestionId) => { void suggestions.file(suggestionId); }, onFileAndAct: (suggestionId) => { void suggestions.fileAndAct(suggestionId); },
+          onRestore: (suggestionId) => { void suggestions.restore(suggestionId); },
+          onShow: (suggestionId) => { setSuggestionsOpen(false); setRevealing(suggestionId); },
+          onOpenSession: (sessionId) => { setSuggestionsOpen(false); openSuggestionSession?.(sessionId); },
+          onOpenBacklog: suggestionLinks?.openBacklog ? () => { setSuggestionsOpen(false); suggestionLinks.openBacklog?.(); } : undefined,
+          onRetry: () => { void suggestions.refresh(); }, onClose: () => setSuggestionsOpen(false) }} />}
       {visible && decisionsOpen && <DecisionsSheet log={log} actions={logActions} onClose={() => { decisions.dismissError(); setDecisionsOpen(false); }} />}
       {visible && pullOpen && <PullRequestReview discovery={pull.discovery} load={pull.load} selected={pullSelected} onSelect={setPullSelected} reading={pull.reading}
         notice={pull.notice} writing={pull.writing} now={Date.now()}

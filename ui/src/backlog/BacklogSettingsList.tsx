@@ -9,13 +9,17 @@ import { Lede } from "../ui/Lede";
 import { ListSection } from "../ui/ListSection";
 import { ActionFooter } from "../ui/ActionFooter";
 import { HeaderButton } from "../ui/HeaderButton";
+import { SuggestionModelField } from "./suggestions/SuggestionModelField";
+import type { SuggestionModelChoice } from "./suggestions/SuggestionModelField";
 import { backlogSettingsOrigin, sourceBoard, sourceDestinationText, sourceSelection } from "./backlogSettingsModel";
 
 /**
  * Shape: Settings → Backlog. Sources come first: an Azure DevOps board is a backlog of its own, owned by no project,
  * with a destination where its sessions start. Projects follow, with their Markdown files and GitHub issues.
  */
-export function BacklogSettingsList({ back, close, load, error, busy, login, onLogin, onSaveLogin, onOpen, onReload }: {
+export function BacklogSettingsList({ back, close, load, error, busy, login, onLogin, onSaveLogin, onOpen, onReload, suggestionModel }: {
+  /** The global default model for a suggestion's File and act. Absent: the field is not shown. */
+  suggestionModel?: Omit<SuggestionModelChoice, "fallback"> | undefined;
   back: ReactNode; close: ReactNode; load: { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; value: BacklogSettingsCatalog };
   error: string | undefined; busy: boolean; login: string; onLogin: (login: string) => void; onSaveLogin: () => void; onOpen: (id: string) => void; onReload: () => void;
 }) {
@@ -27,6 +31,9 @@ export function BacklogSettingsList({ back, close, load, error, busy, login, onL
     {load.type === "loading" ? <Lede>Reading backlog settings…</Lede> : load.type === "ready" ? <>
       <SettingsField label="GitHub username" hint="Mine shows issues assigned to this username. This is not a credential."><SettingsInput label="GitHub username" value={login} onChange={onLogin} disabled={busy} /></SettingsField>
       <ActionFooter actions={[{ label: "Save username", disabled: busy || login === (load.value.settings.githubLogin ?? ""), onPress: onSaveLogin }]} />
+      {suggestionModel ? <SuggestionModelField label="Background model" value={suggestionModel.value} fallback="The chat's model" disabled={busy}
+        hint="File and act on a backlog suggestion starts its background session on this model. A project can set its own. With neither set, the session uses the model of the chat the suggestion came from."
+        knownModels={suggestionModel.known} listModels={suggestionModel.list} onChange={suggestionModel.onChange} /> : null}
       <Lede>An Azure DevOps board is a source of its own: each work item shows once, and its session starts in the source's destination. Markdown files and GitHub issues belong to their project. Credentials stay in private files on the server.</Lede>
       <ListSection title="Sources" empty="No Azure DevOps boards yet. Use Add Azure DevOps source to list one.">
         {load.value.settings.sources.map((source) => <SettingsRow key={source.id} name={source.project} meta={sourceBoard(source)}

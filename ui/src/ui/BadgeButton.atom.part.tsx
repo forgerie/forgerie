@@ -16,3 +16,6 @@ export function Quiet() {
 export function QuietCount() {
   return <BadgeButton icon={<ScaleIcon aria-hidden />} label="Decisions, 3 flagged guesses to look at" count={3} quiet onPress={() => {}} />;
 }
+export function QuietCountWorking() {
+  return <BadgeButton icon={<ScaleIcon aria-hidden />} label="Suggestions, 2 open, 1 working in the background" count={2} quiet active onPress={() => {}} />;
+}

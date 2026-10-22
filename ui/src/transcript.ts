@@ -12,6 +12,7 @@ import { ACTION_RUN_NOTICE_TYPE, actionRunNoticeOf, type ActionRunNotice } from 
 import { childEntryOf, type ChildEntry } from "./childAgents/childAgentsModel";
 import { isOldIssueOutcome, oldIssueOutcomeOf, oldIssueProposalOf, type OldIssueProposal } from "./issues/oldIssueProposal";
 import { issueOutcomeFrom, issueOutcomeOf, type IssueOutcome } from "./issues/fileIssueResult";
+import { suggestionRefOf, suggestionRefSchema, type SuggestionRef } from "./backlog/suggestions/suggestionsApi";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
 import { gatedEntryOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
@@ -24,7 +25,7 @@ import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCo
 export type ToolState =
   | { type: "pending" }
   | { type: "running"; output: string }
-  | { type: "done"; output: string; isError: boolean; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome }
+  | { type: "done"; output: string; isError: boolean; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome; suggestion?: SuggestionRef }
   | { type: "interrupted" };
 export type TranscriptPart =
   | { type: "text"; text: string }
@@ -201,7 +202,10 @@ function settled(toolName: string, output: string, isError: boolean, content: un
   const images = imagesOf(content);
   const door = handoffDoorOf({ toolName, isError, details });
   const issue = issueOutcomeOf({ toolName, isError, details });
-  return { type: "done", output, isError, ...(images.length ? { images } : {}), ...(door ? { door } : {}), ...(issue ? { issue } : {}) };
+  // A suggestion's card reads the record it names; a failed call made none.
+  const suggestion = isError ? undefined : suggestionRefOf({ toolName, details });
+  return { type: "done", output, isError, ...(images.length ? { images } : {}), ...(door ? { door } : {}), ...(issue ? { issue } : {}),
+    ...(suggestion ? { suggestion } : {}) };
 }
 function finishTool(state: Transcript, id: string | undefined, name: string, done: ToolState): Transcript {
   if (!id) return state;
@@ -517,7 +521,8 @@ export function seedTranscript(history: readonly PiMessage[], partial: PiMessage
 }
 
 /** UI-only state of a tool call, carried as the part's artifact. `risk` is a risk label in words, so the shared trace can draw it. */
-export type ToolArtifact = { state: ToolState["type"]; riskLabel?: RiskLabel; risk?: RiskWords; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome };
+export type ToolArtifact = { state: ToolState["type"]; riskLabel?: RiskLabel; risk?: RiskWords; images?: readonly string[]; door?: HandoffDoor; issue?: IssueOutcome;
+  suggestion?: SuggestionRef };
 /** The session a converted tool call created, read back from its artifact. */
 export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
   if (typeof artifact !== "object" || artifact === null || !("door" in artifact)) return undefined;
@@ -528,6 +533,10 @@ export function artifactDoor(artifact: unknown): HandoffDoor | undefined {
 /** What a converted `file_issue` call did with an issue, read back from its artifact. */
 export function artifactIssue(artifact: unknown): IssueOutcome | undefined {
   return typeof artifact === "object" && artifact !== null && "issue" in artifact ? issueOutcomeFrom(artifact.issue) : undefined;
+}
+/** The backlog suggestion a `suggest_backlog` call made, read back from its artifact. */
+export function artifactSuggestion(artifact: unknown): SuggestionRef | undefined {
+  return typeof artifact === "object" && artifact !== null && "suggestion" in artifact ? suggestionRefSchema.safeParse(artifact.suggestion).data : undefined;
 }
 /** UI data of a shell row, carried as the system message's custom metadata. */
 export type ShellArtifact = { shell: ShellRun };
@@ -639,7 +648,7 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
  */
 function standsApart(part: ToolPart): boolean {
   return part.name === "ask_user" || part.name === "end_turn" || skillLoadOf(part.name, part.args) !== undefined
-    || (part.state.type === "done" && (part.state.door !== undefined || part.state.issue !== undefined));
+    || (part.state.type === "done" && (part.state.door !== undefined || part.state.issue !== undefined || part.state.suggestion !== undefined));
 }
 /**
  * A step is one Pi assistant message that calls a tool: its thinking, the
@@ -666,7 +675,7 @@ function stepOf(message: TranscriptMessage): { members: ReadonlySet<number>; ord
 function toolArtifact(state: ToolState): ToolArtifact {
   if (state.type !== "done") return { state: state.type };
   return { state: state.type, ...(state.images ? { images: state.images } : {}), ...(state.door ? { door: state.door } : {}),
-    ...(state.issue ? { issue: state.issue } : {}) };
+    ...(state.issue ? { issue: state.issue } : {}), ...(state.suggestion ? { suggestion: state.suggestion } : {}) };
 }
 function toolResult(state: ToolState) {
   switch (state.type) {

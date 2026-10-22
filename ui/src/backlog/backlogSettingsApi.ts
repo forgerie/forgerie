@@ -4,6 +4,15 @@ import type { BacklogConfig } from "@shared/backlog";
 import type { BacklogSourceInput } from "@shared/backlogSources";
 import { projectSchema, type Fetch } from "../newSession";
 import { z } from "zod";
+import { modelsResponseSchema, type SessionModel } from "../contracts";
+import { suggestionModelSchema, type SuggestionModel } from "./suggestions/suggestionsApi";
+
+/** The global default model for suggestions, from a settings response. The shared schema gains it on the server's side. */
+export const suggestionsDefaultOf = (settings: BacklogSettingsResponse): SuggestionModel | undefined =>
+  suggestionModelSchema.optional().catch(undefined).parse((settings as { suggestionsDefault?: unknown }).suggestionsDefault);
+/** A project's own model for suggestions, from its backlog settings. */
+export const projectSuggestionsOf = (backlog: BacklogConfig): SuggestionModel | undefined =>
+  suggestionModelSchema.optional().catch(undefined).parse((backlog as { suggestions?: unknown }).suggestions);
 export interface BacklogSettingsCatalog { settings: BacklogSettingsResponse; projects: z.infer<typeof projectSchema>[] }
 export class BacklogSettingsRefusal extends Error { constructor(message: string, readonly status: number) { super(message); } }
 export function createBacklogSettingsApi(fetchFn: Fetch) {
@@ -22,6 +31,11 @@ export function createBacklogSettingsApi(fetchFn: Fetch) {
     save: (projectId: string, backlog: BacklogConfig, baseRevision: number) => call(`/api/backlog/settings/projects/${encodeURIComponent(projectId)}`, json("PUT", { backlog, baseRevision })),
     remove: (projectId: string, baseRevision: number) => call(`/api/backlog/settings/projects/${encodeURIComponent(projectId)}`, json("DELETE", { baseRevision })),
     githubLogin: (githubLogin: string | null) => call("/api/backlog/settings/github-login", json("PUT", { githubLogin })),
+    /** The model a suggestion's File and act starts on when its project sets none. Null: the chat's own model. */
+    suggestionsDefault: (suggestionsDefault: SuggestionModel | null) => call("/api/backlog/settings/suggestions-default", json("PUT", { suggestionsDefault })),
+    /** The models a session in `cwd` may use, for the model fields. */
+    models: async (cwd: string, signal?: AbortSignal): Promise<SessionModel[]> => modelsResponseSchema.parse(await call(`/api/models?${new URLSearchParams({ cwd }).toString()}`,
+      signal ? { signal } : undefined)).models,
     /** A new Azure DevOps source. The server refuses one that overlaps another source's board (409). */
     createSource: (input: BacklogSourceInput) => call("/api/backlog/settings/sources", json("POST", input)),
     saveSource: (id: string, input: BacklogSourceInput, baseRevision: number) => call(`/api/backlog/settings/sources/${encodeURIComponent(id)}`, json("PUT", { ...input, baseRevision })),

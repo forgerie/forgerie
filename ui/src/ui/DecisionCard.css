@@ -8,6 +8,15 @@
 .decision-card-title { min-inline-size: 0; font-size: var(--small-text); font-weight: 600; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .decision-card[data-open] .decision-card-title { color: var(--ink-live); }
 .decision-card-meta { min-inline-size: 0; color: var(--muted-foreground); font-size: var(--label-text); overflow-wrap: anywhere; }
+/* An offer the reader can take or leave: the open rule and title in full ink. Live stays for work that holds things up. */
+.decision-card[data-open][data-edge="ink"] { border-inline-start-color: var(--foreground); }
+.decision-card[data-open][data-edge="ink"] .decision-card-title { color: var(--foreground); }
+/* One quiet control at the title line's end; its own padding lines its words up with the edge. */
+.decision-card-head-action { display: inline-flex; margin-inline: auto calc(-1 * var(--space-2)); align-self: center; }
+/* The subject under the title: reading size and weight while open, a quiet line once decided. */
+.decision-card-lead { min-inline-size: 0; color: var(--quiet-foreground); font-weight: 500; overflow-wrap: anywhere; text-wrap: pretty; }
+.decision-card[data-open] .decision-card-lead { color: var(--foreground); font-size: var(--text-size); font-weight: 600; line-height: 1.4; }
+.decision-card-closed code { color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size); overflow-wrap: anywhere; }
 .decision-card[data-open] .decision-card-body { font-size: var(--text-size); line-height: 1.625; }
 .decision-card-body { display: grid; gap: var(--space-2); min-inline-size: 0; overflow-wrap: anywhere; }
 /* The body's gap and the detail's gap space their paragraphs, so a plain paragraph keeps no margin of its own. */
@@ -50,6 +59,8 @@
   .decision-card[data-open][data-pin-choices] { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
     padding-block: var(--space-2) var(--space-3); }
   .decision-card[data-open][data-pin-choices] > .decision-card-head { flex: 1 1 12rem; }
+  /* A lead line keeps its place under the title, so the choices that pin come right after the subject they act on. */
+  .decision-card[data-open][data-pin-choices] > .decision-card-lead { flex: 1 1 100%; }
   .decision-card[data-open][data-pin-choices] > .decision-card-foot { flex: 0 1 auto; order: 1; }
   .decision-card[data-open][data-pin-choices] > :is(.decision-card-annotation, .decision-card-problem) { flex: 1 1 100%; order: 2; }
   .decision-card[data-open][data-pin-choices] > .decision-card-body { flex: 1 1 100%; order: 3; }

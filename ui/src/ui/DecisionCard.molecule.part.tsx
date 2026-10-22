@@ -1,5 +1,6 @@
 import { DecisionCard } from "./DecisionCard";
 import { ActionFooter } from "./ActionFooter";
+import { TextButton } from "./TextButton";
 
 export const name = "Decision card";
 export const note = "Something in the thread that waits on the reader's decision, and says what was decided once closed";
@@ -44,5 +45,12 @@ export function ClosedFailed() {
     closed="Approved — failed: npm ERR! 403 You cannot publish over the previously published version 0.4.0."
     closedDetail={<p>The registry keeps every published version.</p>}>
     <p>The body stays above the closed line.</p>
+  </DecisionCard>;
+}
+export function Offer() {
+  return <DecisionCard title="Suggested change" meta="Edited" edge="ink" open pinChoices lead="Rename the export button to Download CSV"
+    headAction={<TextButton label="Edit" onPress={() => {}} />}
+    footer={<ActionFooter note="Accepting renames it everywhere." noteLastWhenShort actions={[{ label: "Accept", onPress: () => {}, tone: "primary" }, { label: "Later", onPress: () => {} }, { label: "Dismiss", onPress: () => {}, tone: "quiet" }]} />}>
+    <p>An offer the reader can take or leave: the rule stays in full ink, and the work goes on without it.</p>
   </DecisionCard>;
 }

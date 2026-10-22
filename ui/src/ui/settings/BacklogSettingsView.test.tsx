@@ -7,7 +7,8 @@ import { BacklogSettingsRefusal, createBacklogSettingsApi, type BacklogSettingsA
 import { azureSourcesOverlap, sourceOverlapMessage, type BacklogSourceInput } from "@shared/backlogSources";
 let root: Root;
 /** Source writes for the tests about projects, which never make one. */
-const noSources: Pick<BacklogSettingsApi, "createSource" | "saveSource" | "removeSource"> = { createSource: async () => ({}), saveSource: async () => ({}), removeSource: async () => ({}) };
+const noSources: Pick<BacklogSettingsApi, "createSource" | "saveSource" | "removeSource" | "suggestionsDefault" | "models"> = { createSource: async () => ({}), saveSource: async () => ({}), removeSource: async () => ({}),
+  suggestionsDefault: async () => ({}), models: async () => [] };
 const settle = () => act(async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === name)!;
 const click = async (node: HTMLElement) => { await act(async () => node.click()); await settle(); };

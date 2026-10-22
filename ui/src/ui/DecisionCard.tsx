@@ -29,14 +29,23 @@ import "./DecisionCard.css";
  * them while they are pinned beside the title) and fades in. Its arrival moves
  * the scroll as a failed choice's reason does, so the choices stay where they were.
  */
-export function DecisionCard({ title, meta, open, closed, closedTone, closedHref, closedDetail, problem, focusClosed = false, pinChoices = false,
+export function DecisionCard({ title, meta, headAction, lead, edge = "live", open, closed, closedTone, closedHref, closedDetail, problem, focusClosed = false, pinChoices = false,
   children, footer, action, annotation }: {
   title: string;
   /** A short fact about the subject, such as the file it concerns: at the end of the title line, or under the title when they do not fit together. */
   meta?: ReactNode;
+  /** One quiet control at the title line's end, such as Edit. */
+  headAction?: ReactNode;
+  /** The subject in a line of its own under the title, at reading size while open. It stays above choices that pin. */
+  lead?: ReactNode;
+  /**
+   * `live`: the rule and title take the live colour while open, for a decision that holds work up.
+   * `ink`: full ink, for an offer the reader can take or leave while the work goes on.
+   */
+  edge?: "live" | "ink";
   open: boolean;
   /** What was decided, shown once the card is closed. */
-  closed?: string | undefined;
+  closed?: ReactNode;
   /** Draws the closed line in the failure ink, for a decision whose outcome failed. */
   closedTone?: "bad" | undefined;
   /** Where the closed line leads, such as the thing the decision made. It opens in a new tab. */
@@ -97,11 +106,15 @@ export function DecisionCard({ title, meta, open, closed, closedTone, closedHref
     observer.observe(frame);
     return () => { observer.disconnect(); };
   }, [shown, annotated]);
-  return <section className="decision-card" ref={card} data-open={open || undefined} data-pin-choices={pinChoices || undefined} aria-label={title}>
+  const hasLead = lead !== undefined && lead !== null && lead !== false;
+  return <section className="decision-card" ref={card} data-open={open || undefined} data-pin-choices={pinChoices || undefined}
+    data-edge={edge === "live" ? undefined : edge} aria-label={title}>
     <header className="decision-card-head">
       <span className="decision-card-title">{title}</span>
       {meta !== undefined && <span className="decision-card-meta">{meta}</span>}
+      {headAction !== undefined && headAction !== null && headAction !== false && <span className="decision-card-head-action">{headAction}</span>}
     </header>
+    {hasLead && <div className="decision-card-lead">{lead}</div>}
     {children !== undefined && <div className="decision-card-body">{children}</div>}
     {annotated && <div className="decision-card-annotation">{annotation}</div>}
     {shown !== undefined && <p className="decision-card-problem" role="alert">

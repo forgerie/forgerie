@@ -5,7 +5,8 @@ import "./BadgeButton.css";
  * Atom: an icon button drawn small with a control-sized hit area. A count
  * badge in the live colour says how many things wait on the reader; a dot
  * says that something is working. A quiet count, in muted ink on a muted chip,
- * counts what the reader may look at when they like; nothing waits on it. The
+ * counts what the reader may look at when they like; nothing waits on it, so a
+ * working dot can show with it, at the icon's foot. The
  * label carries all of them for a screen reader.
  */
 export function BadgeButton({ icon, label, count = 0, quiet = false, active = false, onPress }: {
@@ -21,7 +22,8 @@ export function BadgeButton({ icon, label, count = 0, quiet = false, active = fa
   return <button type="button" className="badge-button" aria-label={label} title={label} onClick={onPress}
     data-waiting={(count > 0 && !quiet) || undefined} data-quiet={quiet || undefined} data-active={active || undefined}>
     {icon}
-    {count > 0 ? <span className="badge-button-count" aria-hidden>{count}</span>
-      : active ? <span className="badge-button-dot" aria-hidden /> : null}
+    {count > 0 ? <span className="badge-button-count" aria-hidden>{count}</span> : null}
+    {/* A quiet count says nothing about work, so the working dot still shows beside it, at the foot. */}
+    {active && (count === 0 || quiet) ? <span className="badge-button-dot" data-foot={count > 0 || undefined} aria-hidden /> : null}
   </button>;
 }

@@ -22,10 +22,11 @@ describe("six-entry session lifetime", () => {
     await vi.waitFor(() => expect(api.registry.getSnapshot().every(record => record.state === "seeded")).toBe(true));
     expect(api.sockets.clients.size).toBe(6);
     expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(6);
-    // Hidden entries seed only transcript + commands. The selected entry reads its seven panel routes.
-    await vi.waitFor(() => expect(api.requests).toHaveLength(19));
+    // Hidden entries seed only transcript + commands. The selected entry reads its eight panel routes, backlog suggestions among them.
+    await vi.waitFor(() => expect(api.requests).toHaveLength(20));
+    expect(api.requests.filter(url => url.pathname === "/api/backlog/suggestions")).toHaveLength(1);
     expect(api.registry.select(session("s1"))).toBe(prefetched);
-    await vi.waitFor(() => expect(api.requests).toHaveLength(26));
+    await vi.waitFor(() => expect(api.requests).toHaveLength(28));
     expect(api.registry.select(session("s1"))).toBe(prefetched);
     const requests = api.requests.length;
     await new Promise(resolve => setTimeout(resolve, 20)); expect(api.requests).toHaveLength(requests);
@@ -137,7 +138,7 @@ it("defers speculative and hidden reconnect panel reads until selection, without
   await new Promise(resolve => setTimeout(resolve, 350));
   expect(panels()).toHaveLength(0);
   expect(api.registry.select(session("hidden"))).toBe(entry);
-  await vi.waitFor(() => expect(panels()).toHaveLength(7));
+  await vi.waitFor(() => expect(panels()).toHaveLength(8));
   // A child read still in flight when the entry hides is aborted and correctly read again on show.
   // Settle it first so the count below covers only the deferred change event.
   await vi.waitFor(() => expect(entry.childAgents.getSnapshot().available).toBe(false));
@@ -145,7 +146,7 @@ it("defers speculative and hidden reconnect panel reads until selection, without
   api.registry.setVisible(false);
   api.emit({ type: "pi.event", eventType: "durable_children_changed" });
   await new Promise(resolve => setTimeout(resolve, 350));
-  expect(panels()).toHaveLength(7);
+  expect(panels()).toHaveLength(8);
   api.registry.setVisible(true);
-  await vi.waitFor(() => expect(panels()).toHaveLength(10));
+  await vi.waitFor(() => expect(panels()).toHaveLength(11));
 });

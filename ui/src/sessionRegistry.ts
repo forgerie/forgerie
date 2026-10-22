@@ -10,6 +10,8 @@ import { WORKFLOW_RUNS_CHANGED_EVENT } from "./workflows/workflowsModel";
 import { createDecisionsStore } from "./decisions/decisionsStore";
 import { createGatedActionsStore } from "./gatedActions/gatedActionsStore";
 import { createTaskActivityStore } from "./session/taskActivityStore";
+import { createSuggestionsApi } from "./backlog/suggestions/suggestionsApi";
+import { createSuggestionsStore } from "./backlog/suggestions/suggestionsStore";
 
 export interface RegistryReceipt { catalogId: string; throughCompletionOrder: number }
 export function createSessionEntry(session: Session, transport: SessionTransport, options: {
@@ -28,6 +30,8 @@ export function createSessionEntry(session: Session, transport: SessionTransport
   const gated = createGatedActionsStore(transport.request, ref);
   // Live Durable tasks for the status panel: read again on the same change event as the children, on reconnect, and on panel open.
   const taskActivity = createTaskActivityStore(transport.request, ref);
+  // This chat's backlog suggestions: read on open and reconnect, and when the catalog says one changed.
+  const suggestions = createSuggestionsStore(createSuggestionsApi((path, init) => transport.request(path, init ?? {})), () => ({ sessionId: ref().id }));
   // Hidden entries keep their transcript subscriptions, but panel reads can wait for selection.
   const pendingPanels = new Set<{ refresh: () => void | Promise<void> }>();
   const refreshPanels = (...panels: { refresh: () => void | Promise<void> }[]) => {
@@ -50,11 +54,13 @@ export function createSessionEntry(session: Session, transport: SessionTransport
     taskActivity.setConnected(state.connection.type === "ready");
     if (state.connection.type !== "ready" || state.lastReadyAt === readyAt) return;
     readyAt = state.lastReadyAt;
-    refreshPanels(childAgents, workflows, decisions, gated, processes, taskActivity);
+    refreshPanels(childAgents, workflows, decisions, gated, processes, taskActivity, suggestions);
   }));
   let disposed = false;
   return {
-    session, store, childAgents, processes, workflows, decisions, gated, taskActivity, signal: lifetime.signal,
+    session, store, childAgents, processes, workflows, decisions, gated, taskActivity, suggestions, signal: lifetime.signal,
+    /** A suggestion of this chat changed: read them again now, or when the chat shows. */
+    suggestionsChanged: () => refreshPanels(suggestions),
     setVisible: (next: boolean) => {
       visible = next; store.setVisible(next); childAgents.setVisible(next);
       if (next) { const panels = [...pendingPanels]; pendingPanels.clear(); refreshPanels(...panels); }
@@ -63,7 +69,7 @@ export function createSessionEntry(session: Session, transport: SessionTransport
     dispose: () => {
       if (disposed) return;
       disposed = true; visible = false; lifetime.abort(); pendingPanels.clear();
-      store.dispose(); childAgents.dispose(); processes.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); taskActivity.dispose();
+      store.dispose(); childAgents.dispose(); processes.dispose(); workflows.dispose(); decisions.dispose(); gated.dispose(); taskActivity.dispose(); suggestions.dispose();
       for (const cleanup of cleanups) cleanup();
       cleanups.clear();
     },
