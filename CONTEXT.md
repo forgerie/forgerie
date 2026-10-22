@@ -33,6 +33,13 @@ _Avoid_: Question (a child's question goes to its parent first and is not an esc
 A tool call that is irreversible or acts outside the project in the user's name. Forgerie blocks it in code until the user approves; the agent keeps working on what does not depend on it.
 _Avoid_: Dangerous command
 
+**Owned worktree**:
+A worktree, clone or branch that Forgerie made for an agent family through `scratch_git`, and recorded with an identity in the parent's ledger. The family removes it without a gate. Work made with plain Git commands is never owned, whatever the agent typed.
+_Avoid_: Agent worktree, scratch clone (for work made with plain Git)
+
+**scratch_git**:
+The tool that creates, pushes and removes owned worktrees. Forgerie runs its Git commands itself, so ownership is what Forgerie saw, not a reading of a shell command.
+
 **Decision**:
 A choice an agent made without the user, such as a parent's answer to a child's question or a guess in place of an escalation. Each decision records the question, the choice, and the reason.
 

@@ -22,6 +22,7 @@ function fixture() {
       sent.push([message, options]); manager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details); return Promise.resolve();
     } });
   const service = new PiSessionService(new CapturingSessionEventHub(), { ...sessionServiceDependencies({
+    worktreeBackupDirectory: "/unused/worktree-backups",
     pinStore: new SessionPinStore(), tabsStore: new SessionTabsStore(), workspaceActivity: new WorkspaceActivityService(),
     logger: { info() { /* No test log output. */ } }, durableReader: createActiveDurableSessionReader(() => undefined), notificationStore: new SessionNotificationStore(), unreadStore: new SessionUnreadStore(),
     catalogRefreshStatus: { isRefreshInFlight: () => false }, askUserEnabled: true, codemodeEnabled: false,

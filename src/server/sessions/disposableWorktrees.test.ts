@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
-import { disposableWorktree } from "./disposableWorktrees.js";
+import { backUpWorktree, disposableWorktree } from "./disposableWorktrees.js";
 import { gatedAction, type GatedActionReads } from "./gatedActions.js";
 
 const run = promisify(execFile);
@@ -67,7 +67,7 @@ it("backs up a project worktree before it counts as disposable, and never accept
 
   expect(await disposable(agent)).toBe(true);
   const [folder] = await readdir(backups);
-  expect(folder).toBe("agent-fix-2026-10-16T12-00-00-000Z");
+  expect(folder).toMatch(/^agent-fix-2026-10-16T12-00-00-000Z-[A-Za-z0-9]{6}$/u);
   expect(await readFile(join(backups, folder ?? "", "untracked", "notes.md"), "utf8")).toBe("untracked");
   expect(await readFile(join(backups, folder ?? "", "tracked.patch"), "utf8")).toContain("+one");
   expect(JSON.parse(await readFile(join(backups, folder ?? "", "worktree.json"), "utf8"))).toMatchObject({ branch: "agent-fix" });
@@ -104,4 +104,29 @@ it("lets real destroy-local commands run in scratch clones and child worktrees, 
   expect(await classify("git reset --hard", join(scratch, "link-to-project"))).toBe("destroy-local");
   await symlink(project, join(scratch, "link-to-project"));
   expect(await classify("git reset --hard", join(scratch, "link-to-project"))).toBe("destroy-local");
+});
+
+it("keeps simultaneous same-name backup snapshots separate", async () => {
+  const targets = [join(base, "one", "tree"), join(base, "two", "tree")];
+  for (const [index, target] of targets.entries()) {
+    await git(project, ["worktree", "add", "-qb", `snapshot-${String(index)}`, target]);
+    await writeFile(join(target, "notes"), String(index));
+  }
+  const directory = join(base, "snapshots"); const now = () => new Date("2026-10-16T12:00:00Z");
+  await Promise.all(targets.map(target => backUpWorktree(target, {git, directory, now})));
+  const folders = await readdir(directory); expect(folders).toHaveLength(2);
+  expect((await Promise.all(folders.map(folder => readFile(join(directory, folder, "untracked/notes"), "utf8")))).sort()).toEqual(["0", "1"]);
+});
+it("keeps untracked symlinks in a backup without reading their targets", async () => {
+  const target = join(project, ".worktree", "links"); await git(project, ["worktree", "add", "-qb", "links", target]);
+  await symlink("../missing-target", join(target, "untracked-link"));
+  const directory = join(base, "link-backups"); await backUpWorktree(target, {git, directory, now: () => new Date()});
+  const [folder] = await readdir(directory);
+  expect(await readlink(join(directory, folder ?? "", "untracked/untracked-link"))).toBe("../missing-target");
+});
+it("gates when an untracked nested repository cannot be backed up", async () => {
+  const target = join(project, ".worktree", "nested"); await git(project, ["worktree", "add", "-qb", "nested", target]);
+  await git(project, ["clone", "-q", project, join(target, "nested-repo")]);
+  const disposable = disposableWorktree({scratchRoot: scratch, childWorktrees: () => Promise.resolve([]), projectBackup: {git, directory: join(base, "backups"), now: () => new Date()}});
+  expect(await disposable(target)).toBe(false);
 });

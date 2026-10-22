@@ -9,6 +9,8 @@ import type { PiSessionServiceDependencies } from "../sessions/piSessionService.
  */
 export interface SessionServiceDependencyInput {
   agentDir: string;
+  /** Where discarded worktrees are backed up, resolved against the captured daemon environment. */
+  worktreeBackupDirectory: string;
   durableReader: NonNullable<PiSessionServiceDependencies["durableReader"]>;
   decisionHints?: PiSessionServiceDependencies["decisionHints"];
   workflowAutonomy?: PiSessionServiceDependencies["workflowAutonomy"];
@@ -68,6 +70,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     modelRuntime: input.modelRuntime,
     durableReader: input.durableReader,
     agentDir: input.agentDir,
+    worktreeBackupDirectory: input.worktreeBackupDirectory,
     ...(input.decisionHints === undefined ? {} : { decisionHints: input.decisionHints }),
     ...(input.workflowAutonomy === undefined ? {} : { workflowAutonomy: input.workflowAutonomy }),
     ...(input.managedProcesses === undefined ? {} : { managedProcesses: input.managedProcesses }),

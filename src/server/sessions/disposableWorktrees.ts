@@ -1,4 +1,4 @@
-import { copyFile, lstat, mkdir, realpath, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, realpath, readlink, symlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 
 /** Agents make throwaway clones and worktrees here. A fixed path, so a changed TMPDIR cannot widen the exemption. */
@@ -6,7 +6,7 @@ export const SCRATCH_ROOT = "/tmp";
 /** Project folders that hold agent worktrees, beside the main checkout. */
 const PROJECT_WORKTREE_FOLDERS = new Set([".worktree", ".worktrees"]);
 /** Forgerie's own session (`s-<8 hex>`) and child (`c-<64 hex>`) worktrees belong to other chats; never treat them as disposable here. */
-const MANAGED_WORKTREE = /^(?:s-[0-9a-f]{8}|c-[0-9a-f]{64})$/u;
+export const isManagedWorktree = (path: string): boolean => /^(?:s-[0-9a-f]{8}|c-[0-9a-f]{64})$/u.test(basename(path));
 /** A backup larger than this fails, and the action then waits for the user. */
 const BACKUP_LIMIT_BYTES = 200 * 1024 * 1024;
 
@@ -51,7 +51,7 @@ export function disposableWorktree(sources: DisposableWorktreeSources): (worktre
 }
 
 async function isProjectWorktree(target: string, git: ProjectWorktreeBackup["git"]): Promise<boolean> {
-  if (MANAGED_WORKTREE.test(basename(target)) || !PROJECT_WORKTREE_FOLDERS.has(basename(dirname(target)))) return false;
+  if (isManagedWorktree(target) || !PROJECT_WORKTREE_FOLDERS.has(basename(dirname(target)))) return false;
   const top = await realpath((await git(target, ["rev-parse", "--show-toplevel"])).trim());
   if (top !== target) return false;
   const common = await realpath((await git(target, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim());
@@ -60,15 +60,20 @@ async function isProjectWorktree(target: string, git: ProjectWorktreeBackup["git
   return gitDir !== common && basename(common) === ".git" && dirname(common) === dirname(dirname(target));
 }
 
-/** Writes HEAD, status, a binary diff of tracked changes and copies of untracked files. Ignored files are not kept. */
-async function backUpWorktree(target: string, backup: ProjectWorktreeBackup): Promise<void> {
+/** Writes HEAD, status, a binary diff of tracked changes and copies of untracked files and links. Ignored files are not kept. */
+export async function backUpWorktree(target: string, backup: ProjectWorktreeBackup): Promise<void> {
   const stamp = backup.now().toISOString().replace(/[:.]/gu, "-");
-  const folder = join(backup.directory, `${basename(target)}-${stamp}`);
   const untracked = (await backup.git(target, ["ls-files", "--others", "--exclude-standard", "-z"])).split("\0").filter(path => path !== "");
   let bytes = 0;
-  for (const path of untracked) bytes += (await lstat(join(target, path))).size;
+  for (const path of untracked) {
+    const file = await lstat(join(target, path));
+    if (!file.isFile() && !file.isSymbolicLink()) throw new Error(`Cannot back up untracked entry: ${path}`);
+    bytes += file.size;
+  }
   if (bytes > BACKUP_LIMIT_BYTES) throw new Error("Worktree backup is too large");
-  await mkdir(folder, { recursive: true });
+  await mkdir(backup.directory, { recursive: true });
+  // A timestamp is not unique across parallel families or same-name trees.
+  const folder = await mkdtemp(join(backup.directory, `${basename(target)}-${stamp}-`));
   await writeFile(join(folder, "worktree.json"), `${JSON.stringify({
     path: target,
     head: (await backup.git(target, ["rev-parse", "HEAD"])).trim(),
@@ -80,6 +85,9 @@ async function backUpWorktree(target: string, backup: ProjectWorktreeBackup): Pr
   for (const path of untracked) {
     const destination = join(folder, "untracked", path);
     await mkdir(dirname(destination), { recursive: true });
-    if ((await lstat(join(target, path))).isFile()) await copyFile(join(target, path), destination);
+    const source = join(target, path); const file = await lstat(source);
+    if (file.isSymbolicLink()) await symlink(await readlink(source), destination);
+    else if (file.isFile()) await copyFile(source, destination);
+    else throw new Error(`Cannot back up untracked entry: ${path}`);
   }
 }

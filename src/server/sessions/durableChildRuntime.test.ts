@@ -47,6 +47,13 @@ describe("an agent file in a Durable child", () => {
     expect(planChildRuntime(reader, ["process"], []).tools).not.toContain("process");
   });
 
+  it("gives a child that may run bash the scratch_git tool, so it can clean up its own checkouts", () => {
+    const shell = parseChildAgentFile("---\nname: builder\ndescription: Build\ntools: read, bash\n---\nBuild.\n", join(root, "builder.md"));
+    expect(planChildRuntime(shell, ["scratch_git"], []).tools).toContain("scratch_git");
+    const reader = parseChildAgentFile("---\nname: reader\ndescription: Read\ntools: read\n---\nRead.\n", join(root, "reader.md"));
+    expect(planChildRuntime(reader, ["scratch_git"], []).tools).not.toContain("scratch_git");
+  });
+
   it("gives the bundled researcher the session tools its file names", async () => {
     const plan = planChildRuntime(await bundledAgent("researcher"), ["web_search", "fetch_content"], []);
     expect(plan.tools).toEqual(expect.arrayContaining(["web_search", "fetch_content"]));

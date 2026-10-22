@@ -12,6 +12,8 @@ export interface GatedActionReads {
   issueLabels(cwd: string, issue: string | number, repo?: string, worktreeId?: string): Promise<readonly string[]>;
   /** Whether a Git worktree root holds only throwaway files, so discarding them needs no approval. */
   disposable(worktreeRoot: string): Promise<boolean>;
+  /** Whether `scratch_git` made every one of these branches, in the repository at `cwd`, for this agent family. */
+  scratchBranches?(cwd: string, names: readonly string[]): Promise<boolean>;
 }
 const unavailableReads: GatedActionReads = {
   git: () => Promise.reject(new Error("Git state unavailable")),
@@ -324,6 +326,11 @@ async function gitMatch(action: string | undefined, tokens: string[], cwd: strin
         if (names.length > 0 && names.every(t => merged.includes(t))) return undefined;
       }
     } catch { /* No known remote default branch: HEAD alone decides. */ }
+    // Only after Git state was readable here: an uncertain folder or a `$` target makes `reads.git` fail first.
+    try {
+      await reads.git(cwd, ["rev-parse", "--git-common-dir"]);
+      if (await reads.scratchBranches?.(cwd, names) === true) return undefined;
+    } catch { /* Unknown ownership is not ownership. */ }
     return match("destroy-local", "Delete an unmerged Git branch");
   }
   return undefined;

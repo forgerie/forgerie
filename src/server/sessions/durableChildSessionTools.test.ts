@@ -172,7 +172,8 @@ it.each(["grep", "find", "ls"])("excludes the parent's %s tool from shared decla
   expect(probe.session.extensionRunner.getToolDefinition(name)?.name).toBe(name);
   expect(probe.sharedToolNames()).not.toContain(name);
   await probe.spawn();
-  expect(probe.offered[0]).toEqual(["ask_human", "bash"]);
+  // bash also brings scratch_git, which the session offers every child that may run shell commands.
+  expect(probe.offered[0]).toEqual(["ask_human", "bash", "scratch_git"]);
   expect(probe.calls).toEqual([]);
 });
 

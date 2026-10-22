@@ -45,6 +45,8 @@ import { routeDurableChildExtensions, type DurableChildExtensions, answerChildQu
 import type { DurableChildHost } from "./durableChildHost.js";
 import { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { disposableWorktree, SCRATCH_ROOT } from "./disposableWorktrees.js";
+import { scratchBranchReader, scratchGitExtension, scratchGitTool } from "./durableScratchGit.js";
+import { SCRATCH_GIT_ROOT } from "./scratchGit.js";
 import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, confirmDecision, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
@@ -177,6 +179,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private workflowGlanceValue: WorkflowGlance | undefined;
   private waitingGates = 0;
   private gateOptions: GatedActionsExtensionOptions | undefined;
+  private scratchGit: ReturnType<typeof scratchGitTool> | undefined;
   private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
   readonly processTools: ManagedProcessTools | undefined;
@@ -542,6 +545,15 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await decisionAnnotations(this.journal.harness).write(String(conversation), `tool:${identity.invocationId}`, durableJson({target: "tool", id, ...identity, label}));
   }
 
+  private backupDirectory(): string { return this.options.worktreeBackupDirectory ?? join(piWebDataDir(), "worktree-backups"); }
+
+  /** One tool for the parent and its children. Its Git commands write, so they run without the read-only lock option. */
+  private scratchGitTool(): ReturnType<typeof scratchGitTool> {
+    const git = async (cwd: string, args: readonly string[]) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: sanitizedGitEnv(), encoding: "utf8", maxBuffer: 64 * 1024 * 1024})).stdout;
+    this.scratchGit ??= scratchGitTool({git, scratchRoot: SCRATCH_GIT_ROOT, now: Date.now, backup: {git, directory: this.backupDirectory(), now: () => new Date()}});
+    return this.scratchGit;
+  }
+
   private async startGatedActions(): Promise<void> {
     this.gateUnsubscribe?.();
     const gitRead = async (cwd: string, args: readonly string[]) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 64 * 1024 * 1024})).stdout;
@@ -555,14 +567,17 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable"))),
         // Child worktrees are read at call time: they start after the gate and change as children spawn and land.
         disposable: disposableWorktree({scratchRoot: SCRATCH_ROOT, childWorktrees: async () => await this.childWorktrees?.activePaths() ?? [],
-          projectBackup: {git: gitRead, directory: this.options.worktreeBackupDirectory ?? join(piWebDataDir(), "worktree-backups"), now: () => new Date()}})},
+          projectBackup: {git: gitRead, directory: this.backupDirectory(), now: () => new Date()}}),
+        scratchBranches: scratchBranchReader(() => this.journal.harness, parent, gitRead, context)},
     };
     const extension = gatedActionsExtension(this.gateOptions);
     const {tasks, ...selected} = extension;
     this.registry.install(defineExtension({name: "forgerie.gated-action-runtime", tasks: tasks ?? []}));
     this.registry.install(selected);
-    const retained = (await this.journal.conversation.agent(context)).extensions.filter(item => !item.name.startsWith("forgerie.gated-actions:"));
-    await this.journal.conversation.configure({extensions: [...retained, selected]}, context);
+    const scratch = scratchGitExtension(this.scratchGitTool());
+    this.registry.install(scratch);
+    const retained = (await this.journal.conversation.agent(context)).extensions.filter(item => !item.name.startsWith("forgerie.gated-actions:") && item.name !== scratch.name);
+    await this.journal.conversation.configure({extensions: [...retained, selected, scratch]}, context);
     const recount = async () => {
       this.waitingGates = await waitingGatedActions(this.journal.harness, parent, context);
       this.flaggedCount = await flaggedDecisions(this.journal.harness, parent, context);
@@ -610,6 +625,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const sessionSkills = this.resourceLoader.getSkills().skills.filter((skill) => !skill.disableModelInvocation)
       .map((skill) => ({ name: skill.name, description: skill.description, path: skill.filePath }));
     const source = await host.extensions({ cwd: this.options.services.cwd, agentDir: this.options.services.agentDir, projectContext, sessionSkills, sessionTools: () => this.tools,
+      extraTools: [this.scratchGitTool()],
       commit: (change, ctx) => this.journal.harness.commit(change, ctx),
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); },
         record: (conversation: ConversationId, id: string, label: RiskLabel, identity: RiskToolIdentity) => this.recordToolRiskLabel(conversation, id, label, identity)}}),
@@ -953,7 +969,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     // Reset/compaction may remove every positional system entry. Request preparation adds the
     // current prompt and tools again; include those known inputs without rerunning emitContext.
     const active = new Set(this.tools.getActive());
-    const tools = this.tools.getDefinitions().filter((tool) => active.has(tool.name)).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
+    const tools = [...this.tools.getDefinitions().filter((tool) => active.has(tool.name)), ...(this.scratchGit === undefined ? [] : [this.scratchGit])]
+      .map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
     const promptTokens = this.modelContext.some((message) => message.role === "system") ? 0 : Math.ceil((this.systemPrompt.length + JSON.stringify(tools).length) / 4);
     const tokens = preparedTokens ?? this.modelContext.reduce((total, message) => total + estimateTokens(message), promptTokens);
     return { tokens, contextWindow: this.model.contextWindow, percent: this.model.contextWindow === 0 ? null : tokens / this.model.contextWindow * 100,

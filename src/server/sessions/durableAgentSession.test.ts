@@ -155,18 +155,19 @@ describe("SDK-compatible Durable execution", () => {
     await fork.bindExtensions({});
     const parentAgent = await parent.journal.conversation.agent(context);
     const forkAgent = await fork.journal.conversation.agent(context);
-    expect(parentAgent.tools.map((tool) => tool.name)).toEqual(["read"]);
-    expect(forkAgent.tools.map((tool) => tool.name)).toEqual(["bash"]);
+    // scratch_git is Forgerie's own tool, offered beside the SDK loadout in every session.
+    expect(parentAgent.tools.map((tool) => tool.name).sort()).toEqual(["read", "scratch_git"]);
+    expect(forkAgent.tools.map((tool) => tool.name).sort()).toEqual(["bash", "scratch_git"]);
     expect(parentAgent.extensions.filter(item => item.name.startsWith("forgerie.gated-actions:")).map(item => item.name)).toEqual([`forgerie.gated-actions:${String(parent.journal.conversation.id)}`]);
     expect(forkAgent.extensions.filter(item => item.name.startsWith("forgerie.gated-actions:")).map(item => item.name)).toEqual([`forgerie.gated-actions:${String(fork.journal.conversation.id)}`]);
-    expect(parentAgent.tools[0]?.description).not.toBe("Fork-only read override");
-    expect(parentAgent.tools[0]?.replay).toBe("safe");
+    expect(parentAgent.tools.find((tool) => tool.name === "read")?.description).not.toBe("Fork-only read override");
+    expect(parentAgent.tools.find((tool) => tool.name === "read")?.replay).toBe("safe");
     provider.setResponses([fauxAssistantMessage([fauxToolCall("read", {})], { stopReason: "toolUse" }), fauxAssistantMessage("inactive read rejected")]);
     await fork.prompt("try an inactive read");
     expect(fork.messages.find((message) => message.role === "toolResult")?.isError).toBe(true);
-    expect((await parent.journal.conversation.agent(context)).tools[0]?.replay).toBe("safe");
+    expect((await parent.journal.conversation.agent(context)).tools.find((tool) => tool.name === "read")?.replay).toBe("safe");
     await parent.reload();
-    expect((await fork.journal.conversation.agent(context)).tools.map((tool) => tool.name)).toEqual(["bash"]);
+    expect((await fork.journal.conversation.agent(context)).tools.map((tool) => tool.name).sort()).toEqual(["bash", "scratch_git"]);
   });
 
   it("selects native continuations without appending their inherited prefix again", async () => {

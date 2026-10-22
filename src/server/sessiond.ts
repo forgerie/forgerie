@@ -260,6 +260,8 @@ async function createSessionDaemonRuntime() {
   app.addHook("onClose", async () => { await sessionSearch.close(); });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     decisionHints,
+    // Resolved here: the daemon scrubs PI_WEB_DATA_DIR from process.env before sessions open.
+    worktreeBackupDirectory: join(piWebDataDir(daemonEnvironment), "worktree-backups"),
     workflowAutonomy: createWorkflowAutonomyReader({ env: daemonEnvironment }),
     modelRuntime: modelRuntime,
     durableReader: createActiveDurableSessionReader(ref => sessions.activeDurableRead(ref)),

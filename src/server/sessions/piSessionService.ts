@@ -906,6 +906,7 @@ function createDefaultRuntimeFactory(
   decisionHints?: DecisionHints,
   workflowAutonomy?: () => WorkflowAutonomy,
   backlogSuggestions?: BacklogSuggestionToolDeps,
+  worktreeBackupDirectory?: string,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
@@ -949,6 +950,7 @@ function createDefaultRuntimeFactory(
     if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
     const managedTools = await processTools?.({ id: sessionManager.getSessionId(), cwd }, sessionManager.getSessionDir());
     const session = await DurableAgentSession.open({
+      ...(worktreeBackupDirectory === undefined ? {} : { worktreeBackupDirectory }),
       ...(decisionHints === undefined ? {} : {decisionHints}),
       ...(workflowAutonomy === undefined ? {} : {workflowAutonomy}),
       ...(managedTools === undefined ? {} : { processTools: managedTools }),
@@ -1004,6 +1006,8 @@ function createPiWebEditToolDefinition(cwd: string) {
 }
 
 export interface PiSessionServiceDependencies {
+  /** Where discarded worktrees are backed up. Omitted: the data folder of this process's environment. */
+  worktreeBackupDirectory?: string;
   /** Optional background-only hint client and live settings; never used for authorization. */
   decisionHints?: DecisionHints;
   /** Reads Settings > Plugins > Workflow autonomy at each workflow decision. Omitted: every stop waits for the user. */
@@ -1291,6 +1295,7 @@ export class PiSessionService implements SessionRouteService {
       deps.decisionHints,
       deps.workflowAutonomy,
       deps.backlogSuggestions,
+      deps.worktreeBackupDirectory,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;

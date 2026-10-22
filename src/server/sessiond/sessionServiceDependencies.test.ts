@@ -23,6 +23,7 @@ const AGENT_DIR = "/tmp/pi-web-test-agent";
 function daemonCollaborators(patch: Partial<SessionServiceDependencyInput> = {}): SessionServiceDependencyInput {
   return {
     agentDir: AGENT_DIR,
+    worktreeBackupDirectory: "/captured/data/worktree-backups",
     durableReader: createActiveDurableSessionReader(() => undefined),
     archiveStore: emptyArchiveStore(),
     pinStore: new SessionPinStore(),
@@ -67,6 +68,10 @@ async function startupDetails(deps: PiSessionServiceDependencies): Promise<strin
 }
 
 describe("sessiond session service dependency assembly", () => {
+  it("passes the backup folder resolved before daemon environment scrubbing", () => {
+    const directory = "/captured/data/worktree-backups";
+    expect(sessionServiceDependencies(daemonCollaborators({ worktreeBackupDirectory: directory })).worktreeBackupDirectory).toBe(directory);
+  });
   it("reports a concurrent provider model list refresh to a waiting user", async () => {
     // The note is only reachable in the product because the assembly hands the
     // refresher to the session service. Asserting the note rather than the

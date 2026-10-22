@@ -355,3 +355,11 @@ it("gates `cd <missing>; <destructive>` because the Git read in the missing fold
 it("does not gate marking a draft PR ready for review", async () => {
   expect(await gatedAction("github_write", { action: "ready_pr", number: 9 }, "/repo")).toBeUndefined();
 });
+
+it.each(["2>& 1", "2>&1", ">& file", "&> file", "1>&-", "> file", ">& main", ">&file", "1>& -", "3>& 1-"])("does not treat redirect syntax or its target as push refspecs: %s", async redirect => {
+  expect(await gatedAction("bash", {command: `git push origin ${redirect}`}, "/repo", reads)).toEqual({
+    category: "force-push", description: "Push Git refs with unknown implicit destination",
+  });
+  expect(await gatedAction("bash", {command: `git push origin feature ${redirect}`}, "/repo", reads)).toBeUndefined();
+  expect((await gatedAction("bash", {command: `git push origin HEAD:main ${redirect}`}, "/repo", reads))?.category).toBe("push-default");
+});

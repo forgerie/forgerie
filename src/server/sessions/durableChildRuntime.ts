@@ -25,7 +25,7 @@ const EQUIVALENT: Readonly<Record<string, { tool: string; note: string }>> = {
 };
 
 /** Tools a child gets when its agent file grants the first one and the session has the second. */
-const IMPLIED: readonly (readonly [string, string])[] = [["bash", "process"]];
+const IMPLIED: readonly (readonly [string, string])[] = [["bash", "process"], ["bash", "scratch_git"]];
 
 export interface ChildRuntimePlan {
   /** Tool names to offer; undefined offers child-native tools and host extras, not shared session tools. Always includes ask_human. */
