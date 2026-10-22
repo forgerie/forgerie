@@ -26,7 +26,7 @@ const input = { title: "Improve launch recovery", body: "Keep the first prompt."
 const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/owner/repo/issues/${String(number)}`, user: { login: "owner" }, author_association: "OWNER", labels, created_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z", comments: 0 });
 function inMemoryGitHub(gitResolution = false) {
   const writes: { url: string; body: unknown }[] = []; const labels = new Set<string>();
-  const rows = [issue(7, "fix: Improve launch recovery")]; let listingReads = 0;
+  const rows = [issue(7, "fix: Improve launch recovery")]; let listingReads = 0; let rejectCreation = false; let nextIssue = 20;
   const fetch: Fetch = (url, init) => {
     const method = init?.method ?? "GET";
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -36,7 +36,9 @@ function inMemoryGitHub(gitResolution = false) {
     const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); writes.push({ url, body });
     if (url.endsWith("/labels")) { labels.add("agent-filed"); return Promise.resolve(json({ name: "agent-filed", description: "Agent filed" }, 201)); }
     if (url.endsWith("/issues") && Check(Type.Object({ title: Type.String(), labels: Type.Array(Type.String()), body: Type.String() }), body)) {
-      const created = { ...issue(20, body.title, body.labels), body: body.body }; rows.push(created); return Promise.resolve(json(created, 201));
+      const created = { ...issue(nextIssue++, body.title, body.labels), body: body.body }; rows.push(created);
+      if (rejectCreation) { rejectCreation = false; return Promise.reject(new Error("Connection lost after GitHub accepted the issue")); }
+      return Promise.resolve(json(created, 201));
     }
     throw new Error(`Unexpected in-memory API call ${method} ${url}`);
   };
@@ -44,7 +46,7 @@ function inMemoryGitHub(gitResolution = false) {
     app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, status: () => ({ state: "not-configured" }) }, fetch,
   });
   const client = new GitHubIssueClient({ fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, installUrl: () => undefined } });
-  return { agent, client, writes, listingReads: () => listingReads };
+  return { agent, client, writes, listingReads: () => listingReads, rejectNextCreation: () => { rejectCreation = true; } };
 }
 async function fixture() {
   const repo = await repository(); const events: BacklogSuggestion[] = [];
@@ -53,20 +55,20 @@ async function fixture() {
   const projects = { list: () => Promise.resolve([repo.project]), requireProject: () => Promise.resolve(repo.project) };
   const claims = new BacklogClaimStore(join(repo.root, ".git/claims.json")); await claims.initialize();
   const starts: UserSessionStart[] = []; const prompts: { id: string; text: unknown; requestId?: string | undefined }[] = [];
-  let launchError = false;
+  let launchError = false; let promptError = false;
   const github = inMemoryGitHub();
   const backlog = new BacklogService({ projects, claims, settings, providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: github.client })], userSessions: { start: start => {
     if (launchError) throw new Error("Configured launch failure");
     starts.push(start);
     const session: SessionInfo = { id: "background", cwd: repo.root, path: join(repo.root, ".git/background.jsonl"), created: "today", modified: "today", messageCount: 0, firstMessage: "" };
     return Promise.resolve(session);
-  } }, sessions: { stop: () => Promise.resolve(), prompt: (ref, text, _behavior, _images, options) => { prompts.push({ id: ref.id, text, ...options }); return Promise.resolve(); } }, isArchived: () => Promise.resolve(false) });
+  } }, sessions: { stop: () => Promise.resolve(), prompt: (ref, text, _behavior, _images, options) => { prompts.push({ id: ref.id, text, ...options }); return promptError ? Promise.reject(new Error("Configured prompt failure")) : Promise.resolve(); } }, isArchived: () => Promise.resolve(false) });
   const service = new BacklogSuggestionService({ store, projects, settings, worktrees: repo.worktrees, backlog, githubRepo: () => Promise.resolve("owner/repo"), fileIssue: async (cwd, sessionId, input, slug) => {
     const result = await github.agent.fileIssue(cwd, sessionId, input, slug);
     if (result.state === "created") await github.client.invalidate(result.repo);
     return result;
   } });
-  return { ...repo, store, settings, service, starts, prompts, events, github, backlog, failLaunch: (fail: boolean) => { launchError = fail; } };
+  return { ...repo, store, settings, service, starts, prompts, events, github, backlog, failLaunch: (fail: boolean) => { launchError = fail; }, failPrompt: (fail: boolean) => { promptError = fail; } };
 }
 
 describe("backlog suggestions", () => {
@@ -181,7 +183,7 @@ describe("backlog suggestions", () => {
       const record = await f.service.suggest(f.root, "chat", input);
       if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
       const request = { requestId: "crash", modelSpec: "override/cheap" };
-      await f.store.update({ ...record, state: { kind: "filing", action: "file-and-act" } }, { suggestionId: record.id, requestId: "crash", fingerprint: "interrupted-fingerprint", action: "file-and-act", input: request });
+      await f.store.update({ ...record, state: { kind: "filing", action: "file-and-act", launchChoice: { modelSpec: "override/stored", thinkingLevel: "medium" } } }, { suggestionId: record.id, requestId: "crash", fingerprint: "interrupted-fingerprint", action: "file-and-act", input: request });
       const scratch = backlogScratchIdentity(f.root, record.id);
       await git(f.root, "worktree", "add", "-b", scratch.branch, scratch.path, "main");
       await mkdir(join(scratch.path, ".forgerie/backlog"), { recursive: true });
@@ -194,7 +196,7 @@ describe("backlog suggestions", () => {
       expect(await git(f.root, "branch", "--list", "forgerie-backlog-scratch/*")).toBe("");
       expect(await git(f.root, "worktree", "list", "--porcelain")).not.toContain(scratch.path);
       const recovered = f.store.require(record.id);
-      expect(recovered.state).toMatchObject(afterFastForward ? { kind: "started", modelSpec: "override/cheap" } : { kind: "failed", action: "file-and-act", retryable: true });
+      expect(recovered.state).toMatchObject(afterFastForward ? { kind: "started", modelSpec: "override/stored", thinkingLevel: "medium" } : { kind: "failed", action: "file-and-act", retryable: true });
       await expect(readFile(join(indexDirectory, "item"))).rejects.toMatchObject({ code: "ENOENT" });
       expect(f.store.pendingReceipt(record.id)).toBeUndefined();
       expect(f.starts).toHaveLength(afterFastForward ? 1 : 0);
@@ -232,6 +234,60 @@ describe("backlog suggestions", () => {
       const retry = await f.service.file(record.id, action, { requestId: "retry" });
       expect(retry.state.kind).toBe(action === "file-and-act" ? "started" : "filed");
       expect(f.starts).toHaveLength(action === "file-and-act" ? 1 : 0);
+    } finally { await f.dispose(); }
+  });
+  it("files Markdown after acknowledging every matching path, but refuses a new unacknowledged match", async () => {
+    const f = await fixture(); const app = Fastify(); registerBacklogSuggestionRoutes(app, f.service);
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
+      const firstPath = record.destination.path; const newPath = ".forgerie/backlog/new.md";
+      await mkdir(join(f.root, ".forgerie/backlog"), { recursive: true });
+      await writeFile(join(f.root, firstPath), "---\nid: first\ntitle: Improve launch recovery\nstatus: To Do\n---\nExisting\n");
+      await git(f.root, "add", firstPath); await git(f.root, "commit", "-m", "existing match");
+      const click = async (action: string, payload: object) => {
+        const response = await app.inject({ method: "POST", url: `/backlog/suggestions/${record.id}/${action}`, payload });
+        expect(response.statusCode, response.body).toBe(200); return response.json<BacklogSuggestion>();
+      };
+      expect((await click("file", { requestId: "duplicate" })).state).toMatchObject({ kind: "duplicate", matches: [{ path: firstPath }] });
+      await writeFile(join(f.root, newPath), "---\nid: new\ntitle: Improve launch recovery\nstatus: To Do\n---\nNew match\n");
+      await git(f.root, "add", newPath); await git(f.root, "commit", "-m", "new match while card was open");
+      const refused = await click("file", { requestId: "new-match", acknowledgedPaths: [firstPath] });
+      expect(refused.state.kind).toBe("duplicate");
+      if (refused.state.kind !== "duplicate") throw new Error("Expected duplicate refusal");
+      expect(refused.state.matches.map(match => match.path)).toContain(newPath);
+      const filed = await click("file-and-act", { requestId: "acknowledged", acknowledgedPaths: [firstPath, newPath] });
+      expect(filed.state.kind).toBe("started"); expect(f.starts).toHaveLength(1);
+      expect(filed.destination).toEqual({ provider: "markdown", path: firstPath.replace(/\.md$/u, "-2.md") });
+      expect(await click("file-and-act", { requestId: "acknowledged", acknowledgedPaths: [newPath, firstPath] })).toEqual(filed); expect(f.starts).toHaveLength(1);
+    } finally { await app.close(); await f.dispose(); }
+  });
+  it("reuses the created session after prompt failure even if retry overrides choose another model", async () => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input, { modelSpec: "source/current", thinkingLevel: "high" });
+      f.failPrompt(true);
+      const failed = await f.service.file(record.id, "file-and-act", { requestId: "prompt-fails", modelSpec: "override/first", thinkingLevel: "low" });
+      expect(failed.state).toMatchObject({ kind: "filed", launchChoice: { modelSpec: "override/first", thinkingLevel: "low" }, launchError: { retryable: true } });
+      expect(f.events.some(event => event.state.kind === "filing" && event.state.launchChoice?.modelSpec === "override/first")).toBe(true); expect(f.starts).toHaveLength(1);
+      await f.store.initialize(); f.failPrompt(false);
+      const retry = await f.service.file(record.id, "file-and-act", { requestId: "prompt-retry", modelSpec: "override/different", thinkingLevel: "off" });
+      expect(retry.state).toMatchObject({ kind: "started", sessionId: "background", modelSpec: "override/first", thinkingLevel: "low" });
+      expect(f.starts).toHaveLength(1); expect(f.prompts).toHaveLength(2); expect(f.prompts[1]?.requestId).toBe(f.prompts[0]?.requestId);
+    } finally { await f.dispose(); }
+  });
+  it("restores an unsafe GitHub failure to the same failed state, never to a fileable open state", async () => {
+    const f = await fixture();
+    try {
+      await f.settings.save("project", { providers: ["github"], github: { repo: "owner/repo" } }, 0);
+      const record = await f.service.suggest(f.root, "chat", { ...input, title: "Export lost receipt context" });
+      f.github.rejectNextCreation();
+      const failed = await f.service.file(record.id, "file", { requestId: "unknown-receipt" });
+      expect(failed.state).toMatchObject({ kind: "failed", action: "file", retryable: false });
+      await f.service.transition(record.id, "dismiss"); await f.store.initialize();
+      const restored = await f.service.transition(record.id, "restore"); expect(restored.state).toEqual(failed.state);
+      await expect(f.service.file(record.id, "file", { requestId: "must-not-refile", title: "Changed title after unsafe failure" })).rejects.toMatchObject({ kind: "conflict" });
+      expect(f.github.writes.filter(write => write.url.endsWith("/issues"))).toHaveLength(1);
     } finally { await f.dispose(); }
   });
   it("validates complete content before filing, so an oversized override leaves the card open", async () => {

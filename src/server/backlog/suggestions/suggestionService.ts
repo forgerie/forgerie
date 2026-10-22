@@ -94,38 +94,40 @@ export class BacklogSuggestionService {
     if (this.pending.has(id)) throw new BacklogError("conflict", "Wait for filing to finish");
     if (action === "restore") {
       if (record.state.kind !== "dismissed") throw new BacklogError("conflict", "Only dismissed suggestions can be restored");
-      return this.deps.store.update({ ...record, state: { kind: "open" } });
+      return this.deps.store.update({ ...record, state: record.state.restoreTo });
     }
-    if (!["open", "duplicate", "failed"].includes(record.state.kind)) throw new BacklogError("conflict", "This suggestion cannot be dismissed");
-    return this.deps.store.update({ ...record, state: { kind: "dismissed", at: new Date().toISOString() } });
+    if (record.state.kind !== "open" && record.state.kind !== "duplicate" && record.state.kind !== "failed") throw new BacklogError("conflict", "This suggestion cannot be dismissed");
+    return this.deps.store.update({ ...record, state: { kind: "dismissed", at: new Date().toISOString(), restoreTo: record.state } });
   }
   private async fileOnce(id: string, action: BacklogSuggestionAction, input: BacklogSuggestionActRequest): Promise<BacklogSuggestion> {
-    const fingerprint = createHash("sha256").update(JSON.stringify([action, input.title ?? null, input.body ?? null, [...input.notDuplicateOf ?? []].sort((a, b) => a - b), input.modelSpec ?? null, input.thinkingLevel ?? null])).digest("hex");
+    let record = this.deps.store.require(id);
+    const launchChoice = action !== "file-and-act" ? undefined : record.state.kind === "filed" && record.state.launchChoice !== undefined ? record.state.launchChoice : resolveLaunchChoice(record.defaultModel, input);
+    const fingerprint = createHash("sha256").update(JSON.stringify([action, input.title ?? null, input.body ?? null, [...input.notDuplicateOf ?? []].sort((a, b) => a - b), [...input.acknowledgedPaths ?? []].sort(), launchChoice?.modelSpec ?? null, launchChoice?.thinkingLevel ?? null])).digest("hex");
     const receipt = this.deps.store.receipt(id, input.requestId);
     if (receipt !== undefined) {
       if (receipt.fingerprint !== fingerprint) throw new BacklogError("conflict", "requestId was reused with different filing choices");
       if (receipt.result !== undefined) return receipt.result;
       throw new BacklogError("conflict", "This request was interrupted. Inspect the destination before retrying.");
     }
-    let record = this.deps.store.require(id);
     const launchingFiled = action === "file-and-act" && record.state.kind === "filed";
     if (!launchingFiled && record.state.kind !== "open" && record.state.kind !== "duplicate" && !(record.state.kind === "failed" && record.state.retryable)) throw new BacklogError("conflict", "Suggestion is not open for filing");
-    if (launchingFiled && (input.title !== undefined || input.body !== undefined || input.notDuplicateOf !== undefined)) throw new BacklogError("conflict", "Filed items cannot be edited");
+    if (launchingFiled && (input.title !== undefined || input.body !== undefined || input.notDuplicateOf !== undefined || input.acknowledgedPaths !== undefined)) throw new BacklogError("conflict", "Filed items cannot be edited");
     if (!launchingFiled) validateContent({ ...record, title: input.title ?? record.title, body: input.body ?? record.body });
     const request = { suggestionId: id, requestId: input.requestId, fingerprint, action, input };
     const finish = (next: BacklogSuggestion) => this.deps.store.update(next, { ...request, result: next });
     const project = await this.deps.projects.requireProject(record.projectId);
-    record = await this.deps.store.update({ ...record, ...(!launchingFiled ? { title: input.title ?? record.title, body: input.body ?? record.body, state: { kind: "filing" as const, action } } : {}) }, request);
+    if (launchingFiled && record.state.kind === "filed") record = { ...record, state: { ...record.state, ...(launchChoice === undefined ? {} : { launchChoice }) } };
+    record = await this.deps.store.update({ ...record, ...(!launchingFiled ? { title: input.title ?? record.title, body: input.body ?? record.body, state: { kind: "filing" as const, action, ...(launchChoice === undefined ? {} : { launchChoice }) } } : {}) }, request);
     if (!launchingFiled) {
       try {
         if (record.destination.provider === "markdown") {
-          const state = await writeMarkdownSuggestion(this.deps.worktrees, project, record, async path => {
+          const state = await writeMarkdownSuggestion(this.deps.worktrees, project, record, { acknowledgedPaths: input.acknowledgedPaths ?? [], onPath: async path => {
             record = await this.deps.store.update({ ...record, destination: { provider: "markdown", path } });
-          });
-          record = await this.deps.store.update({ ...record, state });
+          } });
+          record = await this.deps.store.update({ ...record, state: state.kind === "filed" && launchChoice !== undefined ? { ...state, launchChoice } : state });
         } else {
           const result = await this.deps.fileIssue(project.path, record.sessionId, { title: record.title, body: suggestionBody(record), duplicates: [record.title], labels: ["agent-filed"], ...(input.notDuplicateOf === undefined ? {} : { notDuplicateOf: input.notDuplicateOf }) }, record.destination.repo);
-          record = await this.deps.store.update({ ...record, state: result.state === "duplicate" ? { kind: "duplicate", matches: result.matches } : { kind: "filed", provider: "github", number: result.number, url: result.url, ...(result.decisionLogWarning === undefined ? {} : { decisionLogWarning: result.decisionLogWarning }), at: new Date().toISOString() } });
+          record = await this.deps.store.update({ ...record, state: result.state === "duplicate" ? { kind: "duplicate", matches: result.matches } : { kind: "filed", provider: "github", number: result.number, url: result.url, ...(result.decisionLogWarning === undefined ? {} : { decisionLogWarning: result.decisionLogWarning }), ...(launchChoice === undefined ? {} : { launchChoice }), at: new Date().toISOString() } });
         }
       } catch (error) {
         // An external writer may have accepted a request before the connection failed. Fail closed.
@@ -137,14 +139,18 @@ export class BacklogSuggestionService {
   }
   private async launchFiled(record: BacklogSuggestion, input: BacklogSuggestionActRequest): Promise<BacklogSuggestion> {
     if (record.state.kind !== "filed") throw new BacklogError("conflict", "Only a filed item can launch");
-    const filed = record.state;
-    const model = { ...record.defaultModel, ...(input.modelSpec === undefined ? {} : { modelSpec: input.modelSpec }), ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }) };
+    let filed = record.state;
+    const model = filed.launchChoice ?? resolveLaunchChoice(record.defaultModel, input);
+    if (filed.launchChoice === undefined) {
+      filed = { ...filed, launchChoice: model };
+      record = await this.deps.store.update({ ...record, state: filed });
+    }
     try {
       const project = await this.deps.projects.requireProject(record.projectId);
       const itemId = filed.provider === "markdown" ? record.destination.provider === "markdown" ? record.destination.path.split("/").at(-1)?.slice(0, -3) : undefined : String(filed.number);
       if (itemId === undefined) throw new Error("Filed item identity is missing");
       const launched = await this.deps.backlog.launchInBackground(project.id, itemId, { requestId: `suggestion-${record.id}`, start: { cwd: project.path, ...model, destination: { kind: "fresh-worktree" } } }, filed.provider, "everyone", record.destination.provider === "markdown" ? { providers: ["markdown"], dir: dirname(record.destination.path) } : { providers: ["github"], github: { repo: record.destination.repo } });
-      const state = { ...filed }; delete state.launchError;
+      const state = { ...filed }; delete state.launchError; delete state.launchChoice;
       record = await this.deps.store.update({ ...record, state: { ...state, kind: "started", sessionId: launched.session.id, claimId: launched.claim.claimId, ...model } });
     } catch (error) { record = await this.deps.store.update({ ...record, state: { ...filed, launchError: { message: error instanceof Error ? error.message : String(error), retryable: true } } }); }
     return record;
@@ -154,4 +160,8 @@ export class BacklogSuggestionService {
 function validateContent(record: BacklogSuggestion): void {
   const limit = record.destination.provider === "markdown" ? 255 * 1024 : 64000;
   if (Buffer.byteLength(suggestionBody(record), "utf8") > limit) throw new BacklogError("invalid-request", `Suggestion with context exceeds the ${record.destination.provider} item limit. Shorten the body or context.`);
+}
+
+function resolveLaunchChoice(defaultModel: BacklogSuggestionModel, input: BacklogSuggestionModel): BacklogSuggestionModel {
+  return { ...defaultModel, ...(input.modelSpec === undefined ? {} : { modelSpec: input.modelSpec }), ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }) };
 }

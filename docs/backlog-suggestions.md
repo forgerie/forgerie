@@ -15,8 +15,8 @@ It stays after archive. It never expires.
 | --- | --- |
 | File | Files the item. The current chat continues. |
 | File and act | Files the item, then starts a new session in a fresh worktree. The server sends its initial prompt. The browser stays in the current chat. |
-| Dismiss | Hides an unfiled suggestion without deleting it. Restore makes it open again. |
-| File anyway | For GitHub duplicates, passes the displayed issue numbers in `notDuplicateOf`. It does not edit or comment on those issues. |
+| Dismiss | Hides an unfiled suggestion without deleting it. Restore keeps its prior state, including unsafe failures. |
+| File anyway | Acknowledges displayed matches: `notDuplicateOf` issue numbers for GitHub, or `acknowledgedPaths` for Markdown. Any new unacknowledged match stops filing. It never overwrites or comments on a match. |
 | Start session after a launch error | Starts work from the existing filed receipt. It never files again. |
 
 Title and body can be overridden when filing, not after filing. Each item includes
@@ -64,8 +64,11 @@ Model and thinking defaults resolve per field in this order:
 3. Global `suggestionsDefault` in `backlog-settings.json`.
 4. The source chat's model and thinking level.
 
-Creation stores the resolved default in `defaultModel`. A request override applies
-only to its new session. See [configuration](config.md#backlog-settings).
+Creation stores the resolved default in `defaultModel`. The first File and act
+saves its resolved `launchChoice` on `filing` and then `filed`. That choice remains
+while `launchError` is set. A launch-only retry uses the saved choice and ignores
+a different request model or thinking override, so it can reuse an existing
+session and claim. A request override never changes project or global settings. See [configuration](config.md#backlog-settings).
 
 Sessiond owns `<data dir>/backlog-suggestions.json`. It uses atomic replacement,
 mode `0600`, revisions, and durable request receipts. It keeps suggestions and
@@ -94,7 +97,7 @@ Routes have `/api` in the browser and no prefix inside sessiond. The existing
 backlog proxy forwards them.
 
 - `GET /api/backlog/suggestions?sessionId=&state=` returns `{ suggestions: [...] }`, newest first.
-- `POST /api/backlog/suggestions/:id/file` accepts `{ requestId, title?, body?, notDuplicateOf? }`.
+- `POST /api/backlog/suggestions/:id/file` accepts `{ requestId, title?, body?, notDuplicateOf?, acknowledgedPaths? }`.
 - `POST /api/backlog/suggestions/:id/file-and-act` accepts the same fields plus `modelSpec?`, `thinkingLevel?`.
 - `POST /api/backlog/suggestions/:id/dismiss` and `/restore` accept `{}`.
 
@@ -103,7 +106,9 @@ reusing it with different choices returns 409. Use a new ID for a launch retry.
 Wrong state returns 409 with `BacklogErrorSchema`. Open, duplicate, and retryable
 failed records can file. Failed state includes `action: "file" | "file-and-act"`,
 so a retry after reload repeats the failed action. Filed records accept only file-and-act without edits.
-Restore accepts dismissed records only.
+Restore accepts dismissed records only. Dismissed state stores `{ at, restoreTo }`,
+where `restoreTo` is the prior open, duplicate, or failed state. An unsafe GitHub
+failure stays `failed` with `retryable: false` after Dismiss and Restore.
 
 Changes emit the global event
 `{ type: "backlog.suggestions.changed", sessionId, suggestionId }`.

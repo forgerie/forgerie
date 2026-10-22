@@ -16,14 +16,18 @@ export type BacklogSuggestionDestination = Static<typeof BacklogSuggestionDestin
 const filed = { decisionLogWarning: Type.Optional(Type.String()), provider: Type.Union([Type.Literal("markdown"), Type.Literal("github")]), path: Type.Optional(text), number: Type.Optional(Type.Integer({ minimum: 1 })), url: Type.Optional(text), at: text };
 export const BacklogSuggestionActionSchema = Type.Union([Type.Literal("file"), Type.Literal("file-and-act")]);
 export type BacklogSuggestionAction = Static<typeof BacklogSuggestionActionSchema>;
+const OpenStateSchema = Type.Object({ kind: Type.Literal("open") }, { additionalProperties: false });
+const DuplicateStateSchema = Type.Object({ kind: Type.Literal("duplicate"), matches: Type.Array(Type.Object({ number: Type.Optional(Type.Integer({ minimum: 1 })), path: Type.Optional(text), title: Type.String(), state: Type.String(), url: Type.Optional(text) }, { additionalProperties: false })) }, { additionalProperties: false });
+const FailedStateSchema = Type.Object({ kind: Type.Literal("failed"), action: BacklogSuggestionActionSchema, message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false });
+const RestorableStateSchema = Type.Union([OpenStateSchema, DuplicateStateSchema, FailedStateSchema]);
 export const BacklogSuggestionStateSchema = Type.Union([
-  Type.Object({ kind: Type.Literal("open") }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("filing"), action: BacklogSuggestionActionSchema }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("filed"), ...filed, launchError: Type.Optional(Type.Object({ message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false })) }, { additionalProperties: false }),
+  OpenStateSchema,
+  Type.Object({ kind: Type.Literal("filing"), action: BacklogSuggestionActionSchema, launchChoice: Type.Optional(BacklogSuggestionModelSchema) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("filed"), ...filed, launchChoice: Type.Optional(BacklogSuggestionModelSchema), launchError: Type.Optional(Type.Object({ message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("started"), ...filed, sessionId: text, claimId: text, ...BacklogSuggestionModelSchema.properties }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("duplicate"), matches: Type.Array(Type.Object({ number: Type.Optional(Type.Integer({ minimum: 1 })), path: Type.Optional(text), title: Type.String(), state: Type.String(), url: Type.Optional(text) }, { additionalProperties: false })) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("failed"), action: BacklogSuggestionActionSchema, message: Type.String(), retryable: Type.Boolean() }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("dismissed"), at: text }, { additionalProperties: false }),
+  DuplicateStateSchema,
+  FailedStateSchema,
+  Type.Object({ kind: Type.Literal("dismissed"), at: text, restoreTo: RestorableStateSchema }, { additionalProperties: false }),
 ]);
 export const BacklogSuggestionSchema = Type.Object({
   id: text, sessionId: text, projectId: text, sessionTitle: Type.Optional(text), title: SuggestBacklogInputSchema.properties.title, body: SuggestBacklogInputSchema.properties.body,
@@ -33,7 +37,7 @@ export const BacklogSuggestionSchema = Type.Object({
 }, { additionalProperties: false });
 export type BacklogSuggestion = Static<typeof BacklogSuggestionSchema>;
 export type BacklogSuggestionState = Static<typeof BacklogSuggestionStateSchema>;
-export const BacklogSuggestionFileRequestSchema = Type.Object({ requestId: text, title: Type.Optional(SuggestBacklogInputSchema.properties.title), body: Type.Optional(SuggestBacklogInputSchema.properties.body), notDuplicateOf: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }), { maxItems: 100, uniqueItems: true })) }, { additionalProperties: false });
+export const BacklogSuggestionFileRequestSchema = Type.Object({ requestId: text, title: Type.Optional(SuggestBacklogInputSchema.properties.title), body: Type.Optional(SuggestBacklogInputSchema.properties.body), notDuplicateOf: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }), { maxItems: 100, uniqueItems: true })), acknowledgedPaths: Type.Optional(Type.Array(text, { maxItems: 1000, uniqueItems: true })) }, { additionalProperties: false });
 export const BacklogSuggestionActRequestSchema = Type.Object({ ...BacklogSuggestionFileRequestSchema.properties, ...BacklogSuggestionModelSchema.properties }, { additionalProperties: false });
 export type BacklogSuggestionFileRequest = Static<typeof BacklogSuggestionFileRequestSchema>;
 export type BacklogSuggestionActRequest = Static<typeof BacklogSuggestionActRequestSchema>;

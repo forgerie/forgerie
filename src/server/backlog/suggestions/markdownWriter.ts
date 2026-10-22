@@ -18,7 +18,7 @@ export function suggestionItemId(title: string, date: string): string {
 }
 
 /** A private index builds a commit before any checkout materializes the item. Never pushes. */
-export async function writeMarkdownSuggestion(worktrees: Pick<SessionWorktrees, "options" | "withMainCheckout">, project: Project, record: BacklogSuggestion, onPath?: (path: string) => Promise<void>): Promise<BacklogSuggestionState> {
+export async function writeMarkdownSuggestion(worktrees: Pick<SessionWorktrees, "options" | "withMainCheckout">, project: Project, record: BacklogSuggestion, filing: { onPath?: (path: string) => Promise<void>; acknowledgedPaths?: readonly string[] } = {}): Promise<BacklogSuggestionState> {
   if (record.destination.provider !== "markdown") throw new Error("Expected Markdown destination");
   const originalPath = record.destination.path;
   let path = originalPath;
@@ -41,12 +41,12 @@ export async function writeMarkdownSuggestion(worktrees: Pick<SessionWorktrees, 
       const scans = await Promise.all([options.repo, scratch].map(root => markdownBacklogProvider.scan(project, root, { dir: dirname(path) })));
       if (scans.some(scan => scan.warnings.some(warning => warning.kind === "scan-limit" || warning.kind === "invalid-item"))) throw new Error("Cannot complete duplicate check: invalid or incomplete Markdown backlog");
       const matches = [...new Map(scans.flatMap(scan => scan.entries).filter(({ item }) => item.open && closeIssueTitle(item.title, record.title)).map(({ item }) => [item.path, { path: item.path, title: item.title, state: "open" }])).values()];
-      if (matches.length > 0) return { kind: "duplicate", matches };
+      if (matches.some(match => filing.acknowledgedPaths?.includes(match.path) !== true)) return { kind: "duplicate", matches };
       const base = path.slice(0, -3);
       for (let suffix = 2; await git(scratch, ["ls-tree", "HEAD", "--", path]) !== ""; suffix++) path = `${base}-${String(suffix)}.md`;
       if (path !== originalPath) {
-        if (onPath === undefined) throw new Error("A destination persistence callback is required for a path collision");
-        await onPath(path);
+        if (filing.onPath === undefined) throw new Error("A destination persistence callback is required for a path collision");
+        await filing.onPath(path);
       }
       await checkMain();
       const content = markdownSuggestionContent(record, path);

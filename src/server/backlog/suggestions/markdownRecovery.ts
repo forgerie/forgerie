@@ -27,7 +27,7 @@ export async function recoverMarkdownSuggestions(worktrees: Pick<SessionWorktree
         if (!(error instanceof Error)) throw error;
         if ("code" in error && error.code !== 1 && error.code !== 128) throw error;
       }
-      recovered.push({ id: record.id, state: ours ? { kind: "filed", provider: "markdown", path, at: new Date().toISOString() }
+      recovered.push({ id: record.id, state: ours ? { kind: "filed", provider: "markdown", path, at: new Date().toISOString(), ...(record.state.launchChoice === undefined ? {} : { launchChoice: record.state.launchChoice }) }
         : { kind: "failed", action: record.state.action, message: "Filing was interrupted before a verified fast-forward. No item from this suggestion exists on the default branch. Retry with a new requestId.", retryable: true } });
     }
     await sweepBacklogScratch(options.repo);

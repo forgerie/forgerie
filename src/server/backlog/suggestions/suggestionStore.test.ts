@@ -12,7 +12,7 @@ describe("backlog suggestion store", () => {
       const path = join(root, "data/backlog-suggestions.json"); const events: string[] = [];
       const store = new BacklogSuggestionStore(path, record => events.push(record.state.kind)); await store.initialize();
       const created = await store.create(suggestion()); created.title = "not saved";
-      const next = await store.update({ ...store.require(created.id), state: { kind: "dismissed", at: "now" } }, { suggestionId: created.id, requestId: "click", fingerprint: "fp", result: created });
+      const next = await store.update({ ...store.require(created.id), state: { kind: "dismissed", at: "now", restoreTo: { kind: "open" } } }, { suggestionId: created.id, requestId: "click", fingerprint: "fp", result: created });
       expect(next.revision).toBe(2); expect(events).toEqual(["open", "dismissed"]);
       expect((await stat(path)).mode & 0o777).toBe(0o600);
       const reopened = new BacklogSuggestionStore(path); await reopened.initialize();
