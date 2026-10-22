@@ -39,7 +39,7 @@ export function BacklogProjectSettings({ entry, name, back, close, busy, error, 
       {trusted ? <TrustedBotsField bots={bots} problems={botProblems} limit={TRUSTED_BOT_LIMIT} disabled={busy} onChange={onBots} /> : null}
     </> : null}
     {suggestionModel ? <SuggestionModelField label="Background model" value={suggestionModel.value} fallback={suggestionModel.fallback} disabled={busy}
-      hint={`File and act on this project's backlog suggestions starts its background session on this model. Unset: ${suggestionModel.fallback.charAt(0).toLowerCase()}${suggestionModel.fallback.slice(1)}.`}
+      hint={`File and act on this project's backlog suggestions starts its background session on this model. Unset: ${suggestionModel.fallbackDetail ?? `${suggestionModel.fallback.charAt(0).toLowerCase()}${suggestionModel.fallback.slice(1)}`}.`}
       knownModels={suggestionModel.known} listModels={suggestionModel.list} onChange={suggestionModel.onChange} /> : null}
     {!valid ? <Lede>Select at least one provider and fill in its valid settings.</Lede> : null}
     <ActionFooter actions={[{ label: "Use the repo file", onPress: onRemove, disabled: busy || entry.source !== "forgerie" }]} note="Forgerie replaces the whole repo backlog section. Turning Markdown off leaves its files on disk. Add Azure DevOps boards under Sources in Settings → Backlog." />

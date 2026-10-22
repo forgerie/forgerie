@@ -17,8 +17,11 @@ import { SuggestionCard } from "../src/backlog/suggestions/SuggestionCard";
 import { SuggestionsOpener } from "../src/backlog/suggestions/SuggestionsOpener";
 import { SuggestionsSheet } from "../src/backlog/suggestions/SuggestionsSheet";
 import { cardInputs } from "../src/backlog/suggestions/cardInputs";
-import { openerView } from "../src/backlog/suggestions/suggestionsModel";
-import { AZURE, CHAT_MODEL, CHAT_SUGGESTIONS, CHAT_TITLE, DUPLICATE, FAILED, FILED, LONG, MODELS, OPEN, OPEN_GITHUB, SHORT, STARTED, look } from "../src/backlog/suggestions/fixtures/suggestions";
+import { isOpen, openerView } from "../src/backlog/suggestions/suggestionsModel";
+import { SuggestedInChats } from "../src/backlog/suggestions/SuggestedInChats";
+import { BacklogView } from "../src/ui/backlog/BacklogView";
+import type { BacklogItem } from "../src/backlog/backlogApi";
+import { AZURE, CHAT_MODEL, CHAT_SUGGESTIONS, CHAT_TITLE, DUPLICATE, FAILED, FILED, LONG, MODELS, OPEN, OPEN_GITHUB, SHORT, STARTED, look, suggestion } from "../src/backlog/suggestions/fixtures/suggestions";
 import "../src/ui/theme.css";
 
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "suggested";
@@ -80,6 +83,29 @@ function Preview() {
   </AssistantRuntimeProvider>;
 }
 
+/** The Backlog view with "Suggested in chats" above the projects' own groups. */
+function BacklogPreview() {
+  const [store] = useState(() => {
+    const created = createSuggestionsStore(memoryServer([...CHAT_SUGGESTIONS, suggestion("sg-x", { title: "Keep the composer draft when a send fails twice",
+      sessionId: "s-composer", sessionTitle: "Composer retries", createdAt: "2026-10-19T10:00:00Z" })], 600).api, () => ({}));
+    void created.refresh();
+    return created;
+  });
+  const view = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const items: BacklogItem[] = [
+    { id: "01K2", title: "Make a delegated agent's nested transcript openable from the Agents panel", provider: "markdown", projectId: "p", projectName: "forgerie", repo: "/code/forgerie",
+      owner: { kind: "project", projectId: "p", projectName: "forgerie", repo: "/code/forgerie" }, destination: { kind: "routed", projectId: "p", reason: "project-owned" },
+      path: ".forgerie/backlog/01K2.md", status: "", labels: ["agents-panel", "sessions"], priority: "high", created: "2026-09-30", assignedToMe: true, assignees: [], open: true,
+      readiness: "ready", blockingIds: [] },
+  ];
+  return <BacklogView place={{}} binding={{ load: { type: "ready", value: { items, sources: [], warnings: [], projects: [{ projectId: "p", providers: ["markdown"] }], generatedAt: "2026-10-21T16:58:00Z" } },
+    onRefresh: () => {}, api: { detail: async () => { throw new Error("Not in the preview."); }, release: async () => ({ released: true as const }) }, look, onPlace: () => {},
+    onLaunch: () => {}, onOpenSession: () => {},
+    before: <SuggestedInChats suggestions={view.suggestions?.filter((record) => isOpen(record.state))} readError={view.readError} pending={view.pending} problems={view.problems}
+      drafts={view.drafts} now={Date.parse("2026-10-21T16:58:00Z")} actions={{ onFile: (id) => { void store.file(id); }, onFileAndAct: (id) => { void store.fileAndAct(id); },
+        onShow: () => {}, onRetry: () => { void store.refresh(); } }} /> }} />;
+}
+
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing preview root");
-createRoot(root).render(<Preview />);
+createRoot(root).render(scenario === "backlog" ? <BacklogPreview /> : <Preview />);

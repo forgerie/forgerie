@@ -64,7 +64,8 @@ export function BacklogSettingsView({ api, selected, onOpen, back, close }: { ap
   const projectPath = load.type === "ready" && place.kind === "project" ? load.value.projects.find((p) => p.id === place.projectId)?.path : undefined;
   const globalName = modelWords(modelFromSpec(globalModel?.modelSpec, knownModels));
   if (entry && !("error" in entry)) return <ProjectEditorBinding key={`${entry.projectId}:${entry.source}:${entry.revision ?? 0}`} entry={entry} name={name ?? entry.projectId} back={back} close={close} busy={busy} error={error}
-    models={{ known: knownModels, list: listModels(projectPath), fallback: globalName ? `The global default, ${globalName}` : "The chat's model" }}
+    models={{ known: knownModels, list: listModels(projectPath), fallback: globalName ? "The global default" : "The chat's model",
+      fallbackDetail: globalName ? `the global default, ${globalName}` : "the model of the chat the suggestion came from" }}
     onSave={(backlog) => void mutate(() => api.save(entry.projectId, backlog, entry.revision ?? 0))}
     onRemove={() => void mutate(() => api.remove(entry.projectId, entry.revision ?? 0))} onReload={reload} />;
   return <BacklogSettingsList back={back} close={close} load={load} error={error} busy={busy} login={login} onLogin={setLogin}
@@ -107,7 +108,7 @@ function SourceEditorBinding({ source, catalog, back, close, busy, error, onSave
 }
 
 /** The model fields' list: names Pi knows, a read for the picker, and what an unset field falls back to. */
-interface ModelChoices { known: readonly SessionModel[]; list: (signal: AbortSignal) => Promise<SessionModel[]>; fallback: string }
+interface ModelChoices { known: readonly SessionModel[]; list: (signal: AbortSignal) => Promise<SessionModel[]>; fallback: string; fallbackDetail: string }
 
 function ProjectEditorBinding({ entry, name, back, close, busy, error, models, onSave, onRemove, onReload }: {
   entry: ProjectSettingsEntry; name: string; back: ReactNode; close: ReactNode; busy: boolean; error: string | undefined; models: ModelChoices;
@@ -135,6 +136,6 @@ function ProjectEditorBinding({ entry, name, back, close, busy, error, models, o
   return <BacklogProjectSettings entry={entry} name={name} back={back} close={close} busy={busy} error={error} valid={valid}
     providers={providers} onSources={(sources) => setProviders(sources.filter((p): p is "markdown" | "github" => p === "markdown" || p === "github"))}
     repo={repo} onRepo={setRepo} trusted={trusted} onTrusted={setTrusted} bots={bots} botProblems={botProblems} onBots={setBots}
-    suggestionModel={{ value: suggestions, known: models.known, list: models.list, fallback: models.fallback, onChange: setSuggestions }}
+    suggestionModel={{ value: suggestions, known: models.known, list: models.list, fallback: models.fallback, fallbackDetail: models.fallbackDetail, onChange: setSuggestions }}
     onSave={() => onSave(saved)} onRemove={onRemove} onReload={onReload} />;
 }

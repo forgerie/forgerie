@@ -10,7 +10,11 @@ import { modelFromSpec, specOf } from "./suggestionsModel";
 /** A model field's inputs as a settings page passes them. */
 export interface SuggestionModelChoice {
   value: SuggestionModel | undefined; known: readonly SessionModel[]; list: (signal: AbortSignal) => Promise<SessionModel[]>;
-  fallback: string; onChange: (value: SuggestionModel | undefined) => void;
+  /** What an unset field means, in a few words for the trigger, such as "The global default". */
+  fallback: string;
+  /** The same, in full for the hint, such as "the global default, Claude Haiku 4.5". */
+  fallbackDetail?: string | undefined;
+  onChange: (value: SuggestionModel | undefined) => void;
 }
 
 /**

@@ -39,7 +39,7 @@ function Stateful({ entry, rows }: { entry: ProjectSettingsEntry; rows?: string[
   const [bots, setBots] = useState<string[]>(rows ?? entry.backlog.github?.trustedBots ?? []);
   const problems = trustedBotProblems(bots);
   const [model, setModel] = useState<SuggestionModel>();
-  return <BacklogProjectSettings suggestionModel={{ value: model, known: MODELS, list: async () => MODELS, fallback: "The global default, Claude Haiku 4.5", onChange: setModel }} entry={entry} name="design-system" back={null} close={null} busy={false} error={undefined}
+  return <BacklogProjectSettings suggestionModel={{ value: model, known: MODELS, list: async () => MODELS, fallback: "The global default", fallbackDetail: "the global default, Claude Haiku 4.5", onChange: setModel }} entry={entry} name="design-system" back={null} close={null} busy={false} error={undefined}
     valid={providers.length > 0 && !(providers.includes("github") && trusted && problems.some(Boolean))}
     providers={providers} onSources={setProviders} repo={repo} onRepo={setRepo} trusted={trusted} onTrusted={setTrusted}
     bots={bots} botProblems={problems} onBots={setBots}

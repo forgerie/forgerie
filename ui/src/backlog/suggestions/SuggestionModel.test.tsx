@@ -92,7 +92,7 @@ describe("Settings → Backlog", () => {
     expect(document.querySelector(".model-trigger")?.textContent).toContain("Gemini 3.8 Flash");
     await click(button("Save changes"));
     expect(writes.at(-1)).toEqual({ id: "p", backlog: { providers: ["markdown"], suggestions: { modelSpec: "google/gemini-3-8-flash" } }, baseRevision: 2 });
-    await click(button("Use the global default, Claude Haiku 4.5"));
+    await click(button("Use the global default"));
     await click(button("Save changes"));
     expect(writes.at(-1)).toEqual({ id: "p", backlog: { providers: ["markdown"] }, baseRevision: 2 });
   });

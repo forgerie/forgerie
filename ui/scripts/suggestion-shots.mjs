@@ -43,7 +43,7 @@ const SIZES = [
 ];
 // The real thread with the real cards and header, from verification/suggestions-preview.html: one capture per scenario,
 // with the newest card scrolled into view, and the sheet open in "sheet".
-const scenarios = (process.env.SCENARIOS ?? "suggested,github,filed,started,many,duplicate,failed,azure,sheet,long").split(",").filter(Boolean);
+const scenarios = (process.env.SCENARIOS ?? "suggested,github,filed,started,many,duplicate,failed,azure,sheet,long,backlog").split(",").filter(Boolean);
 const sizes = (process.env.SIZES ?? SIZES.map((size) => size.name).join(",")).split(",");
 const profile = await mkdtemp(join(tmpdir(), "suggestion-shots-"));
 const port = await getFreePort();
@@ -112,13 +112,13 @@ try {
         const url = new URL(`/verification/suggestions-preview.html?scenario=${scene}`, base);
         await cdp.send("Page.navigate", { url: url.href });
         const deadline = Date.now() + 15_000;
-        while (!(await evaluate(cdp, `document.querySelector('[data-suggestion] .decision-card, [data-suggestion] .readout-line, .sheet-dialog') !== null`))) {
+        while (!(await evaluate(cdp, `document.querySelector('[data-suggestion] .decision-card, [data-suggestion] .readout-line, .sheet-dialog, .pending-row') !== null`))) {
           if (Date.now() > deadline) throw new Error(`Preview did not render: ${url.href}`);
           await sleep(100);
         }
         await evaluate(cdp, `document.fonts.ready.then(() => true)`);
         await sleep(400);
-        await evaluate(cdp, `(() => { const cards = document.querySelectorAll('[data-suggestion]'); cards[cards.length - 1]?.scrollIntoView({ block: 'end' }); return true; })()`);
+        await evaluate(cdp, `(() => { const cards = document.querySelectorAll('[data-suggestion]'); cards[cards.length - 1]?.scrollIntoView({ block: 'start' }); return true; })()`);
         await sleep(300);
         const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
         const file = join(out, `chat-${scene}-${name}-${scheme}.png`);
