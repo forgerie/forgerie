@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { Check } from "typebox/value";
-import { BacklogGitHubLoginRequestSchema, BacklogSettingsDeleteSchema, BacklogSettingsResponseSchema, BacklogSettingsSaveSchema, type BacklogSettingsResponse } from "../../shared/backlogSettings.js";
+import { BacklogSuggestionsDefaultRequestSchema, BacklogGitHubLoginRequestSchema, BacklogSettingsDeleteSchema, BacklogSettingsResponseSchema, BacklogSettingsSaveSchema, type BacklogSettingsResponse } from "../../shared/backlogSettings.js";
 import { BacklogSourceCreateSchema, BacklogSourceSaveSchema, BacklogSourceDeleteSchema, BacklogSourceSchema, sourceWarnings, type BacklogSourceInput, type BacklogSourceSettings } from "../../shared/backlogSources.js";
 import { BacklogErrorSchema } from "../../shared/backlog.js";
 import type { ProjectService } from "../projects/projectService.js";
@@ -11,7 +11,7 @@ export function registerBacklogSettingsRoutes(app: FastifyInstance, store: Backl
   const list = async (): Promise<BacklogSettingsResponse> => {
     const file = await store.read();
     const snapshot = { read: () => Promise.resolve(file) };
-    return { sources: Object.values(file.sources).map((source): BacklogSourceSettings => ({ ...source, warnings: sourceWarnings(source, Object.values(file.sources)) })), ...(file.githubLogin === undefined ? {} : { githubLogin: file.githubLogin }), projects: await Promise.all((await projects.list()).map(async (project) => {
+    return { ...(file.suggestionsDefault === undefined ? {} : { suggestionsDefault: file.suggestionsDefault }), sources: Object.values(file.sources).map((source): BacklogSourceSettings => ({ ...source, warnings: sourceWarnings(source, Object.values(file.sources)) })), ...(file.githubLogin === undefined ? {} : { githubLogin: file.githubLogin }), projects: await Promise.all((await projects.list()).map(async (project) => {
       try { return await resolveBacklogConfig(project, () => canonicalBacklogRoot(project.path), snapshot); }
       catch { return { projectId: project.id, error: "Cannot read this project's backlog settings. Check its project folder and .forgerie/config.json, then reload." }; }
     })) };
@@ -63,6 +63,10 @@ export function registerBacklogSettingsRoutes(app: FastifyInstance, store: Backl
       await projects.requireProject(request.params.projectId);
       await store.remove(request.params.projectId, request.body.baseRevision); return { removed: true };
     } catch (error) { return reply.code(error instanceof BacklogSettingsConflict ? 409 : error instanceof BacklogSettingsUnavailable ? 503 : 400).send({ error: error instanceof Error ? error.message : "Could not remove backlog settings." }); }
+  });
+  app.put<{ Body: unknown }>("/backlog/settings/suggestions-default", async (request, reply) => {
+    try { if (!Check(BacklogSuggestionsDefaultRequestSchema, request.body)) throw new Error("Invalid suggestions model."); await store.setSuggestionsDefault(request.body.suggestionsDefault); return { saved: true }; }
+    catch (error) { return reply.code(error instanceof BacklogSettingsUnavailable ? 503 : 400).send({ error: error instanceof BacklogSettingsUnavailable ? error.message : "Invalid suggestions model." }); }
   });
   app.put<{ Body: unknown }>("/backlog/settings/github-login", async (request, reply) => {
     try { if (!Check(BacklogGitHubLoginRequestSchema, request.body)) throw new Error("Invalid GitHub username."); await store.setGitHubLogin(request.body.githubLogin); return { saved: true }; }

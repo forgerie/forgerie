@@ -90,7 +90,7 @@ export class SessionWorktrees {
   async create(cwd: string, startupToken?: string, retryId?: string, relatedSession?: SessionWorktreeRecord["relatedSession"], allocation?: { id: string; sourceCommit: string; owner: { id: string; cwd: string } }): Promise<SessionWorktreeRecord> {
     const options = await this.options(cwd);
     if (options.kind !== "git") throw new Error("Fresh worktrees require a Git project");
-    return this.exclusive(options.repo, async () => {
+    return this.withMainCheckout(options.repo, async () => {
       let record: SessionWorktreeRecord;
       const allocated = allocation === undefined ? undefined : (await this.store.list()).find((item) => item.id === allocation.id);
       const existingId = retryId ?? allocated?.id;
@@ -205,7 +205,7 @@ export class SessionWorktrees {
   async renameFromTitle(sessionId: string, title: string): Promise<void> {
     const record = (await this.store.list()).find((item) => item.sessionId === sessionId);
     if (record === undefined || record.renamed || record.state.kind !== "active") return;
-    await this.exclusive(record.repo, async () => {
+    await this.withMainCheckout(record.repo, async () => {
       const current = await this.store.require(record.id);
       if (current.renamed || current.operation !== undefined || current.state.kind !== "active") return;
       await assertOwnedCheckout(current);
@@ -229,7 +229,7 @@ export class SessionWorktrees {
 
   async land(id: string, sessions: readonly SessionFile[], actorId?: string): Promise<WorktreeActionResult> {
     const record = await this.store.require(id);
-    return this.exclusive(record.repo, async () => {
+    return this.withMainCheckout(record.repo, async () => {
       let current = await this.store.require(id);
       if (current.relatedSession !== undefined || current.childOwner !== undefined) await this.events.beforeRelatedAction?.(current, actorId);
       const related = await this.activeRelated(current);
@@ -288,7 +288,7 @@ export class SessionWorktrees {
   }
   async discard(id: string, token: string, sessions: readonly SessionFile[], actorId?: string): Promise<WorktreeActionResult> {
     const record = await this.store.require(id);
-    return this.exclusive(record.repo, async () => {
+    return this.withMainCheckout(record.repo, async () => {
       let current = await this.store.require(id);
       if (current.relatedSession !== undefined || current.childOwner !== undefined) await this.events.beforeRelatedAction?.(current, actorId);
       const related = await this.activeRelated(current);
@@ -315,7 +315,7 @@ export class SessionWorktrees {
   /** Automatic cleanup admits only owned, clean, merged checkouts with no live session. */
   async cleanupUnused(id: string, inUse: (record: SessionWorktreeRecord) => Promise<boolean>): Promise<WorktreeCleanupOutcome> {
     const record = await this.store.require(id);
-    return this.exclusive(record.repo, async () => {
+    return this.withMainCheckout(record.repo, async () => {
       const current = await this.store.require(id);
       if (current.cleanup.kind === "done") return { kind: "removed" };
       if (current.operation !== undefined) return { kind: "kept", reason: "in-use" };
@@ -355,7 +355,7 @@ export class SessionWorktrees {
 
   async archiveCleanup(id: string, sessions: readonly SessionFile[]): Promise<WorktreeArchiveCleanupResult> {
     const record = await this.store.require(id);
-    const result = await this.exclusive<WorktreeArchiveCleanupResult>(record.repo, async () => {
+    const result = await this.withMainCheckout<WorktreeArchiveCleanupResult>(record.repo, async () => {
       const current = await this.store.require(id);
       if (current.state.kind !== "active") return { kind: "retained", reason: "already-completed" };
       if ((await this.activeRelated(current)).length > 0) return { kind: "retained", reason: "related-worktrees-active" };
@@ -428,7 +428,7 @@ export class SessionWorktrees {
     this.events.publish(record);
     return record;
   }
-  private async exclusive<T>(repo: string, action: () => Promise<T>): Promise<T> {
+  async withMainCheckout<T>(repo: string, action: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(repo) ?? Promise.resolve();
     let release = (): void => undefined;
     const current = new Promise<void>((resolve) => { release = resolve; });
@@ -493,7 +493,7 @@ async function dirtyFiles(cwd: string, includeIgnored = false): Promise<string[]
 async function mainDirtyOverlap(record: SessionWorktreeRecord): Promise<string[]> {
   const [dirty, touched] = await Promise.all([dirtyFiles(record.repo), git(record.path, "diff", "--name-only", "-z", `${record.defaultBranch}...HEAD`)]);
   const paths = touched.split("\0").filter(Boolean);
-  return dirty.filter((file) => paths.some((path) => path === file || pathInside(file, path) || pathInside(path, file)));
+  return overlappingPaths(dirty, paths);
 }
 async function discardFingerprint(record: SessionWorktreeRecord, files: string[]): Promise<string> {
   const hash = createHash("sha256");
@@ -508,3 +508,7 @@ async function discardFingerprint(record: SessionWorktreeRecord, files: string[]
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function blocked(reason: string, files: string[]): WorktreeActionResult { return { kind: "blocked", reason, files }; }
+
+/** Shared with short-lived backlog commits; uses the same overlap rules as Land. */
+export async function mainCheckoutOverlaps(repo: string, paths: string[]): Promise<string[]> { return overlappingPaths(await dirtyFiles(repo), paths); }
+function overlappingPaths(dirty: string[], paths: string[]): string[] { return dirty.filter((file) => paths.some((path) => path === file || pathInside(file, path) || pathInside(path, file))); }

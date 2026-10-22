@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { BacklogSuggestionStore } from "./backlog/suggestions/suggestionStore.js";
+import { BacklogSuggestionService } from "./backlog/suggestions/suggestionService.js";
+import { registerBacklogSuggestionRoutes } from "./backlog/suggestions/suggestionRoutes.js";
 import { createProjectWorkspaceServices } from "./sessiond/projectWorkspaceServices.js";
 import { registerDecisionGatewayKeyRoutes } from "./decisions/decisionGatewayKeyRoutes.js";
 import { registerDurableTaskRoutes } from "./sessions/durableTaskRoutes.js";
@@ -289,6 +292,7 @@ async function createSessionDaemonRuntime() {
       onRunRecordError: (error) => { app.log.error({ err: error }, "durable child run record write failed"); },
       onIndexError: (error) => { app.log.warn({ err: error }, "durable child index write failed"); },
     }) }),
+    backlogSuggestions: { suggest: (cwd, sessionId, input, context) => backlogSuggestions.suggest(cwd, sessionId, input, context) },
     github: {
       actions: {
         link: (ref, run) => actionRuns.link(ref, run),
@@ -301,7 +305,7 @@ async function createSessionDaemonRuntime() {
       gateIssueLabels: (cwd, number, slug) => githubAgent.gateIssueLabels(cwd, number, slug),
       read: (cwd, request) => githubAgent.read(cwd, request),
       write: (cwd, id, request) => githubAgent.write(cwd, id, request),
-      fileIssue: (cwd, id, input) => githubAgent.fileIssue(cwd, id, input),
+      fileIssue: (cwd, id, input, repo) => githubAgent.fileIssue(cwd, id, input, repo),
       watch: (cwd, id, action, number) => action === "start" ? pulls.watch({ id, cwd }, number) : pulls.stopRef({ id, cwd }, number),
     },
     azurePr: { execute: async (cwd, id, action, number) => {
@@ -406,13 +410,20 @@ async function createSessionDaemonRuntime() {
   const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
   const backlog = new BacklogService({ settings: backlogSettings, projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
     providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
-  return { decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
+  const suggestionStore = new BacklogSuggestionStore(join(piWebDataDir(daemonEnvironment), "backlog-suggestions.json"), record => { eventHub.publishGlobal({ type: "backlog.suggestions.changed", sessionId: record.sessionId, suggestionId: record.id }); });
+  await suggestionStore.initialize();
+  const backlogSuggestions = new BacklogSuggestionService({ store: suggestionStore, projects, settings: backlogSettings, worktrees: sessionWorktrees, backlog,
+    githubRepo: async cwd => (await githubAgent.repo(cwd)).slug,
+    fileIssue: (cwd, id, input, repo) => sessions.fileBacklogIssue(cwd, id, input, repo),
+  });
+  return { backlogSuggestions, decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 
-function registerSessionDaemonRoutes({ decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
+function registerSessionDaemonRoutes({ backlogSuggestions, decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, runtimeComponent, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, worktreeCleanup, workspaceServices, childRuns }: SessionDaemonRuntime): void {
   registerDecisionGatewayKeyRoutes(app, decisionHints.gatewayKey, activeAgentProfile.revision);
   registerTriggerRoutes(app, triggers);
   registerBacklogRoutes(app, backlog);
+  registerBacklogSuggestionRoutes(app, backlogSuggestions);
   registerBacklogSettingsRoutes(app, backlogSettings, projects);
   registerGitHubRoutes(app, github);
   registerPullRequestRoutes(app, pulls);

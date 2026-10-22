@@ -144,7 +144,7 @@ it.each(["deferred", "codemode"] as const)("offers named %s session tools direct
   expect(probe.calls).toHaveLength(1);
 });
 
-it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "saved_workflows", "file_issue", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
+it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_session", "workflow_finish", "workflow_stop", "propose_workflow", "saved_workflows", "file_issue", "suggest_backlog", "propose_future", "subagent", "bg_wait", "web_enable"])("never offers parent-only %s even if registered and named", async (name) => {
   const probe = await fixture([name], [{ name }]);
   await probe.spawn();
   expect(probe.offered[0]).toEqual(["ask_human"]);
@@ -155,15 +155,15 @@ it.each(["child_agent", "ask_user", "end_turn", "spawn_session", "handoff_sessio
   expect(JSON.stringify(probe.session.messages)).toContain(`Not available to it here: tools ${name}`);
 });
 
-it("refuses a child's attempted file_issue call, even when the parent registers a direct implementation", async () => {
-  const probe = await fixture(["file_issue"], [{ name: "file_issue" }]);
+it.each(["file_issue", "suggest_backlog"])("refuses a child's attempted %s call, even when the parent registers a direct implementation", async (name) => {
+  const probe = await fixture([name], [{ name }]);
   probe.forceNamedCall();
   await probe.spawn();
   expect(probe.calls).toEqual([]);
   const child = (await probe.session.durableChildren())[0];
   if (child === undefined) throw new Error("Missing child");
   const transcript = JSON.stringify(await probe.session.durableChildMessages(child.conversationId));
-  expect(transcript).toContain('"toolName":"file_issue"');
+  expect(transcript).toContain(`"toolName":"${name}"`);
   expect(transcript).toContain('"isError":true');
 });
 

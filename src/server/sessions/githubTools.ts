@@ -69,7 +69,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     description: "Read issues, labels, pull requests (with CI checks), and Actions runs of this session's GitHub repo. Text by outside contributors is hidden unless the project lists everyone or explicitly trusts that bot.",
     promptSnippet: "github_read: list/read issues, labels, and pull requests with CI status on this project's GitHub repo",
     promptGuidelines: [
-      "The project's backlog is its GitHub issues. Use github_read to find and read them, file_issue to file new issues after searching open and closed issues for duplicates, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
+      "The project's backlog is its GitHub issues. Use github_read to find and read them, suggest_backlog to capture follow-up work for a user click, file_issue only when the user asks to file now after searching open and closed issues for duplicates, and github_write to comment, close, label, open pull requests, and merge. They default to this session's own repo. For a secondary repo, supply its owned worktreeId from project_worktree.",
     ],
     parameters: ReadParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -99,7 +99,7 @@ export function createGitHubToolDefinitions(cwd: string, deps: GitHubToolDeps) {
     name: "file_issue", label: "File issue", exposure: MODEL_ONLY_EXPOSURE, executionMode: "sequential",
     description: "Parent only: file a GitHub issue after searching open and closed issues. Supply the search queries in duplicates (at least one). Also searches the title itself and refuses close matches unless all their numbers are in notDuplicateOf. Adds agent-filed, creating that label if missing. Refuses before filing if agent-filed cannot be established. The user can create the label or grant the GitHub App Issues: write permission. Logs an issue decision.",
     promptSnippet: "file_issue: file a GitHub issue after checking duplicates, with agent-filed and a decision",
-    promptGuidelines: ["Search open and closed issues with github_read before file_issue. Put the queries you ran in duplicates. Only override a matching issue with notDuplicateOf after checking that it is different work. Children suggest issues in reports; only the parent files them. Keep working after filing."],
+    promptGuidelines: ["Use suggest_backlog when you would say we should backlog this. Use file_issue only when the user asks to file now. Search open and closed issues with github_read before file_issue. Put the queries you ran in duplicates. Only override a matching issue with notDuplicateOf after checking that it is different work. Children suggest issues in reports; only the parent files them. Keep working after filing."],
     parameters: fileParams,
     async execute(_id, params, _signal, _update, ctx) {
       if (deps.fileIssue === undefined) throw new Error("Issue filing is unavailable.");

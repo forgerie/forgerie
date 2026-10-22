@@ -1,3 +1,7 @@
+import { DurableDecisionWriter, issueDecision } from "./durableDecisionWriter.js";
+import { durableSessionPaths } from "./durableSessionJournal.js";
+import { readDurableSessionLocator } from "./durableSessionLocator.js";
+import { createBacklogSuggestionTool, type BacklogSuggestionToolDeps } from "./backlogSuggestionTool.js";
 import type { TaskActivity } from "../../shared/durableTaskActivity.js";
 import { durableBrowserMessageSchema } from "../../shared/durableBrowserSnapshot.js";
 import { z } from "zod";
@@ -865,9 +869,11 @@ export function createPiWebCustomToolDefinitions(
   projectTools?: ProjectToolDeps,
   workspaceServices?: WorkspaceServices,
   triggers?: () => TriggerService,
+  backlogSuggestions?: BacklogSuggestionToolDeps,
 ) {
   return [
     createPiWebEditToolDefinition(cwd),
+    ...(backlogSuggestions === undefined ? [] : [createBacklogSuggestionTool(cwd, backlogSuggestions)]),
     ...(triggers === undefined ? [] : [createWorkflowScheduleTool(cwd, triggers)]),
     ...(projectTools === undefined ? [] : createProjectTools(cwd, projectTools)),
     ...(workspaceServices === undefined ? [] : [createWorkspaceServicesTool(cwd, workspaceServices)]),
@@ -899,6 +905,7 @@ function createDefaultRuntimeFactory(
   processTools?: (ref: PiSessionRef, sessionDir: string) => Promise<ManagedProcessTools | undefined>,
   decisionHints?: DecisionHints,
   workflowAutonomy?: () => WorkflowAutonomy,
+  backlogSuggestions?: BacklogSuggestionToolDeps,
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
@@ -938,7 +945,7 @@ function createDefaultRuntimeFactory(
         await session.parentState.declareResponse(awaiting, durableContext, reply);
         await session.refreshParentAppState();
       },
-    }, projectTools, workspaceServices, triggers);
+    }, projectTools, workspaceServices, triggers, backlogSuggestions);
     if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
     const managedTools = await processTools?.({ id: sessionManager.getSessionId(), cwd }, sessionManager.getSessionDir());
     const session = await DurableAgentSession.open({
@@ -1046,6 +1053,7 @@ export interface PiSessionServiceDependencies {
    * project's GitHub repo, acting as Forgerie's GitHub App.
    */
   github?: GitHubToolDeps;
+  backlogSuggestions?: BacklogSuggestionToolDeps;
   azurePr?: AzurePrToolDeps;
   pullRequestWatches?: { isWatching(id: string): boolean; stop(id: string, reason?: string): Promise<unknown> };
   actionRunWatches?: { isWatching(id: string): boolean; stop(id: string, reason?: string): Promise<unknown> };
@@ -1180,6 +1188,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly createRuntime: PiWebCreateAgentSessionRuntimeFactory;
   private readonly createAgentRuntime: CreateAgentRuntime;
   private readonly modelRuntime: ModelRuntime;
+  private readonly githubTools: GitHubToolDeps | undefined;
   private readonly workspaceActivity: Pick<WorkspaceActivityService, "applySessionStatus" | "applySessionActivity" | "removeSession" | "reconcileSessionActivity"> | undefined;
   private readonly spawnTargets: SpawnTargetResolver | undefined;
   private readonly projectWorkspaces: ProjectWorkspaceCwds | undefined;
@@ -1209,6 +1218,7 @@ export class PiSessionService implements SessionRouteService {
   private unreadPublicationStopped = false;
 
   constructor(private readonly events: SessionEventHub, deps: PiSessionServiceDependencies) {
+    this.githubTools = deps.github;
     this.durableReader = deps.durableReader;
     this.childReadWorktrees = deps.durableChildAgents?.worktrees ?? deps.sessionWorktrees;
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
@@ -1266,26 +1276,7 @@ export class PiSessionService implements SessionRouteService {
       this.spawnTargets === undefined ? undefined : (input) => this.spawnSession(input),
       deps.askUserEnabled === true ? { open: (input) => this.openAsk(input) } : undefined,
       this.spawnTargets === undefined ? undefined : (input) => this.handoffSession(input),
-      deps.github === undefined ? undefined : { ...deps.github, fileIssue: async (targetCwd, id, input) => {
-        const file = deps.github?.fileIssue;
-        if (file === undefined) throw new Error("Issue filing is unavailable.");
-        const session = await this.getOrOpen(this.activeSessionRef(id));
-        if (!(session instanceof DurableAgentSession)) throw new Error("Issue filing requires a Durable parent session.");
-        const result = await file(targetCwd, id, input);
-        if (result.state === "created") {
-          // Record the known issue even when the tool will report a label attachment error.
-          try {
-            await session.journal.conversation.commit(tx => logDecision(tx, session.journal.conversation.id, {
-              id: `issue:${result.repo.toLowerCase()}:${String(result.number)}`, kind: "issue", by: "parent",
-              question: input.title, choice: `#${String(result.number)} ${result.url}`,
-              reason: `Searches run: ${input.duplicates.join("; ")}`, flagged: false,
-            }), durableContext);
-          } catch (error) {
-            throw new Error(`Filed #${String(result.number)} ${result.url}, but decision logging failed: ${error instanceof Error ? error.message : String(error)}. Do not file it again.`, { cause: error });
-          }
-        }
-        return result;
-      } },
+      deps.github === undefined ? undefined : { ...deps.github, fileIssue: (cwd, id, input) => this.fileIssueForModel(cwd, id, input) },
       deps.projectTools,
       deps.durableChildAgents,
       deps.workspaceServices,
@@ -1299,6 +1290,7 @@ export class PiSessionService implements SessionRouteService {
       },
       deps.decisionHints,
       deps.workflowAutonomy,
+      deps.backlogSuggestions,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -2780,6 +2772,48 @@ export class PiSessionService implements SessionRouteService {
     this.assertHandoffDestinationAcceptsInput(session);
     return this.runSessionEntryMutation(session, "decide a gated action", () => session.decideGatedAction(id, choice));
   }
+  /** User-approved cards must remain usable without opening or resuming their original chat. */
+  async fileBacklogIssue(targetCwd: string, id: string, input: import("../../shared/fileIssues.js").FileIssueInput, pinnedRepo: string): Promise<import("../../shared/fileIssues.js").FileIssueResult & { decisionLogWarning?: string }> {
+    const file = this.githubTools?.fileIssue;
+    if (file === undefined) throw new Error("Issue filing is unavailable.");
+    const result = await file(targetCwd, id, input, pinnedRepo);
+    if (result.state !== "created") return result;
+    try {
+      const record = { ...result, duplicates: input.duplicates };
+      const session = this.active.get(id)?.runtime.session;
+      if (session instanceof DurableAgentSession) {
+        await session.journal.conversation.commit(tx => logDecision(tx, session.journal.conversation.id, issueDecision(record)), durableContext);
+      } else {
+        const writer = new DurableDecisionWriter(async sessionId => {
+          const lens = await this.resourceEditorSession(sessionId);
+          if (lens === undefined) return undefined;
+          const ref = { id: sessionId, cwd: lens.cwd };
+          const archived = await this.getArchived(ref);
+          const readonly = await this.sessionWorktrees?.store.readOnly(ref);
+          const path = archived?.originalPath ?? readonly?.session.path ?? (await this.historySessionManager(ref)).getSessionFile();
+          return path === undefined ? undefined : readDurableSessionLocator(durableSessionPaths(path).directory);
+        });
+        await writer.logIssueDecision(id, record);
+      }
+    } catch (error) {
+      return { ...result, decisionLogWarning: `Filed #${String(result.number)} ${result.url}, but decision logging failed: ${error instanceof Error ? error.message : String(error)}. Do not file it again.` };
+    }
+    return result;
+  }
+
+  private async fileIssueForModel(targetCwd: string, id: string, input: import("../../shared/fileIssues.js").FileIssueInput): Promise<import("../../shared/fileIssues.js").FileIssueResult> {
+    const file = this.githubTools?.fileIssue;
+    if (file === undefined) throw new Error("Issue filing is unavailable.");
+    const session = await this.getOrOpen(this.activeSessionRef(id));
+    if (!(session instanceof DurableAgentSession)) throw new Error("Issue filing requires a Durable parent session.");
+    const result = await file(targetCwd, id, input);
+    if (result.state === "created") {
+      try { await session.journal.conversation.commit(tx => logDecision(tx, session.journal.conversation.id, issueDecision({ ...result, title: input.title, duplicates: input.duplicates })), durableContext); }
+      catch (error) { throw new Error(`Filed #${String(result.number)} ${result.url}, but decision logging failed: ${error instanceof Error ? error.message : String(error)}. Do not file it again.`, { cause: error }); }
+    }
+    return result;
+  }
+
   async decisions(ref: PiSessionRef) {
     const session = await this.getOrOpen(ref);
     return session instanceof DurableAgentSession ? session.decisions() : [];

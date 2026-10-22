@@ -2,7 +2,7 @@ import { claimKeyOf } from "../../shared/backlogClaimKey.js";
 import { resolveDestination } from "../../shared/backlogDestination.js";
 import { sourceWarnings } from "../../shared/backlogSources.js";
 import { GITHUB_LOGIN_WARNING } from "./githubBacklog.js";
-import type { BacklogSourceSummary, BacklogScope } from "../../shared/backlog.js";
+import type { BacklogConfig, BacklogSourceSummary, BacklogScope } from "../../shared/backlog.js";
 import type { BacklogSettingsStore } from "./backlogSettingsStore.js";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
@@ -19,7 +19,7 @@ interface BacklogDependencies {
   projects: Pick<ProjectService, "list" | "requireProject">;
   claims: BacklogClaimStore;
   userSessions: Pick<UserSessionWorktrees, "start">;
-  sessions: Pick<SessionRouteService, "stop">;
+  sessions: Pick<SessionRouteService, "stop"> & Partial<Pick<SessionRouteService, "prompt">>;
   isArchived: (sessionId: string) => Promise<boolean>;
   providers?: readonly BacklogProvider[];
   settings?: BacklogSettingsStore;
@@ -67,7 +67,7 @@ export class BacklogService {
   private rejectProjectAzure(provider: BacklogProviderId): void {
     if (provider === "azure-devops") throw new BacklogError("not-found", "Azure items are listed under their source");
   }
-  private async readEntry(address: Address, itemId: string, provider: BacklogProviderId, scope: BacklogScope): Promise<{ entry: ScannedBacklogItem; selected: Pick<BacklogProvider, "prompt" | "prepareLaunch"> }> {
+  private async readEntry(address: Address, itemId: string, provider: BacklogProviderId, scope: BacklogScope, config?: BacklogConfig): Promise<{ entry: ScannedBacklogItem; selected: Pick<BacklogProvider, "prompt" | "prepareLaunch"> }> {
     let scan: BacklogProviderScan;
     let selected: Pick<BacklogProvider, "prompt" | "prepareLaunch">;
     if (address.kind === "source") {
@@ -83,7 +83,7 @@ export class BacklogService {
       if (candidate === undefined) throw new BacklogError("not-found", `Backlog provider ${provider} is not enabled`);
       selected = candidate;
       const project = await this.requireProject(address.id);
-      scan = await scanProjectBacklog(project, await this.deps.claims.list(), [candidate], await this.scanOptions(scope));
+      scan = await scanProjectBacklog(project, await this.deps.claims.list(), [candidate], { ...await this.scanOptions(scope), ...(config === undefined ? {} : { config }) });
     }
     const failure = scan.warnings.find((warning) => warning.kind === "project-error" || warning.kind === "scan-limit"
       || warning.kind === "provider-auth" || warning.kind === "provider-install"
@@ -97,21 +97,30 @@ export class BacklogService {
     this.rejectProjectAzure(provider);
     return this.launchAddress({ kind: "project", id: projectId }, itemId, input, provider, scope);
   }
+  async launchInBackground(projectId: string, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId = DEFAULT_PROVIDER, scope: BacklogScope = "mine", config?: BacklogConfig): Promise<BacklogLaunchResponse> {
+    const prompt = this.deps.sessions.prompt;
+    if (prompt === undefined) throw new BacklogError("unavailable", "Server prompt delivery is unavailable");
+    this.rejectProjectAzure(provider);
+    const result = await this.launchAddress({ kind: "project", id: projectId }, itemId, { ...input, start: { ...input.start, destination: { kind: "fresh-worktree" } } }, provider, scope, config);
+    // Durable's prompt receipt survives restarts and suppresses repeated delivery, even after a lost HTTP response.
+    await prompt.call(this.deps.sessions, result.session, result.initialPrompt, undefined, result.images, { requestId: `backlog-${result.claim.claimId}` });
+    return result;
+  }
   launchSource(sourceId: string, itemId: string, input: BacklogLaunchRequest, scope: BacklogScope = "mine"): Promise<BacklogLaunchResponse> {
     return this.launchAddress({ kind: "source", id: sourceId }, itemId, input, "azure-devops", scope);
   }
-  private launchAddress(address: Address, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId, scope: BacklogScope): Promise<BacklogLaunchResponse> {
+  private launchAddress(address: Address, itemId: string, input: BacklogLaunchRequest, provider: BacklogProviderId, scope: BacklogScope, config?: BacklogConfig): Promise<BacklogLaunchResponse> {
     const key = JSON.stringify([address, provider, itemId, input.requestId, scope]);
     const fingerprint = createHash("sha256").update(JSON.stringify([
       input.start.cwd, input.start.modelSpec ?? null, input.start.thinkingLevel ?? null,
-      input.start.destination?.kind ?? null, input.start.setupId ?? null,
+      input.start.destination?.kind ?? null, input.start.setupId ?? null, ...(config === undefined ? [] : [config]),
     ])).digest("hex");
     const pending = this.pending.get(key);
     if (pending !== undefined) {
       if (pending.fingerprint !== fingerprint) return Promise.reject(new BacklogError("conflict", "requestId was reused with different session choices"));
       return pending.promise;
     }
-    const promise = this.launchOnce(address, provider, itemId, input, fingerprint, scope);
+    const promise = this.launchOnce(address, provider, itemId, input, fingerprint, scope, config);
     this.pending.set(key, { address, provider, itemId, fingerprint, promise });
     void promise.finally(() => { if (this.pending.get(key)?.promise === promise) this.pending.delete(key); }).catch(() => undefined);
     return promise;
@@ -144,8 +153,8 @@ export class BacklogService {
       throw error;
     }
   }
-  private async launchOnce(address: Address, provider: BacklogProviderId, itemId: string, input: BacklogLaunchRequest, fingerprint: string, scope: BacklogScope): Promise<BacklogLaunchResponse> {
-    const { entry, selected } = await this.readEntry(address, itemId, provider, scope);
+  private async launchOnce(address: Address, provider: BacklogProviderId, itemId: string, input: BacklogLaunchRequest, fingerprint: string, scope: BacklogScope, config?: BacklogConfig): Promise<BacklogLaunchResponse> {
+    const { entry, selected } = await this.readEntry(address, itemId, provider, scope, config);
     const { item } = entry;
     if (item.contested !== undefined) throw new BacklogError("conflict", item.contested.message, item.claim);
     const key = { ...(item.repo === undefined ? {} : { repo: item.repo }), provider, itemId };

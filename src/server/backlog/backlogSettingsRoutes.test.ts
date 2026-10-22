@@ -107,3 +107,26 @@ it.each(["not-json-secret", JSON.stringify({ version: 99, projects: {} })])("fai
     expect(backlog.body).not.toContain("Must not appear"); expect(settings.body).not.toContain("not-json-secret");
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it("saves global and project suggestion models without a settings migration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "suggestion-settings-")); const app = Fastify();
+  const path = join(root, "settings.json"); const store = new BacklogSettingsStore(path);
+  const project = { id: "p", name: "Project", path: root, createdAt: "today" };
+  try {
+    await writeFile(path, JSON.stringify({ version: 2, projects: {}, sources: {}, githubLogin: "octocat" }));
+    registerBacklogSettingsRoutes(app, store, { list: () => Promise.resolve([project]), requireProject: () => Promise.resolve(project) });
+    const url = "/backlog/settings/suggestions-default";
+    expect((await app.inject({ method: "PUT", url, payload: { suggestionsDefault: { modelSpec: "provider/cheap", thinkingLevel: "low" } } })).json()).toEqual({ saved: true });
+    expect((await app.inject({ url: "/backlog/settings" })).json()).toMatchObject({ githubLogin: "octocat", suggestionsDefault: { modelSpec: "provider/cheap", thinkingLevel: "low" } });
+    expect((await store.read()).version).toBe(2);
+    const invalid = await app.inject({ method: "PUT", url, payload: { suggestionsDefault: { unexpected: "no" } } });
+    expect(invalid.statusCode).toBe(400); expect(invalid.json()).toEqual({ error: "Invalid suggestions model." });
+    expect((await app.inject({ method: "PUT", url: "/backlog/settings/projects/p", payload: { baseRevision: 0, backlog: { providers: ["markdown"], suggestions: { modelSpec: "project/cheap" } } } })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/backlog/settings" })).json()).toMatchObject({ projects: [{ backlog: { suggestions: { modelSpec: "project/cheap" } } }] });
+    expect((await app.inject({ method: "PUT", url, payload: { suggestionsDefault: null } })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/backlog/settings" })).json()).not.toHaveProperty("suggestionsDefault");
+    await writeFile(path, "broken");
+    const unavailable = await app.inject({ method: "PUT", url, payload: { suggestionsDefault: {} } });
+    expect(unavailable.statusCode).toBe(503); expect(unavailable.json()).toHaveProperty("error"); expect(unavailable.json()).not.toHaveProperty("kind");
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+});

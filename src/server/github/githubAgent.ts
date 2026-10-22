@@ -165,9 +165,11 @@ export class GitHubAgent {
   }
 
   /** Search and creation share a pinned repo. Search results contain titles, never bodies. */
-  async fileIssue(cwd: string, sessionId: string, input: FileIssueInput): Promise<FileIssueResult> {
+  async fileIssue(cwd: string, sessionId: string, input: FileIssueInput, pinnedRepo?: string): Promise<FileIssueResult> {
     if (!Check(FileIssueInputSchema, input)) throw new GitHubToolError("Invalid file_issue title, body, labels, duplicate searches, or overrides.");
-    const repo = await this.resolveRepo(cwd);
+    if (pinnedRepo !== undefined && !/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/u.test(pinnedRepo)) throw new GitHubToolError("Invalid pinned issue repository");
+    const resolved = pinnedRepo === undefined || this.deps.resolveRepo !== undefined ? await this.resolveRepo(cwd) : await sessionRepo(cwd, this.deps.backlogConfig, pinnedRepo);
+    const repo = pinnedRepo === undefined ? resolved : { ...resolved, slug: pinnedRepo };
     const call = this.caller(repo.slug);
     const words = issueTitleSearchTerms(input.title);
     if (words.length === 0) throw new GitHubToolError("The issue title needs a word or number to search.");
@@ -503,11 +505,11 @@ export interface Caller {
 }
 
 /** The session's project repo: `backlog.github.repo` from the canonical checkout's config, else its github.com origin. */
-async function sessionRepo(cwd: string, config?: (root: string) => Promise<BacklogConfig>): Promise<SessionRepo> {
+async function sessionRepo(cwd: string, config?: (root: string) => Promise<BacklogConfig>, pinnedRepo?: string): Promise<SessionRepo> {
   const root = await canonicalBacklogRoot(cwd);
   const backlog = config === undefined ? (await resolveBacklogConfig({ id: root }, root)).backlog : await config(root);
   const github = backlog.github;
-  const slug = github?.repo ?? await originGitHubRepo(root);
+  const slug = pinnedRepo ?? github?.repo ?? await originGitHubRepo(root);
   if (slug === undefined) throw new GitHubToolError("This session's project has no GitHub repo. Its origin remote is not on github.com, and .forgerie/config.json sets no backlog.github.repo.");
   return { slug, everyone: github?.authors === "all", ...(github?.trustedBots === undefined ? {} : { trustedBots: github.trustedBots }) };
 }

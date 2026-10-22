@@ -1,3 +1,4 @@
+import { BacklogSuggestionModelSchema, type BacklogSuggestionModel } from "../../shared/backlogSuggestions.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -69,6 +70,14 @@ export class BacklogSettingsStore {
   }
   removeSource(id: string, baseRevision: number): Promise<void> {
     return this.exclusive(async () => { const file = await this.readUnlocked(); this.checkRevision(file.sources, id, baseRevision); this.nextRevision(file); file.sources = Object.fromEntries(Object.entries(file.sources).filter(([sourceId]) => sourceId !== id)); await this.persist(file); });
+  }
+  setSuggestionsDefault(model: BacklogSuggestionModel | null): Promise<void> {
+    return this.exclusive(async () => {
+      if (model !== null && !Check(BacklogSuggestionModelSchema, model)) throw new Error("Invalid suggestions model.");
+      const file = await this.readUnlocked(); this.nextRevision(file);
+      if (model === null) delete file.suggestionsDefault; else file.suggestionsDefault = model;
+      await this.persist(file);
+    });
   }
   setGitHubLogin(login: string | null): Promise<void> {
     return this.exclusive(async () => {

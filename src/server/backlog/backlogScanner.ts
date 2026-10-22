@@ -35,7 +35,7 @@ export async function canonicalBacklogRoot(path: string): Promise<string> {
  * `providers` is what this host can offer; the project's `backlog.providers` picks among them.
  * One failing provider does not hide another's items.
  */
-export async function scanProjectBacklog(project: Project, claims: readonly BacklogClaim[], providers: readonly BacklogProvider[] = defaultBacklogProviders, options: { settings?: Pick<BacklogSettingsStore, "read">; scope?: BacklogScope; githubLogin?: string } = {}): Promise<BacklogProviderScan> {
+export async function scanProjectBacklog(project: Project, claims: readonly BacklogClaim[], providers: readonly BacklogProvider[] = defaultBacklogProviders, options: { settings?: Pick<BacklogSettingsStore, "read">; scope?: BacklogScope; githubLogin?: string; config?: BacklogConfig } = {}): Promise<BacklogProviderScan> {
   const warnings: BacklogWarning[] = [];
   const entries: ScannedBacklogItem[] = [];
   const failed = (error: unknown, provider?: BacklogProviderId) => { warnings.push({ projectId: project.id, ...(provider === undefined ? {} : { provider }), kind: "project-error", path: project.path, message: backlogErrorMessage(error) }); };
@@ -43,9 +43,12 @@ export async function scanProjectBacklog(project: Project, claims: readonly Back
   let config: BacklogConfig | undefined;
   try {
     repo = await canonicalBacklogRoot(project.path);
-    const resolved = await resolveBacklogConfig(project, repo, options.settings);
-    config = resolved.backlog;
-    for (const message of resolved.warnings ?? []) warnings.push({ projectId: project.id, path: ".forgerie/config.json", kind: "retired-repo-azure", message });
+    if (options.config !== undefined) config = options.config;
+    else {
+      const resolved = await resolveBacklogConfig(project, repo, options.settings);
+      config = resolved.backlog;
+      for (const message of resolved.warnings ?? []) warnings.push({ projectId: project.id, path: ".forgerie/config.json", kind: "retired-repo-azure", message });
+    }
   } catch (error) { failed(error); return { entries, warnings }; }
   const enabled = new Set(config.providers ?? DEFAULT_PROJECT_PROVIDERS);
   for (const provider of providers) {

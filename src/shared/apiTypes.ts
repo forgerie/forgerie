@@ -1,3 +1,4 @@
+import type { BacklogSuggestionsChangedEvent } from "./backlogSuggestions.js";
 import type { WorkflowGlance } from "./workflowGlance.js";
 import type { AttentionHint } from "./attentionHints.js";
 import type { DecisionHintsStatus } from "./decisionHints.js";
@@ -1306,6 +1307,7 @@ type SessionUiEventBody =
   | { type: "processes.output"; id: string; lines: ManagedProcessLogLine[]; droppedLines: number; cursor?: ManagedProcessOutputCursor };
 
 export type GlobalSessionEvent =
+  | BacklogSuggestionsChangedEvent
   | TriggersChangedEvent
   | Extract<SessionUiEventBody, { type: "status.update" | "activity.update" | "session.name" | "session.pinned" | "session.tabs" | "session.created" | "session.pull-request" | "session.pull-request.unlinked" | "session.action-run" | "session.action-run.unlinked" }>
   | SessionNotificationSummaryEvent

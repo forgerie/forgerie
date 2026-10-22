@@ -1,6 +1,8 @@
 # Filing GitHub issues
 
-Only the parent uses `file_issue`. A child suggests issues in its report.
+Use `file_issue` only when the user asks to file now. For “we should backlog this”,
+use [`suggest_backlog`](backlog-suggestions.md). It saves a card without filing.
+Only the parent uses these tools. A child suggests items in its report.
 Search open and closed issues with `github_read` first. Filing does not ask the
 user to approve a card and does not end the turn. The old `propose_issue` tool
 and create/dismiss routes are removed. `github_write` still cannot create issues.

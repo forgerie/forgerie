@@ -42,6 +42,7 @@ export interface SessionServiceDependencyInput {
   /** Durable child agents; omitted when the operator has not enabled them. */
   durableChildAgents?: NonNullable<PiSessionServiceDependencies["durableChildAgents"]>;
   /** GitHub work on each session's own repo, as Forgerie's GitHub App. */
+  backlogSuggestions?: PiSessionServiceDependencies["backlogSuggestions"];
   github: NonNullable<PiSessionServiceDependencies["github"]>;
   azurePr?: PiSessionServiceDependencies["azurePr"];
   actionRunWatches?: PiSessionServiceDependencies["actionRunWatches"];
@@ -86,6 +87,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     codemodeEnabled: input.codemodeEnabled,
     ...(input.durableChildAgents === undefined ? {} : { durableChildAgents: input.durableChildAgents }),
     github: input.github,
+    ...(input.backlogSuggestions === undefined ? {} : { backlogSuggestions: input.backlogSuggestions }),
     ...(input.azurePr === undefined ? {} : { azurePr: input.azurePr }),
     ...(input.actionRunWatches === undefined ? {} : { actionRunWatches: input.actionRunWatches }),
     ...(input.pullRequestWatches === undefined ? {} : { pullRequestWatches: input.pullRequestWatches }),

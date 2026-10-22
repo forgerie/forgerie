@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { BacklogSuggestionModelSchema } from "./backlogSuggestions.js";
 import { UserSessionStartSchema } from "./sessionWorktree.js";
 
 const text = Type.String({ minLength: 1, maxLength: 4096 });
@@ -21,6 +22,7 @@ export const BacklogAzureDevopsConfigSchema = Type.Object({
 export type BacklogAzureDevopsConfig = Static<typeof BacklogAzureDevopsConfigSchema>;
 export const BacklogConfigSchema = Type.Object({
   dir: Type.Optional(text),
+  suggestions: Type.Optional(BacklogSuggestionModelSchema),
   /** Providers this project lists. Omitted means markdown only. */
   providers: Type.Optional(Type.Array(Type.Union([Type.Literal("markdown"), Type.Literal("github"), Type.Literal("azure-devops")]), { minItems: 1, maxItems: 3, uniqueItems: true })),
   github: Type.Optional(BacklogGitHubConfigSchema),
@@ -31,7 +33,7 @@ export type BacklogConfig = Static<typeof BacklogConfigSchema>;
 /** Retire legacy Azure sections without changing the project-owned provider configuration. */
 export function projectOwnedBacklog(backlog: BacklogConfig): BacklogConfig & { providers: NonNullable<BacklogConfig["providers"]> } {
   const { providers } = backlog;
-  const rest = { ...(backlog.dir === undefined ? {} : { dir: backlog.dir }), ...(backlog.github === undefined ? {} : { github: backlog.github }) };
+  const rest = { ...(backlog.suggestions === undefined ? {} : { suggestions: backlog.suggestions }), ...(backlog.dir === undefined ? {} : { dir: backlog.dir }), ...(backlog.github === undefined ? {} : { github: backlog.github }) };
   const enabled = providers?.filter((provider) => provider !== "azure-devops");
   return { ...rest, ...(enabled === undefined || enabled.length === 0 ? { providers: ["markdown"] } : { providers: enabled }) };
 }

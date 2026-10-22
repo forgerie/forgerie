@@ -109,7 +109,7 @@ recover after restart. See [Azure credentials and their security costs](azure-de
 Open **Settings → Backlog** to set each project's Markdown and GitHub providers
 and to manage standalone Azure DevOps **Sources**. The server saves settings in
 `<data dir>/backlog-settings.json` (version 2, private mode `0600`, atomic writes).
-The file contains `projects`, `sources`, an optional `githubLogin`, and a
+The file contains `projects`, `sources`, optional `githubLogin` and `suggestionsDefault` fields, and a
 file-wide revision sequence.
 
 A per-project override wins over the canonical checkout's `.forgerie/config.json`
@@ -118,6 +118,22 @@ the override. With neither section, Forgerie reads Markdown from
 `.forgerie/backlog/`. A saved override has an explicit, non-empty `providers`
 list containing Markdown, GitHub, or both. Turning off a provider leaves files
 and remote items unchanged.
+
+[Backlog suggestions](backlog-suggestions.md) capture follow-up work for a user click.
+The first resolved project provider receives the item. Azure sources are read-only.
+
+Global background-session defaults use `suggestionsDefault`, for example
+`{ "modelSpec": "provider/model-id", "thinkingLevel": "low" }`.
+`GET /api/backlog/settings` returns it next to `githubLogin`.
+Save with `PUT /api/backlog/settings/suggestions-default` and
+`{ "suggestionsDefault": { "modelSpec": "provider/model-id" } }`;
+use `null` to remove the global default.
+
+Per-project `backlog.suggestions` has the same shape. Save it through the existing
+project settings route or the repo file. For each model/thinking choice, a launch
+request override wins, then the project value, then the global value, then the
+source chat's value. A suggestion stores its resolved defaults when created.
+These optional fields do not require a settings version bump or a new migration.
 
 The same project GitHub settings work in a saved override or in the repo file:
 
@@ -179,7 +195,7 @@ An unreadable, malformed, invalid, or failed-to-migrate `backlog-settings.json`
 stops all backlog reads and shows the same recovery message in Settings.
 Forgerie never silently falls back to repo files or overwrites the damaged file.
 Restore it from a valid backup, or remove it, then reload. Removing the file
-discards all Forgerie backlog overrides, Azure sources, and the GitHub username;
+discards all Forgerie backlog overrides, Azure sources, suggestion model defaults, and the GitHub username;
 only project-owned repo-file/default providers apply again.
 
 The optional `githubLogin` is a username, not a credential. Without it, Mine

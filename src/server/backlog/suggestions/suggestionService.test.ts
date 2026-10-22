@@ -1,0 +1,167 @@
+import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { describe, it, expect } from "vitest";
+import Fastify from "fastify";
+import { Check } from "typebox/value";
+import { Type } from "typebox";
+import { GitHubAgent } from "../../github/githubAgent.js";
+import { BacklogSuggestionSchema, type BacklogSuggestion, type BacklogSuggestionsResponse } from "../../../shared/backlogSuggestions.js";
+import type { UserSessionStart } from "../../../shared/sessionWorktree.js";
+import type { SessionInfo } from "../../../shared/apiTypes.js";
+import { BacklogSuggestionService } from "./suggestionService.js";
+import { BacklogSuggestionStore } from "./suggestionStore.js";
+import { BacklogSettingsStore } from "../backlogSettingsStore.js";
+import { BacklogService } from "../backlogService.js";
+import { BacklogClaimStore } from "../backlogClaimStore.js";
+import { registerBacklogSuggestionRoutes } from "./suggestionRoutes.js";
+import { repository } from "./suggestionTestSupport.js";
+
+const input = { title: "Improve launch recovery", body: "Keep the first prompt.", why: "A gap came up", files: ["src/launch.ts"], decisions: ["Use receipts"] };
+const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/owner/repo/issues/${String(number)}`, user: { login: "owner" }, author_association: "OWNER", labels, updated_at: "2026-10-20T00:00:00Z", comments: 0 });
+function inMemoryGitHub(gitResolution = false) {
+  const writes: { url: string; body: unknown }[] = []; const labels = new Set<string>();
+  const agent = new GitHubAgent({ ...(gitResolution ? { backlogConfig: () => Promise.resolve({ providers: ["markdown" as const] }) } : { resolveRepo: () => Promise.resolve({ slug: "changed/repo", everyone: true }) }), trust: { judge: () => Promise.resolve(() => true) },
+    app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, status: () => ({ state: "not-configured" }) },
+    fetch: (url, init) => {
+      const method = init?.method ?? "GET";
+      const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+      if (url.includes("/search/issues")) return Promise.resolve(json({ total_count: 1, items: [issue(7, "fix: Improve launch recovery")], incomplete_results: false }));
+      if (method === "GET" && url.includes("/labels")) return Promise.resolve(json([...labels].map(name => ({ name, description: null }))));
+      const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); writes.push({ url, body });
+      if (url.endsWith("/labels")) { labels.add("agent-filed"); return Promise.resolve(json({ name: "agent-filed", description: "Agent filed" }, 201)); }
+      if (url.endsWith("/issues") && Check(Type.Object({ title: Type.String(), labels: Type.Array(Type.String()) }), body)) return Promise.resolve(json(issue(20, body.title, body.labels), 201));
+      throw new Error(`Unexpected in-memory API call ${method} ${url}`);
+    },
+  });
+  return { agent, writes };
+}
+async function fixture() {
+  const repo = await repository(); const events: BacklogSuggestion[] = [];
+  const store = new BacklogSuggestionStore(join(repo.root, ".git/suggestions.json"), record => events.push(record)); await store.initialize();
+  const settings = new BacklogSettingsStore(join(repo.root, ".git/settings.json"));
+  const projects = { list: () => Promise.resolve([repo.project]), requireProject: () => Promise.resolve(repo.project) };
+  const claims = new BacklogClaimStore(join(repo.root, ".git/claims.json")); await claims.initialize();
+  const starts: UserSessionStart[] = []; const prompts: { id: string; text: unknown; requestId?: string | undefined }[] = [];
+  let launchError = false;
+  const backlog = new BacklogService({ projects, claims, settings, userSessions: { start: start => {
+    if (launchError) throw new Error("Configured launch failure");
+    starts.push(start);
+    const session: SessionInfo = { id: "background", cwd: repo.root, path: join(repo.root, ".git/background.jsonl"), created: "today", modified: "today", messageCount: 0, firstMessage: "" };
+    return Promise.resolve(session);
+  } }, sessions: { stop: () => Promise.resolve(), prompt: (ref, text, _behavior, _images, options) => { prompts.push({ id: ref.id, text, ...options }); return Promise.resolve(); } }, isArchived: () => Promise.resolve(false) });
+  const github = inMemoryGitHub();
+  const service = new BacklogSuggestionService({ store, projects, settings, worktrees: repo.worktrees, backlog, githubRepo: () => Promise.resolve("owner/repo"), fileIssue: (cwd, sessionId, input, slug) => github.agent.fileIssue(cwd, sessionId, input, slug) });
+  return { ...repo, store, settings, service, starts, prompts, events, github, backlog, failLaunch: (fail: boolean) => { launchError = fail; } };
+}
+
+describe("backlog suggestions", () => {
+  it("resolves the first project-owned provider and model defaults once, and notes routed Azure sources", async () => {
+    const f = await fixture();
+    try {
+      await f.settings.setSuggestionsDefault({ modelSpec: "global/cheap", thinkingLevel: "low" });
+      await f.settings.save("project", { providers: ["github", "markdown"], github: { repo: "owner/pinned" }, suggestions: { modelSpec: "project/cheap" } }, 0);
+      await f.settings.createSource({ organization: "org", project: "board", destinationProjectId: "project" });
+      const record = await f.service.suggest(f.root, "chat", input, { sessionTitle: "Chat", modelSpec: "chat/large", thinkingLevel: "high" });
+      expect(record.destination).toEqual({ provider: "github", repo: "owner/pinned", label: "agent-filed" });
+      expect(record.defaultModel).toEqual({ modelSpec: "project/cheap", thinkingLevel: "low" }); expect(record.azureReadOnlyNote).toBe(true);
+      await f.settings.save("project", { providers: ["markdown"] }, (await f.settings.read()).projects["project"]?.revision ?? 0);
+      expect(f.service.list()[0]?.destination).toEqual(record.destination);
+      expect((await f.service.suggest(f.root, "chat", input)).destination.provider).toBe("markdown");
+    } finally { await f.dispose(); }
+  });
+  it("keeps repo-config suggestion defaults when retiring Azure, and falls back to the current chat model", async () => {
+    const f = await fixture();
+    try {
+      await mkdir(join(f.root, ".forgerie"));
+      await writeFile(join(f.root, ".forgerie/config.json"), JSON.stringify({ version: 1, backlog: { providers: ["azure-devops", "github"], suggestions: { thinkingLevel: "medium" } } }));
+      const record = await f.service.suggest(f.root, "chat", input, { modelSpec: "chat/large", thinkingLevel: "high" });
+      expect(record.destination).toEqual({ provider: "github", repo: "owner/repo", label: "agent-filed" });
+      expect(record.defaultModel).toEqual({ modelSpec: "chat/large", thinkingLevel: "medium" });
+    } finally { await f.dispose(); }
+  });
+  it("uses GitHub duplicate refusal, explicit File anyway, pinned repo, and agent-filed", async () => {
+    const f = await fixture();
+    try {
+      await f.settings.save("project", { providers: ["github"] }, 0);
+      const record = await f.service.suggest(f.root, "chat", input);
+      const refused = await f.service.file(record.id, "file", { requestId: "refuse" });
+      expect(refused.state).toMatchObject({ kind: "duplicate", matches: [{ number: 7 }] }); expect(f.github.writes).toEqual([]);
+      const filed = await f.service.file(record.id, "file", { requestId: "anyway", notDuplicateOf: [7], body: "Different work after review" });
+      expect(filed.state).toMatchObject({ kind: "filed", provider: "github", number: 20 });
+      const write = f.github.writes.find(write => write.url.endsWith("/issues"));
+      expect(write?.url).toBe("https://api.github.com/repos/owner/repo/issues");
+      expect(write?.body).toMatchObject({ labels: ["agent-filed"], title: input.title });
+      expect(JSON.stringify(write?.body)).toContain("## Context");
+      expect(await f.service.file(record.id, "file", { requestId: "anyway", notDuplicateOf: [7], body: "Different work after review" })).toEqual(filed);
+      expect(f.github.writes.filter(write => write.url.endsWith("/issues"))).toHaveLength(1);
+      await expect(f.service.file(record.id, "file", { requestId: "anyway", title: "Changed" })).rejects.toThrow("reused");
+    } finally { await f.dispose(); }
+  });
+  it("files to the stored GitHub repo even if current config and origin no longer supply a repo", async () => {
+    const repo = await repository();
+    try {
+      const github = inMemoryGitHub(true);
+      expect(await github.agent.fileIssue(repo.root, "chat", { title: input.title, body: input.body, duplicates: [input.title] }, "owner/pinned")).toMatchObject({ state: "duplicate", repo: "owner/pinned" });
+    } finally { await repo.dispose(); }
+  });
+  it("files before background launch, sends the prompt from the server, and never starts a second session on a repeated request", async () => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input, { modelSpec: "chat/large", thinkingLevel: "high" });
+      const request = { requestId: "act", modelSpec: "override/cheap", thinkingLevel: "low" };
+      const [started, repeated] = await Promise.all([f.service.file(record.id, "file-and-act", request), f.service.file(record.id, "file-and-act", request)]);
+      expect(started).toEqual(repeated); expect(started.state).toMatchObject({ kind: "started", sessionId: "background", modelSpec: "override/cheap", thinkingLevel: "low" });
+      expect(f.starts).toHaveLength(1); expect(f.starts[0]).toMatchObject({ destination: { kind: "fresh-worktree" }, modelSpec: "override/cheap" });
+      expect(f.prompts).toHaveLength(1); expect(f.prompts[0]?.text).toContain("Use receipts"); expect(f.prompts[0]?.requestId).toMatch(/^backlog-/u);
+      if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
+      expect(await readFile(join(f.root, record.destination.path), "utf8")).toContain("Keep the first prompt");
+      const restartedStore = new BacklogSuggestionStore(join(f.root, ".git/suggestions.json")); await restartedStore.initialize();
+      expect(restartedStore.receipt(record.id, "act")?.result).toEqual(started);
+    } finally { await f.dispose(); }
+  });
+  it("keeps a filed receipt on launch failure; a new Start session request launches without filing again", async () => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      // A saved suggestion remains launchable from its original directory after settings change.
+      await f.settings.save("project", { providers: ["markdown"], dir: "different-backlog" }, 0);
+      f.failLaunch(true);
+      const failed = await f.service.file(record.id, "file-and-act", { requestId: "first" });
+      expect(failed.state).toMatchObject({ kind: "filed", launchError: { message: "Configured launch failure", retryable: true } });
+      f.failLaunch(false);
+      const started = await f.service.file(record.id, "file-and-act", { requestId: "start-only" });
+      expect(started.state.kind).toBe("started"); expect(f.starts).toHaveLength(1);
+      expect(f.events.filter(record => record.state.kind === "filing")).toHaveLength(1);
+    } finally { await f.dispose(); }
+  });
+  it("validates complete content before filing, so an oversized override leaves the card open", async () => {
+    const f = await fixture();
+    try {
+      await f.settings.save("project", { providers: ["github"] }, 0);
+      const record = await f.service.suggest(f.root, "chat", { ...input, decisions: ["x".repeat(4096), "x".repeat(4096), "x".repeat(4096), "x".repeat(4096), "x".repeat(4096)] });
+      await expect(f.service.file(record.id, "file", { requestId: "too-large", body: "x".repeat(48000) })).rejects.toMatchObject({ kind: "invalid-request" });
+      expect(f.store.require(record.id).state.kind).toBe("open"); expect(f.github.writes).toEqual([]);
+    } finally { await f.dispose(); }
+  });
+  it("serves typed routes, filters records, and rejects wrong states and malformed bodies with BacklogError", async () => {
+    const f = await fixture(); const app = Fastify(); registerBacklogSuggestionRoutes(app, f.service, "/api");
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      const url = `/api/backlog/suggestions/${record.id}`;
+      expect((await app.inject({ method: "POST", url: `${url}/restore`, payload: {} })).statusCode).toBe(409);
+      expect((await app.inject({ method: "POST", url: `${url}/dismiss`, payload: { unexpected: true } })).statusCode).toBe(400);
+      const dismissed = await app.inject({ method: "POST", url: `${url}/dismiss`, payload: {} });
+      expect(dismissed.statusCode).toBe(200); expect(Check(BacklogSuggestionSchema, dismissed.json())).toBe(true);
+      const list = await app.inject({ url: "/api/backlog/suggestions?sessionId=chat&state=dismissed" }); expect(list.json<BacklogSuggestionsResponse>().suggestions).toHaveLength(1);
+      expect((await app.inject({ url: "/api/backlog/suggestions?sessionId=another" })).json()).toEqual({ suggestions: [] });
+      expect((await app.inject({ url: "/api/backlog/suggestions?state=unknown" })).statusCode).toBe(400);
+      expect((await app.inject({ method: "POST", url: `${url}/file`, payload: { requestId: "wrong" } })).statusCode).toBe(409);
+      expect((await app.inject({ method: "POST", url: `${url}/restore`, payload: {} })).statusCode).toBe(200);
+      expect((await app.inject({ method: "POST", url: `${url}/file`, payload: { requestId: "file", modelSpec: "not/accepted" } })).statusCode).toBe(400);
+      const filed = await app.inject({ method: "POST", url: `${url}/file`, payload: { requestId: "file" } });
+      expect(filed.statusCode).toBe(200); expect(filed.json<BacklogSuggestion>().state.kind).toBe("filed"); expect(f.starts).toEqual([]); expect(f.prompts).toEqual([]);
+      expect((await app.inject({ method: "POST", url: `${url}/file`, payload: { requestId: "again" } })).json()).toMatchObject({ kind: "conflict" });
+      expect((await app.inject({ method: "POST", url: `${url}/file`, payload: { requestId: "file" } })).json()).toEqual(filed.json());
+    } finally { await app.close(); await f.dispose(); }
+  });
+});
