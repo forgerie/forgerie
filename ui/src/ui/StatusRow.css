@@ -34,6 +34,7 @@
 .status-row[data-tone="waiting"] .status-row-status { font-weight: 600; }
 .status-row[data-tone="retrying"] .status-row-status { color: var(--ink-warn); font-weight: 500; font-variant-numeric: tabular-nums; }
 .status-row[data-tone="failed"] .status-row-status { color: var(--ink-bad); font-weight: 500; }
+.status-row-go { flex: none; color: var(--foreground); font-size: var(--small-text); font-weight: 500; }
 .status-row-chevron { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
 .status-row-below, .status-row-actions { padding-inline: calc(var(--status-lead) + var(--space-1)) var(--space-2); }
 .status-row-below { display: grid; gap: var(--space-1); padding-block-end: var(--space-2); margin-block-start: calc(-1 * var(--space-1));

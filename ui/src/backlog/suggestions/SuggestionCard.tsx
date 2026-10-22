@@ -107,7 +107,7 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
     const line = <>{filed.lead}{filed.code ? <> <code>{filed.code}</code></> : null}{filed.tail ? ` ${filed.tail}` : null}</>;
     const run = state.kind === "started" && background ? <StatusRow tone={background.tone} mark="block"
       name={modelWords(modelFromSpec(state.modelSpec, knownModels)) ?? "Background session"} detail={background.name} status={background.status} meta={background.time}
-      label={`Open the background session${background.name ? `, ${background.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : null;
+      go="Open" label={`Open the background session${background.name ? `, ${background.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : null;
     const launchError = state.kind === "filed" ? state.launchError : undefined;
     const detail = <>
       {run}

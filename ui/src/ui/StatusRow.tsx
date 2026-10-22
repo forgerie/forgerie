@@ -21,7 +21,7 @@ export interface StatusRowAction { label: string; onPress: () => void; disabled?
  * Content under the row stays readable without opening it, and actions sit
  * under that, outside the row's own press.
  */
-export function StatusRow({ tone, mark = "dot", name, detail, status, meta, label, onPress, below, actions = [] }: {
+export function StatusRow({ tone, mark = "dot", name, detail, status, meta, label, onPress, below, actions = [], go }: {
   tone: StatusTone;
   /** block: the row counts one unit of work. dot: the row reports a state. */
   mark?: "block" | "dot";
@@ -30,8 +30,10 @@ export function StatusRow({ tone, mark = "dot", name, detail, status, meta, labe
   status: string;
   /** A quiet readout after the status, such as a cost or an age. */
   meta?: string | undefined;
-  /** Accessible name of the row's action. */
+  /** Accessible name of the row's action. It should start with `go` when `go` is set, so the visible word is in the name. */
   label: string;
+  /** The row's press in one visible word at its end, such as Open, in place of the chevron. Still one control. */
+  go?: string | undefined;
   onPress: () => void;
   /** Content under the row that stays readable without opening it, such as a question. */
   below?: ReactNode;
@@ -46,7 +48,7 @@ export function StatusRow({ tone, mark = "dot", name, detail, status, meta, labe
         <span className="status-row-status">{status}</span>
         {meta && <span className="status-row-meta">{meta}</span>}
       </span>
-      <ChevronRightIcon className="status-row-chevron" aria-hidden />
+      {go === undefined ? <ChevronRightIcon className="status-row-chevron" aria-hidden /> : <span className="status-row-go">{go}</span>}
     </button>
     {below !== undefined && <div className="status-row-below">{below}</div>}
     {actions.length > 0 && <div className="status-row-actions">{actions.map((action) => <button key={action.label} type="button"

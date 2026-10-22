@@ -87,7 +87,7 @@ export function SuggestionsSheet({ suggestions, readError, pending, problems, dr
         onPress={() => actions.onFileAndAct(suggestion.id)} /> : undefined}
       below={state.kind === "started" && run ? <StatusRow tone={run.tone} mark="block"
         name={modelWords(modelFromSpec(state.modelSpec, knownModels)) ?? "Background session"} detail={run.name} status={run.status} meta={run.time}
-        label={`Open the background session${run.name ? `, ${run.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : undefined} />;
+        go="Open" label={`Open the background session${run.name ? `, ${run.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : undefined} />;
   };
   const dismissedRow = (suggestion: Suggestion) => <PendingRow key={suggestion.id} tone="quiet" title={title(suggestion)} onShow={show(suggestion)} showLabel="Show in chat"
     detail={problems[suggestion.id] ?? "Dismissed"} detailTone={problems[suggestion.id] ? "bad" : undefined}

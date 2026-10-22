@@ -17,3 +17,7 @@ export function Retrying() {
   return <StatusRow tone="retrying" name="api" detail="worker" status="Next try in 1 min 40 s" label="Open api"
     onPress={() => {}} below={<p>{'Retrying 2 of 3: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'}</p>} />;
 }
+export function NamedPress() {
+  return <StatusRow tone="working" mark="block" name="Claude Haiku 4.5" detail="Retry once when the stream drops" status="Working" meta="3m" go="Open"
+    label="Open the background session, Retry once when the stream drops" onPress={() => {}} />;
+}

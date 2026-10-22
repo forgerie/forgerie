@@ -97,7 +97,10 @@ describe("the card shows the server's record in every state", () => {
     expect(text()).toContain("Filed as #214");
     expect(text()).toContain("Claude Haiku 4.5");
     expect(text()).toContain("Working");
-    expect(button("Open the background session, Retry once when the provider stream drops")).toBeDefined();
+    // The row is the one control that opens the session, and it shows the word Open at its end.
+    const row = button("Open the background session, Retry once when the provider stream drops")!;
+    expect(row.querySelector(".status-row-go")?.textContent).toBe("Open");
+    expect([...card().querySelectorAll("button")].filter((node) => node.textContent?.includes("Open"))).toEqual([row]);
   });
 
   it("started: a session that needs the reader, and one that is done", async () => {
