@@ -25,7 +25,7 @@ describe("backlog suggestion store", () => {
   it("fails closed on damaged storage and marks interrupted filing as unsafe to replay", async () => {
     const root = await mkdtemp(join(tmpdir(), "suggestions-store-")); const path = join(root, "records.json");
     try {
-      const store = new BacklogSuggestionStore(path); await store.create(suggestion({ state: { kind: "filing", action: "file" } }));
+      const store = new BacklogSuggestionStore(path); await store.create(suggestion({ destination: { provider: "github", repo: "owner/repo", label: "agent-filed" }, state: { kind: "filing", action: "file" } }));
       const reopened = new BacklogSuggestionStore(path); await reopened.initialize();
       expect(reopened.require("suggestion").state).toMatchObject({ kind: "failed", retryable: false });
       await writeFile(path, "private broken data");

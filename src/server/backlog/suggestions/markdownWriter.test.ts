@@ -7,8 +7,8 @@ import { git, repository, suggestion } from "./suggestionTestSupport.js";
 
 async function expectNoScratch(root: string) {
   expect((await git(root, "worktree", "list", "--porcelain")).split("worktree ").length).toBe(2);
-  expect(await git(root, "branch", "--list", "backlog-*")).toBe("");
-  expect(await readdir(join(root, ".worktrees")).catch(() => [])).toEqual([]);
+  expect(await git(root, "branch", "--list", "forgerie-backlog-scratch/*")).toBe("");
+  expect(await readdir(join(root, ".worktrees/forgerie-backlog-scratch")).catch(() => [])).toEqual([]);
 }
 describe("Markdown suggestion filing", () => {
   it("commits with the user's identity, fast-forwards main and leaves no uncommitted item or scratch branch", async () => {
@@ -18,7 +18,7 @@ describe("Markdown suggestion filing", () => {
       expect(await writeMarkdownSuggestion(repo.worktrees, repo.project, record)).toMatchObject({ kind: "filed", provider: "markdown" });
       const file = record.destination.provider === "markdown" ? record.destination.path : "";
       const item = parseBacklogItem(await readFile(join(repo.root, file), "utf8"));
-      expect(item.metadata).toMatchObject({ id: "2026-10-20-improve-launch-recovery", title: record.title, status: "To Do", created: "2026-10-20", source: "forgerie-suggestion chat" });
+      expect(item.metadata).toMatchObject({ id: "2026-10-20-improve-launch-recovery", title: record.title, status: "To Do", created: "2026-10-20", source: "forgerie-suggestion chat/suggestion" });
       expect(item.body).toContain("## Context"); expect(item.body).toContain("src/launch.ts"); expect(item.body).toContain("Use durable receipts"); expect(item.body).toContain("Suggested in Main work (chat), 2026-10-20");
       expect(await git(repo.root, "rev-parse", "HEAD^")).toBe(before);
       expect(await git(repo.root, "log", "-1", "--format=%an <%ae>%n%s")).toBe("Backlog User <backlog@example.test>\nchore(backlog): add Improve launch recovery");

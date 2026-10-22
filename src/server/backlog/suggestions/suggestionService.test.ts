@@ -14,7 +14,9 @@ import { BacklogSettingsStore } from "../backlogSettingsStore.js";
 import { BacklogService } from "../backlogService.js";
 import { BacklogClaimStore } from "../backlogClaimStore.js";
 import { registerBacklogSuggestionRoutes } from "./suggestionRoutes.js";
-import { repository } from "./suggestionTestSupport.js";
+import { backlogScratchIdentity, backlogScratchIndexDirectory } from "./markdownScratch.js";
+import { markdownSuggestionContent } from "./markdownWriter.js";
+import { git, repository } from "./suggestionTestSupport.js";
 
 const input = { title: "Improve launch recovery", body: "Keep the first prompt.", why: "A gap came up", files: ["src/launch.ts"], decisions: ["Use receipts"] };
 const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/owner/repo/issues/${String(number)}`, user: { login: "owner" }, author_association: "OWNER", labels, updated_at: "2026-10-20T00:00:00Z", comments: 0 });
@@ -132,6 +134,66 @@ describe("backlog suggestions", () => {
       const started = await f.service.file(record.id, "file-and-act", { requestId: "start-only" });
       expect(started.state.kind).toBe("started"); expect(f.starts).toHaveLength(1);
       expect(f.events.filter(record => record.state.kind === "filing")).toHaveLength(1);
+    } finally { await f.dispose(); }
+  });
+  it("allocates and persists a new Markdown path for a closed same-title collision", async () => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
+      const path = record.destination.path; await mkdir(join(f.root, ".forgerie/backlog"), { recursive: true });
+      const closed = "---\nid: closed\ntitle: Improve launch recovery\nstatus: Done\nsource: manual\n---\nOld work\n";
+      await writeFile(join(f.root, path), closed); await git(f.root, "add", path); await git(f.root, "commit", "-m", "closed item");
+      const filed = await f.service.file(record.id, "file", { requestId: "new-path" });
+      expect(filed.destination).toEqual({ provider: "markdown", path: path.replace(/\.md$/u, "-2.md") });
+      expect(await readFile(join(f.root, path), "utf8")).toBe(closed);
+      expect(f.events.some(event => event.state.kind === "filing" && event.destination.provider === "markdown" && event.destination.path.endsWith("-2.md"))).toBe(true);
+      expect(await readFile(join(f.root, path.replace(/\.md$/u, "-2.md")), "utf8")).toContain(`source: forgerie-suggestion chat/${record.id}`);
+    } finally { await f.dispose(); }
+  });
+  it.each([false, true])("recovers process death after scratch creation (fast-forward=%s), without leftovers or duplicate sessions", async afterFastForward => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
+      const request = { requestId: "crash", modelSpec: "override/cheap" };
+      await f.store.update({ ...record, state: { kind: "filing", action: "file-and-act" } }, { suggestionId: record.id, requestId: "crash", fingerprint: "interrupted-fingerprint", action: "file-and-act", input: request });
+      const scratch = backlogScratchIdentity(f.root, record.id);
+      await git(f.root, "worktree", "add", "-b", scratch.branch, scratch.path, "main");
+      await mkdir(join(scratch.path, ".forgerie/backlog"), { recursive: true });
+      await writeFile(join(scratch.path, record.destination.path), markdownSuggestionContent(record, record.destination.path));
+      await git(scratch.path, "add", record.destination.path); await git(scratch.path, "commit", "-m", "interrupted item write");
+      if (afterFastForward) await git(f.root, "merge", "--ff-only", scratch.branch);
+      const indexDirectory = await backlogScratchIndexDirectory(f.root, record.id); await mkdir(indexDirectory, { recursive: true }); await writeFile(join(indexDirectory, "item"), "private item bytes");
+      // Simulate death before the state write: only the persisted filing record and Git artifacts survive.
+      await f.store.initialize(); await f.service.recoverStartup();
+      expect(await git(f.root, "branch", "--list", "forgerie-backlog-scratch/*")).toBe("");
+      expect(await git(f.root, "worktree", "list", "--porcelain")).not.toContain(scratch.path);
+      const recovered = f.store.require(record.id);
+      expect(recovered.state).toMatchObject(afterFastForward ? { kind: "started", modelSpec: "override/cheap" } : { kind: "failed", retryable: true });
+      await expect(readFile(join(indexDirectory, "item"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(f.store.pendingReceipt(record.id)).toBeUndefined();
+      expect(f.starts).toHaveLength(afterFastForward ? 1 : 0);
+      await f.service.recoverStartup(); expect(f.starts).toHaveLength(afterFastForward ? 1 : 0);
+    } finally { await f.dispose(); }
+  });
+  it("does not recover or launch an unrelated closed item, and sweeps orphan private scratch without touching ordinary worktrees", async () => {
+    const f = await fixture();
+    try {
+      const record = await f.service.suggest(f.root, "chat", input);
+      if (record.destination.provider !== "markdown") throw new Error("Expected Markdown");
+      await mkdir(join(f.root, ".forgerie/backlog"), { recursive: true });
+      await writeFile(join(f.root, record.destination.path), "---\nid: closed\ntitle: Improve launch recovery\nstatus: Done\nsource: manual\n---\nUnrelated\n");
+      await git(f.root, "add", record.destination.path); await git(f.root, "commit", "-m", "unrelated closed item");
+      await f.store.update({ ...record, state: { kind: "filing", action: "file-and-act" } }, { suggestionId: record.id, requestId: "crash", fingerprint: "fp", action: "file-and-act", input: { requestId: "crash" } });
+      const orphan = backlogScratchIdentity(f.root, "orphan");
+      await git(f.root, "worktree", "add", "-b", orphan.branch, orphan.path, "main");
+      const ordinary = join(f.root, ".worktrees/ordinary"); await git(f.root, "worktree", "add", "-b", "keep-ordinary", ordinary, "main");
+      await f.store.initialize(); await f.service.recoverStartup();
+      expect(f.store.require(record.id).state).toMatchObject({ kind: "failed", retryable: true }); expect(f.starts).toEqual([]);
+      expect(await git(f.root, "branch", "--list", "forgerie-backlog-scratch/*")).toBe("");
+      expect(await git(f.root, "worktree", "list", "--porcelain")).toContain(ordinary);
+      expect(await git(f.root, "branch", "--list", "keep-ordinary")).toContain("keep-ordinary");
     } finally { await f.dispose(); }
   });
   it("validates complete content before filing, so an oversized override leaves the card open", async () => {

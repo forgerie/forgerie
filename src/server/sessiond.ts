@@ -372,6 +372,17 @@ async function createSessionDaemonRuntime() {
     },
     onError: (error, sessionId) => { app.log.error({ err: error, sessionId }, "action run watch failed"); },
   });
+  const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
+  const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
+  const backlog = new BacklogService({ settings: backlogSettings, projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
+    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
+  const suggestionStore = new BacklogSuggestionStore(join(piWebDataDir(daemonEnvironment), "backlog-suggestions.json"), record => { eventHub.publishGlobal({ type: "backlog.suggestions.changed", sessionId: record.sessionId, suggestionId: record.id }); });
+  await suggestionStore.initialize();
+  const backlogSuggestions = new BacklogSuggestionService({ store: suggestionStore, projects, settings: backlogSettings, worktrees: sessionWorktrees, backlog,
+    onRecoveryError: (projectId, error) => { app.log.warn({ err: error, projectId }, "backlog scratch recovery blocked; restore this Git project and restart sessiond"); },
+    githubRepo: async cwd => (await githubAgent.repo(cwd)).slug,
+    fileIssue: (cwd, id, input, repo) => sessions.fileBacklogIssue(cwd, id, input, repo),
+  });
   const triggerWorkflows = new WorkflowLibrary(activeAgentProfile.dir);
   const triggers: TriggerService = await TriggerService.open({
     env: daemonEnvironment, workflows: triggerWorkflows, workspaces: projectWorkspaces,
@@ -397,7 +408,6 @@ async function createSessionDaemonRuntime() {
     activeAgentProfile,
   });
   await sessions.initializeManagedProcesses();
-  const userSessions = new UserSessionWorktrees(sessionWorktrees, sessions);
   const worktreeCleanup = new WorktreeCleanupJob({
     worktrees: sessionWorktrees,
     async inUse(record) {
@@ -407,15 +417,7 @@ async function createSessionDaemonRuntime() {
     },
     onError: (error) => { app.log.warn({ err: error }, "worktree cleanup failed"); },
   });
-  const azureItems = new AzureDevopsClient({ credentials: azureCredentials, fetch });
-  const backlog = new BacklogService({ settings: backlogSettings, projects, claims: backlogClaims, userSessions, sessions, isArchived: (id) => archiveStore.isArchived(id),
-    providers: [markdownBacklogProvider, createGitHubBacklogProvider({ issues: githubIssues })], sourceProvider: createAzureDevopsBacklogProvider(azureItems) });
-  const suggestionStore = new BacklogSuggestionStore(join(piWebDataDir(daemonEnvironment), "backlog-suggestions.json"), record => { eventHub.publishGlobal({ type: "backlog.suggestions.changed", sessionId: record.sessionId, suggestionId: record.id }); });
-  await suggestionStore.initialize();
-  const backlogSuggestions = new BacklogSuggestionService({ store: suggestionStore, projects, settings: backlogSettings, worktrees: sessionWorktrees, backlog,
-    githubRepo: async cwd => (await githubAgent.repo(cwd)).slug,
-    fileIssue: (cwd, id, input, repo) => sessions.fileBacklogIssue(cwd, id, input, repo),
-  });
+  await backlogSuggestions.recoverStartup();
   return { backlogSuggestions, decisionHints, triggers, eventHub, workspaceActivity, sessions, sessionSearch, unreadStore, activeAgentProfile, runtimeComponent, catalogRefresher, promptResources, promptLibrary, resourceEditor, userSessions, backlog, backlogSettings, github, pulls, actionRuns, groups, relatedWork, projects, liveChildren, worktreeCleanup, workspaceServices, childRuns };
 }
 

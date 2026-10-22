@@ -3,10 +3,10 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { BacklogSuggestionSchema, type BacklogSuggestion } from "../../../shared/backlogSuggestions.js";
+import { BacklogSuggestionActRequestSchema, BacklogSuggestionSchema, type BacklogSuggestion } from "../../../shared/backlogSuggestions.js";
 import { BacklogError, isMissingFile } from "../backlogError.js";
 
-const ReceiptSchema = Type.Object({ suggestionId: Type.String(), requestId: Type.String(), fingerprint: Type.String(), result: Type.Optional(BacklogSuggestionSchema) }, { additionalProperties: false });
+const ReceiptSchema = Type.Object({ suggestionId: Type.String(), requestId: Type.String(), fingerprint: Type.String(), action: Type.Optional(Type.Union([Type.Literal("file"), Type.Literal("file-and-act")])), input: Type.Optional(BacklogSuggestionActRequestSchema), result: Type.Optional(BacklogSuggestionSchema) }, { additionalProperties: false });
 type Receipt = Static<typeof ReceiptSchema>;
 const FileSchema = Type.Object({ version: Type.Literal(1), suggestions: Type.Array(BacklogSuggestionSchema), requests: Type.Array(ReceiptSchema) }, { additionalProperties: false });
 type File = Static<typeof FileSchema>;
@@ -22,8 +22,8 @@ export class BacklogSuggestionStore {
     if (!Check(FileSchema, value)) throw new Error("Invalid backlog suggestions file; it has not been overwritten");
     if (new Set(value.suggestions.map(record => record.id)).size !== value.suggestions.length) throw new Error("Duplicate backlog suggestion IDs");
     this.file = value;
-    // External writes cannot be replayed safely after an unclean shutdown. Never silently file twice.
-    for (const record of value.suggestions.filter(record => record.state.kind === "filing")) {
+    // GitHub writes cannot be proved locally. Markdown recovery verifies Git before changing these records.
+    for (const record of value.suggestions.filter(record => record.state.kind === "filing" && record.destination.provider === "github")) {
       await this.update({ ...record, state: { kind: "failed", message: "Filing was interrupted. Inspect the destination before dismissing and suggesting again.", retryable: false } });
     }
   }
@@ -34,6 +34,7 @@ export class BacklogSuggestionStore {
     return structuredClone(record);
   }
   receipt(suggestionId: string, requestId: string): Receipt | undefined { return structuredClone(this.file.requests.find(receipt => receipt.suggestionId === suggestionId && receipt.requestId === requestId)); }
+  pendingReceipt(suggestionId: string): Receipt | undefined { return structuredClone(this.file.requests.filter(receipt => receipt.suggestionId === suggestionId && receipt.result === undefined).at(-1)); }
   create(record: BacklogSuggestion): Promise<BacklogSuggestion> { return this.mutate(file => {
     if (file.suggestions.some(value => value.id === record.id)) throw new BacklogError("conflict", "Suggestion already exists");
     file.suggestions.push(record); return record;

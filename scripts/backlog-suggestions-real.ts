@@ -76,7 +76,11 @@ let closing = false;
 async function close() { if (closing) return; closing = true; await app.close(); await sessions.dispose(); await rm(join(agentDir, "models.json"), { force: true }); }
 process.once("SIGTERM", () => { void close(); }); process.once("SIGINT", () => { void close(); });
 async function assistantSaid(ref: { id: string; cwd: string }, marker: string): Promise<boolean> {
-  return (await sessions.messages(ref)).messages.some(message => typeof message === "object" && message !== null && "role" in message && message.role === "assistant" && JSON.stringify(message).includes(marker));
+  return (await sessions.messages(ref)).messages.some(message => {
+    if (typeof message !== "object" || message === null || !("role" in message) || message.role !== "assistant" || !("content" in message)) return false;
+    const content = message.content;
+    return typeof content === "string" ? content.includes(marker) : Array.isArray(content) && content.some((part: unknown) => typeof part === "object" && part !== null && "type" in part && part.type === "text" && "text" in part && typeof part.text === "string" && part.text.includes(marker));
+  });
 }
 async function until(what: string, check: () => Promise<boolean>) {
   const deadline = Date.now() + 300000;

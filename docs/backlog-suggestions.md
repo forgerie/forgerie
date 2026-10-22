@@ -31,18 +31,20 @@ read-only. If an Azure source routes to the project, `azureReadOnlyNote` is true
 Later settings changes do not redirect an existing suggestion.
 
 Markdown uses `backlog.dir`, default `.forgerie/backlog/`. The saved destination
-includes `<YYYY-MM-DD>-<slug>.md`; changing the title on File does not change that
-identity. Frontmatter contains `id`, `title`, `status: To Do`, `created`, and
-`source: forgerie-suggestion <sessionId>`.
+starts with `<YYYY-MM-DD>-<slug>.md`; a collision with an existing closed item
+allocates `-2.md`, `-3.md`, and so on. The chosen path is stored before committing.
+Changing the title on File does not otherwise change that identity. Frontmatter contains `id`, `title`, `status: To Do`, `created`, and
+`source: forgerie-suggestion <sessionId>/<suggestionId>`.
 
-Filing uses a scratch worktree under `.worktrees/` from the local default branch.
+Filing uses a scratch worktree under `.worktrees/forgerie-backlog-scratch/<suggestionId>` from the local default branch.
 A private Git index and `commit-tree` create the commit before a checkout holds
 the item. This avoids even a temporary uncommitted item in a checkout. The commit
 uses the user's Git identity and `chore(backlog): add <title>`. The writer uses the
 same per-main-checkout queue and dirty-path overlap rule as Land. Main must be on
 the default branch. Unrelated dirty main files are allowed. The writer fast-forwards
-main, removes its scratch worktree and branch, and never pushes. A path collision
-fails without overwriting an item. Open Markdown duplicates use the same title
+main and never pushes. It removes scratch files, worktree, and branch before the
+fast-forward, so a cleanup failure cannot leave an item on main. Existing paths
+are never overwritten. Open Markdown duplicates use the same title
 rule as `file_issue`; the writer checks them before writing.
 
 GitHub uses `githubAgent.fileIssue` against the saved repo, checks duplicates, and
@@ -69,9 +71,19 @@ mode `0600`, revisions, and durable request receipts. It keeps suggestions and
 request results, not a second background-session status store. Background status
 comes from the normal session list.
 
-If a process stops during filing, startup marks that operation failed and unsafe
-to retry automatically. Inspect the destination before suggesting again. A lost
-GitHub creation response is ambiguous and is not automatically retried. If filing
+On startup, Forgerie sweeps its reserved `forgerie-backlog-scratch/` branch
+namespace, matching scratch worktrees, and private Git index files. For an
+interrupted Markdown filing, it checks the default branch's item with
+`parseBacklogItem` and requires the exact unique `source`. A match becomes filed;
+a pending File and act continues only launch, with its saved model override.
+Without a verified item, state becomes retryable failed. A pre-existing closed
+same-title file is not a filing receipt. Orphan scratch with no filing record is
+also removed. Ordinary worktrees and branches are never swept. If a project
+cannot be read, startup logs a recovery warning. Restore its folder/default
+branch and restart sessiond to finish that project's recovery.
+
+A lost GitHub creation response is ambiguous. Startup marks that filing unsafe;
+inspect GitHub before suggesting again. It is not automatically retried. If filing
 succeeds but launch fails, state stays `filed` with `launchError`; a new request can
 retry only launch. Durable prompt request IDs prevent a repeated initial prompt.
 
