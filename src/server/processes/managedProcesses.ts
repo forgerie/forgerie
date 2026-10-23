@@ -6,7 +6,7 @@ import lockfile from "proper-lockfile";
 import { managedProcessEnvironment } from "./managedProcessEnvironment.js";
 import { atomicWrite, hasCode, readResult } from "./managedProcessFiles.js";
 import { prepareProcessFiles, writeProcessInput } from "./managedProcessIo.js";
-import { ManagedProcessLog, type ManagedProcessLogBatch, type ManagedProcessLogCursor, type ManagedProcessLogReadOptions, type ManagedProcessLogTail } from "./managedProcessLog.js";
+import { ManagedProcessLog, ManagedProcessLogTruncatedError, type ManagedProcessLogBatch, type ManagedProcessLogCursor, type ManagedProcessLogReadOptions, type ManagedProcessLogTail } from "./managedProcessLog.js";
 import {
   managedProcessRecordSchema, managedProcessStartSchema, ManagedProcessLaunchError,
   type ManagedProcessInputResult, type ManagedProcessLauncher, type ManagedProcessRecord,
@@ -126,7 +126,7 @@ export class ManagedProcesses {
   readOutput(id: string, options?: ManagedProcessLogReadOptions): Promise<ManagedProcessLogBatch> {
     return this.exclusive(async () => {
       const snapshot = await this.classify(await this.record(id));
-      return this.log(snapshot).read(snapshot.state.kind !== "running", options);
+      return this.withLog(snapshot, (log) => log.read(snapshot.state.kind !== "running", options));
     });
   }
   /**
@@ -137,22 +137,23 @@ export class ManagedProcesses {
   readTail(id: string, maxLines: number): Promise<ManagedProcessLogBatch> {
     return this.exclusive(async () => {
       const snapshot = await this.classify(await this.record(id));
-      return this.log(snapshot).readTail(snapshot.state.kind !== "running", maxLines);
+      return this.withLog(snapshot, (log) => log.readTail(snapshot.state.kind !== "running", maxLines));
     });
   }
   /** Read only the newest 4 KiB line suffix without consuming the event reader. */
   lastOutput(id: string): Promise<ManagedProcessLogTail | null> {
-    return this.exclusive(async () => this.log(await this.record(id)).tail());
+    return this.exclusive(async () => this.withLog(await this.record(id), (log) => log.tail()));
   }
   /** Acknowledge only after consumers durably accepted the returned batch. */
   acknowledgeOutput(id: string, cursor: ManagedProcessLogCursor): Promise<void> {
-    return this.exclusive(async () => { await this.log(await this.record(id)).acknowledge(cursor); });
+    // After a discard the reader is already at the end of the remaining log, so nothing is left to acknowledge.
+    return this.exclusive(async () => this.withLog(await this.record(id), (log) => log.acknowledge(cursor), () => Promise.resolve()));
   }
   /** Only IDs whose terminal events are durably spooled may be reclaimed. Exits after that scan wait for the next pass. */
   maintain(spooledFinished: readonly string[] = []): Promise<void> {
     return this.exclusive(async () => {
       await this.removeFinished(50, new Set(spooledFinished));
-      for (const record of await this.snapshots()) await this.log(record).maintain();
+      for (const record of await this.snapshots()) await this.withLog(record, (log) => log.maintain());
     });
   }
   async dispose(): Promise<void> {
@@ -186,6 +187,23 @@ export class ManagedProcesses {
     return removed.map(({ record }) => record.id);
   }
   private log(record: ManagedProcessRecord): ManagedProcessLog { return new ManagedProcessLog(record.directory, this.options.logCapBytes); }
+  /**
+   * A truncated log must not make a whole session unusable. A process that ended or was lost
+   * never writes again, so its unreadable output is dropped and the operation runs once more
+   * (or `retry` runs instead). A running process can still append, so its truncation stays an error.
+   * The extra classification runs only on that error path.
+   */
+  private async withLog<T>(record: ManagedProcessRecord | ManagedProcessSnapshot, operation: (log: ManagedProcessLog) => Promise<T>, retry = operation): Promise<T> {
+    const log = this.log(record);
+    try { return await operation(log); }
+    catch (error) {
+      if (!(error instanceof ManagedProcessLogTruncatedError)) throw error;
+      const snapshot = "state" in record ? record : await this.classify(record);
+      if (snapshot.state.kind === "running") throw error;
+      await log.discardTruncated();
+      return retry(log);
+    }
+  }
   private async record(id: string): Promise<ManagedProcessRecord> {
     managedProcessRecordSchema.shape.id.parse(id);
     const directory = join(this.directory, id);

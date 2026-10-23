@@ -225,6 +225,43 @@ describe("managed processes", () => {
     } finally { await second.dispose(); }
   });
 
+  it("drops the output of a lost process whose log a crash emptied, so the session still opens", async () => {
+    const root = await directory(); const { launcher, live } = controlledLauncher();
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "crash", launcher });
+    await manager.initialize();
+    try {
+      const record = await manager.start({ id: "one", command: "cat", cwd: root });
+      await writeFile(join(record.directory, "output.log"), "first\nsecond\n");
+      const batch = await manager.readOutput("one");
+      await manager.acknowledgeOutput("one", batch.cursor);
+      // A power cut loses the log's data blocks but keeps the saved reader and the pending cursor.
+      await writeFile(join(record.directory, "output.log"), "");
+      live.delete("one");
+      await manager.maintain();
+      expect(await manager.lastOutput("one")).toBeNull();
+      await expect(manager.acknowledgeOutput("one", batch.cursor)).resolves.toBeUndefined();
+      const browse = await manager.readOutput("one", { cursor: { offset: 0, line: 1 } });
+      expect(browse).toEqual({ lines: [], cursor: { offset: 0, line: 3 }, droppedLines: 2 });
+      expect((await manager.readTail("one", 10)).lines).toEqual([]);
+      expect((await manager.status("one")).state.kind).toBe("lost");
+    } finally { await manager.dispose(); }
+  });
+
+  it("keeps a truncated log of a running process an error", async () => {
+    const root = await directory(); const { launcher } = controlledLauncher();
+    const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "live-cut", launcher });
+    await manager.initialize();
+    try {
+      const record = await manager.start({ id: "one", command: "cat", cwd: root });
+      await writeFile(join(record.directory, "output.log"), "first\n");
+      await manager.acknowledgeOutput("one", (await manager.readOutput("one")).cursor);
+      await writeFile(join(record.directory, "output.log"), "");
+      await expect(manager.maintain()).rejects.toThrow("externally truncated");
+      await expect(manager.readOutput("one")).rejects.toThrow("externally truncated");
+      expect(JSON.parse(await readFile(join(record.directory, "read-position.json"), "utf8"))).toMatchObject({ read: { offset: 6, line: 2 } });
+    } finally { await manager.dispose(); }
+  });
+
   it("does not classify manager inspection failures as lost", async () => {
     const root = await directory(); const { launcher } = controlledLauncher();
     const manager = new ManagedProcesses({ stateDirectory: root, sessionId: "errors", launcher });

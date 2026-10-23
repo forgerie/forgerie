@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -14,6 +14,10 @@ const stateSchema = z.object({
   reclaimed: z.number().int().nonnegative().optional(),
 });
 type LogState = z.infer<typeof stateSchema>;
+/** The log is shorter than its saved positions. Only outside damage does this, such as writes lost in a power cut. */
+export class ManagedProcessLogTruncatedError extends Error {
+  constructor() { super("Managed process log was externally truncated"); this.name = "ManagedProcessLogTruncatedError"; }
+}
 export interface ManagedProcessLogReadOptions {
   maxLines?: number;
   /** Omit for the durable read position; use {offset: 0, line: 1} to browse retained output. */
@@ -44,7 +48,8 @@ export class ManagedProcessLog {
       const size = Math.min((await file.stat()).size, state.base.offset + this.capBytes);
       if (position.offset > size) throw new Error("Managed process log cursor is beyond output");
       let offset = Math.max(position.offset, state.base.offset);
-      let line = position.offset < state.base.offset ? state.base.line : position.line;
+      // At the base offset the base line wins. They differ only after discardTruncated() moved the base.
+      let line = position.offset <= state.base.offset ? state.base.line : position.line;
       let truncatedStart = offset === state.base.offset && state.partial;
       // One snapshot per call. Appends after this size belong to the next call.
       const buffer = Buffer.alloc(Math.min(64 * 1024, size - offset));
@@ -149,7 +154,7 @@ export class ManagedProcessLog {
     const file = await open(join(this.directory, "output.log"), "r");
     try {
       const size = (await file.stat()).size;
-      if (size < state.base.offset || size < state.read.offset) throw new Error("Managed process log was externally truncated");
+      if (size < state.base.offset || size < state.read.offset) throw new ManagedProcessLogTruncatedError();
       const base = Math.max(state.base.offset, size - this.capBytes);
       if (size === base) return null;
       // Allow a trailing newline and the preceding byte to identify a complete 4 KiB line.
@@ -177,7 +182,10 @@ export class ManagedProcessLog {
     const state = await this.load();
     const file = await open(join(this.directory, "output.log"), "r");
     try {
-      if (cursor.offset > (await file.stat()).size || cursor.offset < state.read.offset || cursor.line < state.read.line) throw new Error("Invalid managed process log acknowledgement");
+      const size = (await file.stat()).size;
+      // A cursor beyond the output was read from bytes that are gone: the log shrank, like a saved position would.
+      if (size < state.base.offset || size < state.read.offset || cursor.offset > size) throw new ManagedProcessLogTruncatedError();
+      if (cursor.offset < state.read.offset || cursor.line < state.read.line) throw new Error("Invalid managed process log acknowledgement");
     } finally { await file.close(); }
     state.read = cursor;
     await this.save(state);
@@ -188,7 +196,7 @@ export class ManagedProcessLog {
     const file = await open(path, "r");
     try {
       const size = (await file.stat()).size;
-      if (size < state.base.offset || size < state.read.offset) throw new Error("Managed process log was externally truncated");
+      if (size < state.base.offset || size < state.read.offset) throw new ManagedProcessLogTruncatedError();
       const cutoff = Math.max(state.base.offset, size - this.capBytes);
       const loadedBase = state.base.offset;
       const buffer = Buffer.alloc(64 * 1024);
@@ -224,6 +232,21 @@ export class ManagedProcessLog {
       }
       return state;
     } finally { await file.close(); }
+  }
+  /**
+   * Only for a process that can no longer write. If the log is shorter than its saved positions,
+   * drop what is left: those bytes no longer match the saved line numbers. Base and reader move
+   * to the end of the file with the highest saved line number, so line numbers never go back and
+   * every earlier line reads as dropped. Returns false and changes nothing when the log is intact.
+   */
+  async discardTruncated(): Promise<boolean> {
+    const state = await this.load();
+    const size = (await stat(join(this.directory, "output.log"))).size;
+    if (size >= state.base.offset && size >= state.read.offset) return false;
+    const end = { offset: size, line: Math.max(state.base.line, state.read.line) };
+    // Omit reclaimed: the next maintenance pass punches the dropped prefix again, which is harmless.
+    await this.save({ version: 1, base: end, partial: false, read: { ...end } });
+    return true;
   }
   private async punch(path: string, length: number): Promise<void> {
     await execute("fallocate", ["--punch-hole", "--keep-size", "--offset", "0", "--length", String(length), path], { timeout: 30_000 });

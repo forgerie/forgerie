@@ -39,6 +39,21 @@ describe("managed process log retention", () => {
     }
     expect((await log.read(true, { cursor })).lines).toEqual([]);
   });
+  it("discards a truncated log at its end with the highest saved line, and leaves an intact log alone", async () => {
+    const { file, directory, log } = await setup(1024);
+    await writeFile(file, "one\ntwo\nthree\n");
+    await log.acknowledge((await log.read(true)).cursor);
+    expect(await log.discardTruncated()).toBe(false);
+    expect(JSON.parse(await readFile(join(directory, "read-position.json"), "utf8"))).toMatchObject({ read: { offset: 14, line: 4 } });
+    await writeFile(file, "one\n");
+    await expect(log.maintain()).rejects.toThrow("externally truncated");
+    expect(await log.discardTruncated()).toBe(true);
+    expect(JSON.parse(await readFile(join(directory, "read-position.json"), "utf8")))
+      .toEqual({ version: 1, base: { offset: 4, line: 4 }, partial: false, read: { offset: 4, line: 4 } });
+    expect(await log.read(true, { cursor: { offset: 0, line: 1 } })).toEqual({ lines: [], cursor: { offset: 4, line: 4 }, droppedLines: 3 });
+    await appendFile(file, "four\n");
+    expect((await log.read(true)).lines).toEqual([{ number: 4, text: "four", terminated: true, truncatedStart: false }]);
+  });
   it("joins long lines across chunks without splitting UTF-8 or advancing an unfinished line", async () => {
     const { file, log } = await setup(1024 * 1024);
     const first = "x".repeat(64 * 1024 - 1) + "😀" + "y".repeat(64 * 1024);
