@@ -14,7 +14,35 @@ import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import type { WorkflowRun } from "../../shared/workflowRuns.js";
-import { associateWorkflowChild, autoStopFailureAdvice, decideWorkflowStop, proposeWorkflow, requestWorkflowStop, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
+import { associateWorkflowChild, autoStopFailureAdvice, closeProposalsOnReply, decideWorkflowProposal, decideWorkflowStop, openWorkflowProposals, proposeWorkflow, requestWorkflowStop, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
+
+it("closes an open proposal when the user replies, and leaves decided proposals as they were", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-proposal-reply-"));
+  const manager = SessionManager.create(directory, directory);
+  manager.appendMessage(fauxAssistantMessage("Prior context"));
+  const models = createModels();
+  const provider = fauxProvider();
+  models.setProvider(provider.provider);
+  provider.setResponses([fauxAssistantMessage("Waiting.")]);
+  const registry = createRegistry();
+  registry.install(workflowExtension());
+  const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" } } });
+  try {
+    const parent = journal.conversation.id;
+    const args = (name: string) => ({ name, summary: "Plan this task.", text: "---\nworkflow: {version: 1}\n---\nWait for review.\n", basis: { kind: "new" as const, reason: "No saved workflow fits." } });
+    await journal.conversation.commit((tx) => closeProposalsOnReply(tx, parent, 1), context);
+    expect(await workflowProposals(journal.harness, parent, context)).toEqual([]);
+    await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:dismissed", args("dismissed-one")), context);
+    await decideWorkflowProposal(journal.harness, journal.conversation, "p:dismissed", "dismissed", undefined, context);
+    await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:open", args("open-one")), context);
+    expect(await openWorkflowProposals(journal.harness, parent, context)).toBe(1);
+    await journal.conversation.commit((tx) => closeProposalsOnReply(tx, parent, 42), context);
+    expect(await openWorkflowProposals(journal.harness, parent, context)).toBe(0);
+    const states = Object.fromEntries((await workflowProposals(journal.harness, parent, context)).map((proposal) => [proposal.id, proposal.state]));
+    expect(states["p:open"]).toEqual({ kind: "replied", decidedAt: 42 });
+    expect(states["p:dismissed"]).toMatchObject({ kind: "dismissed" });
+  } finally { await journal.close(); await rm(directory, { recursive: true, force: true }); }
+});
 
 it("replays a proposal without another entry and commits Start's run and decision together", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-proposal-commit-"));

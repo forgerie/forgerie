@@ -71,7 +71,7 @@ The card's kicker says where the plan comes from: **Based on** a saved workflow'
 | **Ask for changes** | Requires a note. Closes the proposal and delivers the note to the agent once. The agent revises and proposes again. |
 | **Dismiss** | Closes the proposal without waking the agent. |
 
-A new proposal closes every earlier open proposal as **Replaced**. The tool validates the same frontmatter, prose, route, and inputs as a saved workflow. It refuses scripted workflows and proposals during an active run. Only the user starts the run.
+A message you send in the chat closes every open proposal as **Closed when you replied in the chat**, so the session leaves **Needs your response**. The card can no longer start that plan; ask the agent to propose it again. A message that an extension sends does not close a proposal. A new proposal closes every earlier open proposal as **Replaced**. The tool validates the same frontmatter, prose, route, and inputs as a saved workflow. It refuses scripted workflows and proposals during an active run. Only the user starts the run.
 
 The proposal lives in a Durable document. Start records the run and the proposal's decision in one commit. The run's source path is `proposal:<proposalId>`, not a filesystem path. Retrying Start with the same request ID and inputs returns the accepted run. No prompt file is read or written. There is no action to save a proposal to the library or edit its text in the browser. Proposal records have no automatic expiry; they remain in the session's storage and add to its size. Reopening a session restores its open proposals and waiting count without a model turn. Startup recovery currently selects unfinished runs, not idle sessions that have only an open proposal.
 

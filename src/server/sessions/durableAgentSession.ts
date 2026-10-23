@@ -51,7 +51,7 @@ import { DurableChildRunRecords } from "./durableChildRunRecords.js";
 import { isKnownThinkingLevel } from "../../shared/thinkingLevels.js";
 import { decisionExtension, decisions, confirmDecision, overturnDecision, flaggedDecisions, decisionsChanged } from "./durableDecisions.js";
 import { WorkflowLibrary } from "../resources/workflowLibrary.js";
-import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, activeWorkflowGlance, acknowledgeWorkflowStall, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals, LAND_CHILDREN_SETTLE_MS } from "./durableWorkflowRuns.js";
+import { cancelWorkflow, workflowExtension, setWorkflowWorkerModel, launchWorkflow, workflowRuns, finishWorkflow, activeWorkflowRun, workflowActiveFromCommit, workflowRunsChanged, decideWorkflowStop, notifyAutoStopFailed, waitingWorkflowDecisions, activeWorkflowGlance, acknowledgeWorkflowStall, closeProposalsOnReply, workflowProposals, startWorkflowProposal, decideWorkflowProposal, doWorkflowProposalHere, openWorkflowProposals, LAND_CHILDREN_SETTLE_MS } from "./durableWorkflowRuns.js";
 import { hostEntryText, isHostEntryKind } from "./durableHostEntries.js";
 import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
@@ -824,8 +824,12 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.systemPrompt = await buildSdkSystemPrompt(before.systemPromptOptions);
     for (const message of before.messages) await this.sendCustomMessage(message);
     const content = images === undefined || images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
-    // Only the user's own messages pass here. One answers a stalled run's flag.
-    await this.journal.conversation.commit((tx) => acknowledgeWorkflowStall(tx, this.journal.conversation.id), context);
+    // Only the user's own messages pass here. One answers a stalled run's flag and closes any open proposal.
+    await this.journal.conversation.commit(async (tx) => {
+      await acknowledgeWorkflowStall(tx, this.journal.conversation.id);
+      // An extension's sendUserMessage is not the user answering a card.
+      if (options?.source !== "extension") await closeProposalsOnReply(tx, this.journal.conversation.id);
+    }, context);
     const submission = await this.journal.conversation.submit({ type: "input", content, ...(options?.requestId === undefined ? {} : { requestId: options.requestId }), ...(options?.streamingBehavior === undefined ? { whenBusy: "reject" as const } : { whenBusy: options.streamingBehavior }) }, context);
     await this.receivePromptSubmission(submission, options?.preflightResult);
   }

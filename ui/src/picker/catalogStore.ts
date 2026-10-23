@@ -30,6 +30,7 @@ const toStatus = (status: WireStatus): PickerStatus => ({
   workflow: status.workflow,
   workingAgents: status.workingAgents, runningProcesses: status.runningProcesses,
   needsResponse: status.response === undefined ? undefined : requestsResponse(status.response),
+  declaredNothing: status.response === undefined ? undefined : status.response.kind === "none",
   watchingPullRequest: status.watchingPullRequest,
   attentionHint: status.attentionHint,
   // A flagged decision waits on nobody (docs/adr/0001), so it is counted but never makes the session blocked.

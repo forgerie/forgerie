@@ -77,6 +77,8 @@ let modelWork: (() => Promise<void>) | undefined;
 let repairLand = false;
 const modelRequests: { name: string; model: string; phase: string }[] = [];
 let proposalInputs: Record<string, string | boolean | number> = {};
+/** The agent keeps working after its next proposal, so the proposal is open while the parent is busy. */
+let workAfterProposal = false;
 let proposalName = "task-plan";
 let proposalBasis: JsonObject = { kind: "new", reason: "No saved workflow fits." };
 let proposalSummary = "Build and review this task.";
@@ -119,8 +121,8 @@ const route: FauxResponseFactory = (context, options, _state, model) => {
     if (said.includes("asked for changes to the proposal")) proposalChanges++;
     return call("propose_workflow", { name: proposalName, summary: proposalSummary, text: proposalText, inputs: proposalInputs, basis: proposalBasis });
   }
+  if (workAfterProposal && last?.role === "toolResult" && last.toolName === "propose_workflow") { workAfterProposal = false; return call("bash", { command: "sleep 1" }); }
   if (last?.role === "user" && said.startsWith("LIST-SAVED")) return call("saved_workflows", said === "LIST-SAVED" ? {} : { name: said.slice("LIST-SAVED ".length) });
-  if (last?.role === "user" && said === "BUSY") return call("bash", { command: "sleep 1" });
   if (last?.role === "toolResult" && last.isError && context.messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content) === "PROPOSE")) proposalErrors.push(said);
   const commits = context.messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).startsWith("CHILD-COMMIT"));
   const spawnAlpha = () => call("child_agent", { action: "spawn", name: "alpha", message: "CHILD-COMMIT", isolation: "worktree" });
@@ -174,7 +176,7 @@ function runBody(value: unknown): WorkflowRun {
   return value;
 }
 beforeEach(async () => {
-  proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; proposalName = "task-plan"; proposalSummary = "Build and review this task."; proposalBasis = { kind: "new", reason: "No saved workflow fits." };
+  proposalText = staged; proposalChanges = 0; proposalErrors.length = 0; proposalInputs = {}; workAfterProposal = false; proposalName = "task-plan"; proposalSummary = "Build and review this task."; proposalBasis = { kind: "new", reason: "No saved workflow fits." };
   modelAgent = undefined; modelArgument = "faux/faux-1"; modelThinking.length = 0; modelWork = undefined; repairLand = false; modelRequests.length = 0;
   errors.length = 0; started = 0; sequence = 0; autoComplete = false; worktrees = undefined; isolate = false; autonomy = undefined;
   root = await mkdtemp(join(tmpdir(), "forgerie-workflow-runs-"));
@@ -1004,7 +1006,7 @@ describe("temporary workflow proposals through Durable sessions and HTTP", () =>
     });
   };
 
-  it("proposes, counts waiting, replaces, freezes a start, retries, and holds at the first stop without a file", async () => {
+  it("proposes, counts waiting, closes on the user's reply, freezes a start, retries, and holds at the first stop without a file", async () => {
     const server = app();
     try {
       const ref = { id: (await service.start(root)).id, cwd: root };
@@ -1018,7 +1020,9 @@ describe("temporary workflow proposals through Durable sessions and HTTP", () =>
       const second = await propose(ref);
       const list = await server.inject({ url: `/sessions/${ref.id}/workflow-proposals?cwd=${encodeURIComponent(root)}` });
       expect(list.statusCode).toBe(200);
-      expect(list.json()).toMatchObject([{ id: second.id }, { id: first.id, state: { kind: "replaced", by: second.id } }]);
+      // The user's second message closed the first proposal before the agent proposed again.
+      expect(list.json()).toMatchObject([{ id: second.id, state: { kind: "open" } }, { id: first.id, state: { kind: "replied" } }]);
+      expect((await service.status(ref)).waitingOnYou).toBe(1);
       const url = `/sessions/${ref.id}/workflow-proposals/${second.id}/start`;
       const payload = { cwd: root, inputs: {}, requestId: "proposal-start" };
       const [response, retry] = await Promise.all([server.inject({ method: "POST", url, payload }), server.inject({ method: "POST", url, payload })]);
@@ -1171,21 +1175,23 @@ describe("temporary workflow proposals through Durable sessions and HTTP", () =>
       const ref = { id: (await service.start(root)).id, cwd: root };
       proposalText = staged.replace("  version: 1", "  version: 1\n  inputs:\n    task: { type: string }\n    review: { type: boolean, default: true }");
       proposalInputs = { task: "Agent's brief" };
-      const proposal = await propose(ref);
-      expect(proposal.inputs).toEqual({ task: "Agent's brief", review: true });
+      // A user message closes an open proposal, so the parent is busy only when the agent keeps working after it proposes.
+      workAfterProposal = true;
+      await service.prompt(ref, "PROPOSE");
+      const proposal = await until(async () => (await service.workflowProposals(ref)).find((item) => item.state.kind === "open") ?? false);
+      await until(() => Promise.resolve(hub.sessionEvents.some(({ event }) => event.type === "tool.start" && event.toolName === "bash")));
       const url = `/sessions/${ref.id}/workflow-proposals/${proposal.id}/start`;
       const payload = { cwd: root, inputs: { task: "User's edited brief", review: false }, requestId: "edited" };
+      const busy = await server.inject({ method: "POST", url, payload });
+      expect(busy.statusCode).toBe(409);
+      expect(busy.json<{ error: string }>().error).toContain("idle");
+      await until(async () => !(await service.status(ref)).isStreaming);
+      expect(proposal.inputs).toEqual({ task: "Agent's brief", review: true });
       expect((await server.inject({ method: "POST", url, payload: { ...payload, extra: true } })).statusCode).toBe(400);
       expect((await server.inject({ method: "POST", url, payload: { ...payload, inputs: { task: 1 } } })).statusCode).toBe(400);
       expect((await server.inject({ url: `/sessions/${ref.id}/workflow-proposals` })).statusCode).toBe(400);
       const foreign = { id: (await service.start(root)).id, cwd: root };
       expect((await server.inject({ method: "POST", url: `/sessions/${foreign.id}/workflow-proposals/${proposal.id}/start`, payload })).statusCode).toBe(404);
-      await service.prompt(ref, "BUSY");
-      await until(() => Promise.resolve(hub.sessionEvents.some(({ event }) => event.type === "tool.start" && event.toolName === "bash")));
-      const busy = await server.inject({ method: "POST", url, payload });
-      expect(busy.statusCode).toBe(409);
-      expect(busy.json<{ error: string }>().error).toContain("idle");
-      await until(async () => !(await service.status(ref)).isStreaming);
       await new AgentDirPromptLibrary(agentDir).save({ name: "staged", body: staged });
       const active = await service.runWorkflow(ref, "staged", {}, "saved-first");
       const blocked = await server.inject({ method: "POST", url, payload });

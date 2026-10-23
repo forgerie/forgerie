@@ -175,6 +175,15 @@ describe("attention hints", () => {
     expect(rowState(session("c"), { ...status, workingAgents: 1 }, undefined, true)).toBe("working");
     expect(rowState(session("c"), { ...status, attentionHint: { ...hint, likelyNeedsYou: false } }, undefined, true)).toBe("unread");
   });
+  it("never promotes a turn the agent declared with awaiting: nothing", () => {
+    const status = { ...idle, attentionHint: hint };
+    expect(rowState(session("a"), { ...status, declaredNothing: true }, undefined, true)).toBe("unread");
+    expect(rowState(session("b", { response: { kind: "none" } }), status, undefined, true)).toBe("unread");
+    // The live status is newer than the listed session: an undeclared turn after a declared one can be promoted.
+    expect(rowState(session("c", { response: { kind: "none" } }), { ...status, declaredNothing: false }, undefined, true)).toBe("blocked");
+    const [row] = rows(input({ sessions: [session("d")], statuses: { d: { ...status, declaredNothing: true } }, unread: new Set(["d"]) }));
+    expect(row).toMatchObject({ state: "unread", likelyNeedsYou: false, attentionKind: "review" });
+  });
   it("orders Needs your response by urgency then recency, with pins first", () => {
     const all = rows(input({
       sessions: [session("low", { modified: ago(1) }), session("high-old", { modified: ago(30) }), session("high-new", { modified: ago(2) }), session("normal"), session("pin", { pinned: true })],

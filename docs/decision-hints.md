@@ -222,8 +222,11 @@ asks the user to answer, decide or approve; score urgency as low, normal or high
 and estimate whether it announces work it did not do in this turn.
 
 Today's rules draw rows first. Only an Unread row can gain the inferred
-`likelyNeedsYou` flag and move to Needs your response. The larger of the
-asks-user and stopped-early probabilities must meet the inclusive threshold:
+`likelyNeedsYou` flag and move to Needs your response. A row whose agent
+declared `awaiting: nothing` never moves: the declaration wins over the guess.
+The row stays Unread and can still show the hint's kind. For other rows, the
+larger of the asks-user and stopped-early probabilities must meet the inclusive
+threshold:
 
 | Sensitivity | Promotion threshold |
 | --- | --- |

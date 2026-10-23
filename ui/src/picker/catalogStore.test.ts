@@ -293,6 +293,9 @@ describe("machine catalog", () => {
     const unwatch = store.onUnread(changed);
     api.emit({ type: "status.update", status: { sessionId: "a", ...idle, response: { kind: "needs-response", reason: "reply" } } });
     await until(store, () => store.getSnapshot().statuses["a"]?.needsResponse === true);
+    expect(store.getSnapshot().statuses["a"]?.declaredNothing).toBe(false);
+    api.emit({ type: "status.update", status: { sessionId: "b", ...idle, response: { kind: "none" } } });
+    await until(store, () => store.getSnapshot().statuses["b"]?.declaredNothing === true);
     api.emit({ type: "sessions.unread", sessionId: "a", cwd: "/code/forgerie", catalogId: "c", catalogRevision: 2, unread: { completionOrder: 1 } });
     await until(store, () => store.getSnapshot().unread.has("a"));
     expect(changed).toHaveBeenCalledExactlyOnceWith("a", { catalogId: "c", throughCompletionOrder: 1 });

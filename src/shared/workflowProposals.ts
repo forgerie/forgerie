@@ -9,6 +9,8 @@ export const WorkflowProposalStateSchema = Type.Union([
   Type.Object({ kind: Type.Literal("replaced"), by: Type.String(), decidedAt: Type.Number() }, { additionalProperties: false }),
   /** The user chose to have the agent follow the plan itself, in this session, without child agents. */
   Type.Object({ kind: Type.Literal("here"), decidedAt: Type.Number() }, { additionalProperties: false }),
+  /** The user sent the session a message while the proposal was open, so the chat replaced the card's decision. */
+  Type.Object({ kind: Type.Literal("replied"), decidedAt: Type.Number() }, { additionalProperties: false }),
 ]);
 /** Where a proposal comes from: a saved workflow it adapts, or a new plan because no saved workflow fits. */
 export const WorkflowProposalBasisSchema = Type.Union([

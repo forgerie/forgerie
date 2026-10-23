@@ -81,6 +81,7 @@ export const workflowProposalSchema = z.object({
     z.object({ kind: z.literal("dismissed"), decidedAt: z.number() }),
     z.object({ kind: z.literal("replaced"), by: z.string(), decidedAt: z.number() }),
     z.object({ kind: z.literal("here"), decidedAt: z.number() }),
+    z.object({ kind: z.literal("replied"), decidedAt: z.number() }),
   ]),
   /** Absent on proposals made before the agent had to consider saved workflows. */
   basis: basisSchema.optional(),
@@ -285,6 +286,7 @@ export function proposalOutcome(proposal: WorkflowProposal | undefined): string 
     case "dismissed": return "Dismissed";
     case "replaced": return "Replaced by a newer proposal";
     case "here": return "Done here, without workers";
+    case "replied": return "Closed when you replied in the chat";
   }
 }
 

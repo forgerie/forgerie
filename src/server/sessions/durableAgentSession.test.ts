@@ -789,6 +789,18 @@ describe("SDK-compatible Durable execution", () => {
     const { session } = await fixture([override]);
     expect((await session.journal.conversation.agent((await import("@earendil-works/chord/context")).BACKGROUND_CONTEXT)).tools.find((tool) => tool.name === "read")?.replay).toBe("unsafe");
   });
+
+  it("closes an open workflow proposal when the user sends a message, but not for an extension's message", async () => {
+    const { session, provider } = await fixture();
+    const { proposeWorkflow } = await import("./durableWorkflowRuns.js");
+    const args = { name: "one-task", summary: "Plan this task.", text: "---\nworkflow: {version: 1}\n---\nDo the work.\n", basis: { kind: "new" as const, reason: "No saved workflow fits." } };
+    await session.journal.conversation.commit((tx) => proposeWorkflow(tx, session.journal.conversation.id, "p:chat", args), context);
+    provider.setResponses([fauxAssistantMessage("noted"), fauxAssistantMessage("ok")]);
+    await session.prompt("An extension speaks.", { source: "extension" });
+    expect((await session.workflowProposals())[0]?.state).toEqual({ kind: "open" });
+    await session.prompt("Go ahead in the chat instead.");
+    expect((await session.workflowProposals())[0]?.state).toMatchObject({ kind: "replied" });
+  });
 });
 
 import Fastify from "fastify";

@@ -38,6 +38,8 @@ export interface PickerStatus {
   runningProcesses?: number | undefined;
   blocked?: boolean | undefined;
   needsResponse?: boolean | undefined;
+  /** The agent ended its last turn with `awaiting: nothing`. A hint never overrules that declaration. */
+  declaredNothing?: boolean | undefined;
   /** The agent watches a pull request: an idle session stays in Working, not the inbox. */
   watchingPullRequest?: boolean | undefined;
   /** Flagged guesses in the decision log. A readout only: it never makes the session blocked. */
@@ -132,7 +134,9 @@ export function rowState(session: PickerSession, status: PickerStatus | undefine
   if (status?.watchingPullRequest === true || session.pullRequests?.some((link) => link.watch.kind === "watching") === true) return "working";
   if (status?.watchingActionRun === true || session.actionRuns?.some((link) => link.watch.kind === "watching") === true) return "working";
   if ((status?.workingAgents ?? 0) > 0) return "working";
-  return unread ? status?.attentionHint?.likelyNeedsYou === true ? "blocked" : "unread" : "open";
+  // A hint only guesses for a turn the agent did not declare. An explicit `awaiting: nothing` stands (user, 2026-10-23).
+  const declaredNothing = status?.declaredNothing ?? session.response?.kind === "none";
+  return unread ? !declaredNothing && status?.attentionHint?.likelyNeedsYou === true ? "blocked" : "unread" : "open";
 }
 
 const HOUR = 3_600_000;

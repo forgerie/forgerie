@@ -175,6 +175,15 @@ export async function acknowledgeWorkflowStall(tx: Tx, parent: ConversationId): 
   if (run?.stall !== undefined) delete run.stall;
 }
 
+/**
+ * The user's own message closes every open proposal: the chat answered it, so the card no longer waits on the
+ * user (user, 2026-10-23). The card then shows the outcome and can no longer start the plan.
+ */
+export async function closeProposalsOnReply(tx: Tx, parent: ConversationId, now = Date.now()): Promise<void> {
+  const doc = await tx.doc(Proposals, parent);
+  for (const proposal of Object.values(doc.records)) if (proposal.state.kind === "open") proposal.state = { kind: "replied", decidedAt: now };
+}
+
 /** One durable cancellation request per run. Returns immediately; the run stays active until all work stops. */
 export async function cancelWorkflow(harness: Harness, parent: Conversation, runId: string, context: Context): Promise<WorkflowRun> {
   const run = await parent.commit(async (tx) => {
