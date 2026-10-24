@@ -399,6 +399,7 @@ export class DurableParentReadModel {
 
   private page(messages: DurableBrowserMessage[], request?: MessagePageRequest): DurableBrowserSnapshot["history"] {
     const result = pageMessagesAtSafeBoundary(messages, { ...request, limit: request?.limit ?? 100 });
+    // Paging cuts long turns between tool rounds, so only one round with this many results can fail.
     if (result.messages.length > HISTORY_LIMIT) throw new Error(`Durable history tool round exceeds ${String(HISTORY_LIMIT)} messages; cannot publish an unsafe page boundary`);
     return result;
   }

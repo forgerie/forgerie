@@ -39,4 +39,41 @@ describe("message paging", () => {
     const messages = [user("prompt"), thinking("plan"), assistantText("answer")];
     expect(expandStartToSafeBoundary(messages, 2)).toBe(0);
   });
+
+  const longTurn = (rounds: number) => [user("go"), ...Array.from({ length: rounds }, (_, index) => [toolCall(`read-${String(index)}`), toolResult(String(index))]).flat()];
+
+  it("keeps a whole turn when it fits in 500 messages", () => {
+    const messages = longTurn(249);
+    expect(pageMessagesAtSafeBoundary(messages, { limit: 50 })).toEqual(page(0, 499, messages));
+  });
+
+  it("cuts a turn longer than 500 messages at a tool call, never at its result", () => {
+    const messages = longTurn(300);
+    const latest = pageMessagesAtSafeBoundary(messages, { limit: 50 });
+    expect(latest.start).toBe(551);
+    expect(latest.messages).toHaveLength(50);
+    expect(latest.messages[0]).toEqual(toolCall("read-275"));
+    const odd = pageMessagesAtSafeBoundary(messages, { limit: 51 });
+    expect(odd.start).toBe(549);
+    expect(odd.messages[0]).toEqual(toolCall("read-274"));
+  });
+
+  it("accepts a tool-round cursor inside an oversized turn and rejects a result cursor", () => {
+    const messages = longTurn(300);
+    const earlier = pageMessagesAtSafeBoundary(messages, { before: 551, limit: 50, completeTurns: true });
+    expect(earlier).toEqual(page(501, 601, messages.slice(501, 551)));
+    expect(() => pageMessagesAtSafeBoundary(messages, { before: 552, limit: 50, completeTurns: true })).toThrow("complete-turn or tool-round boundary");
+  });
+
+  it("returns to turn boundaries once the earlier turn fits", () => {
+    const messages = [...longTurn(10), ...longTurn(300)];
+    expect(pageMessagesAtSafeBoundary(messages, { before: 21, limit: 5, completeTurns: true })).toEqual(page(0, 622, messages.slice(0, 21)));
+  });
+
+  it("finds a search hit inside an oversized turn without returning the whole turn", () => {
+    const messages = longTurn(300);
+    const hit = pageMessagesAtSafeBoundary(messages, { around: 100, limit: 20 });
+    expect(hit.start).toBe(81);
+    expect(hit.start + hit.messages.length).toBe(101);
+  });
 });

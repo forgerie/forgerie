@@ -184,17 +184,29 @@ describe("native Durable parent reads", () => {
     expect(await reader.statistics(context)).toMatchObject({ totalMessages: 2, userMessages: 2, cost: 3, tokens: { total: 10 } });
   });
 
-  it("reads only own usage and rejects an oversized indivisible tool-round page", async () => {
+  it("reads only own usage and pages a turn longer than 500 messages between tool rounds", async () => {
     const { reader, conversation, user } = await fixture();
     const view = await conversation.viewState(context);
     try { expect(reader.usage(view.value)).toEqual({ models: {}, tools: {} }); }
     finally { view.dispose(); }
     await user("one long turn");
     await conversation.commit(async (tx) => {
-      for (let index = 0; index < 501; index++) await tx.appendEntry(AssistantEntry, conversation.id, { model: [fauxAssistantMessage(`answer ${String(index)}`)] });
+      for (let index = 0; index < 600; index++) {
+        const call = fauxAssistantMessage([fauxToolCall("bash", { command: `printf ${String(index)}` }, { id: `call-${String(index)}` })], { stopReason: "toolUse" });
+        const result = { role: "toolResult" as const, toolCallId: `call-${String(index)}`, toolName: "bash", content: [{ type: "text" as const, text: String(index) }], isError: false, timestamp: 1 };
+        await tx.appendEntry(AssistantEntry, conversation.id, { model: [call, result] });
+      }
       await tx.doc(UsageDoc, conversation.id);
     }, context);
-    await expect(reader.history(undefined, context)).rejects.toThrow("exceeds 500 messages");
+    const latest = await reader.history(undefined, context);
+    expect(latest.total).toBe(1201);
+    expect(latest.messages).toHaveLength(100);
+    expect(latest.start).toBe(1101);
+    expect(latest.messages[0]?.role).toBe("assistant");
+    const earlier = await reader.history({ before: latest.start, limit: 50, completeTurns: true }, context);
+    expect(earlier.start + earlier.messages.length).toBe(latest.start);
+    expect(earlier.messages[0]?.role).toBe("assistant");
+    await expect(reader.history({ before: latest.start + 1, limit: 50, completeTurns: true }, context)).rejects.toThrow("tool-round boundary");
   });
 });
 
