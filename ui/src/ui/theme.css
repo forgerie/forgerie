@@ -318,7 +318,8 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer-input .cm-content { padding: var(--space-3) var(--space-4) var(--space-2); }
 .cm-editor:has([data-composer-input]).cm-focused { outline: none; }
 .cm-editor:has([data-composer-input]) .cm-scroller { font-family: inherit; line-height: inherit; }
-[data-composer-input] { caret-color: var(--foreground); }
+/* CodeMirror's base theme sets a black caret at two classes. The bar has no CodeMirror dark theme, so a lone attribute lost and the caret vanished on a dark page. */
+.cm-editor .cm-content[data-composer-input] { caret-color: var(--foreground); }
 [data-composer-input] .cm-line { padding: 0; }
 .cm-editor:has([data-composer-input]) .cm-placeholder { color: var(--muted-foreground); }
 /* A complete fence reads as the transcript's code sheet: a tinted label, then code.
