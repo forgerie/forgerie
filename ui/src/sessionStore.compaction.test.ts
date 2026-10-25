@@ -81,10 +81,11 @@ async function compactionServer(initial: SessionStatus = idle) {
   const store = createSessionStore("test", transport, { retryDelayMs: 10 }, { id: "test", cwd: "/work tree" });
   cleanup.push(store.dispose);
   const emit = (event: OperationEvent) => {
-    if (event.type === "command.output") transientEvents.push(event);
+    const seq = ++state.seq;
+    // Like the hub, every open replays the last command output with its publish sequence.
+    if (event.type === "command.output") transientEvents.splice(0, transientEvents.length, { ...event, seq });
     if (event.type === "status.update") state.status = event.status;
-    if (event.type === "status.update") state.status = event.status;
-    for (const socket of ws.clients) socket.send(JSON.stringify({ ...event, seq: ++state.seq }));
+    for (const socket of ws.clients) socket.send(JSON.stringify({ ...event, seq }));
   };
   return { state, store, requests, emit, wake: () => recover?.(), transport };
 }
@@ -176,6 +177,17 @@ describe("compaction transport and recovery", () => {
     api.emit({ type: "command.output", level: "success", message: "Compaction complete." });
     await until(() => { const value = api.store.getSnapshot().compaction; return value.type === "finished" && value.outcome === "complete"; });
     expect(api.requests.some(({ path }) => path.endsWith("/commands/run"))).toBe(false);
+  });
+  it("keeps a dismissed completion dismissed when a later open replays the same output", async () => {
+    const api = await compactionServer(); await api.store.start();
+    api.emit({ type: "command.output", level: "success", message: "Compaction complete.\nSummary" });
+    await until(() => api.store.getSnapshot().compaction.type === "finished");
+    api.store.dismissCompaction();
+    const reads = api.state.historyReads; api.wake();
+    await until(() => api.state.historyReads > reads && ready(api.store));
+    expect(api.store.getSnapshot().compaction).toEqual({ type: "idle" });
+    api.emit({ type: "command.output", level: "success", message: "Compaction complete.\nSummary" });
+    await until(() => api.store.getSnapshot().compaction.type === "finished");
   });
   it("keeps status events newer than an in-flight GET",  async () => {
     const api = await compactionServer({ ...idle, isCompacting: true });

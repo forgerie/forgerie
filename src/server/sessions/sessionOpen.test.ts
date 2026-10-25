@@ -89,6 +89,14 @@ describe("consistent open acquisition", () => {
     } finally { await service.dispose(); await app.close(); }
   });
 
+  it("replays the last command output with the sequence its live event carried", () => {
+    const hub = new SessionEventHub();
+    hub.noteDecisionHintChange("command");
+    hub.publish("command", { type: "command.output", level: "success", message: "Compaction complete." });
+    expect(hub.transientEvents("command")).toEqual([{ type: "command.output", level: "success", message: "Compaction complete.", seq: 2 }]);
+    expect(hub.currentSeq("command")).toBe(2);
+  });
+
   it("seeds shell output emitted before subscription and replaces a persisted shell exactly once", () => {
     const hub = new SessionEventHub();
     hub.publish("shell", { type: "shell.start", command: "printf hi", excludeFromContext: true });

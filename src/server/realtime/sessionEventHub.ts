@@ -124,7 +124,8 @@ export class SessionEventHub {
     });
   }
 
-  private rememberHostOutput(sessionId: string, event: SessionUiEvent): void {
+  /** The command output keeps its publish sequence, so a browser can tell a replay from a new report. */
+  private rememberHostOutput(sessionId: string, event: SessionUiEvent, seq: number): void {
     if (!event.type.startsWith("shell.") && event.type !== "command.output") return;
     let host = this.hostBySession.get(sessionId);
     if (host === undefined) { host = { shells: [], consumed: new Set() }; this.hostBySession.set(sessionId, host); }
@@ -138,7 +139,7 @@ export class SessionEventHub {
       const chunk = ((previous?.type === "shell.chunk" ? previous.chunk : "") + event.chunk).slice(-DEFAULT_MAX_BYTES);
       row.events = [row.events[0] ?? { type: "shell.start", command: "" }, { type: "shell.chunk", chunk }];
     } else if (event.type === "shell.end") host.shells.at(-1)?.events.push(event);
-    else if (event.type === "command.output") host.command = event;
+    else if (event.type === "command.output") host.command = { ...event, seq };
   }
 
   add(sessionId: string, socket: RealtimeSocket): void {
@@ -216,8 +217,8 @@ export class SessionEventHub {
   }
 
   publish(sessionId: string, event: SessionUiEvent): void {
-    this.rememberHostOutput(sessionId, event);
     const seq = (this.seqBySession.get(sessionId) ?? 0) + 1;
+    this.rememberHostOutput(sessionId, event, seq);
     this.seqBySession.set(sessionId, seq);
     if (event.type === "status.update") for (const changed of this.nativeRefresh.get(sessionId) ?? []) changed();
     const payload = JSON.stringify({ ...projectBrowserSessionEvent(event), seq });

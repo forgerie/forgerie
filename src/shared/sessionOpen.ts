@@ -36,7 +36,8 @@ export const sessionOpenTransientEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("shell.chunk"), chunk: z.string() }),
   z.object({ type: z.literal("shell.end"), output: z.string().optional(), exitCode: z.number().nullable().optional(),
     cancelled: z.boolean().optional(), truncated: z.boolean().optional(), fullOutputPath: z.string().optional(), isError: z.boolean().optional() }),
-  z.object({ type: z.literal("command.output"), level: z.enum(["info", "success", "error"]), message: z.string() }),
+  /** seq is the live event's publish sequence; a browser that saw it treats this copy as a replay. */
+  z.object({ type: z.literal("command.output"), level: z.enum(["info", "success", "error"]), message: z.string(), seq: safePosition.optional() }),
 ]);
 export type SessionOpenTransientEvent = z.infer<typeof sessionOpenTransientEventSchema>;
 

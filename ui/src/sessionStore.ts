@@ -272,8 +272,15 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     return { ...next, status, compaction: compactionFromStatus(next.compaction, status),
       transcript: { ...next.transcript, isRunning: status.isStreaming || status.isCompacting } };
   }
+  let lastCommandOutput: { seq: number; epoch: string | undefined } | undefined;
   function withOperation(next: SessionState, event: OperationEvent): SessionState {
     if (event.type === "status.update") return withStatus(next, event.status);
+    // Every open replays the host's last command output. A copy this store already applied
+    // must not bring back a notice the user dismissed.
+    if (event.seq !== undefined) {
+      if (lastCommandOutput?.epoch === join?.epoch && event.seq <= (lastCommandOutput?.seq ?? -1)) return next;
+      lastCommandOutput = { seq: event.seq, epoch: join?.epoch };
+    }
     const compaction = compactionFromOutput(event);
     if (compaction) return { ...next, compaction };
     const done: SessionState = { ...next, commandResult: { type: "done", message: event.message } };
