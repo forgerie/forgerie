@@ -6,7 +6,9 @@
 .option-list-search::placeholder { color: var(--muted-foreground); }
 .option-list-alert { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-block-end: var(--hairline) solid var(--line);
   color: var(--destructive); overflow-wrap: anywhere; }
-.option-list-rows { flex: 1 1 auto; min-block-size: var(--control-size); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); }
+/* No overscroll-behavior here: Chrome applies it to a scroll container even when the rows fit, and then a wheel or
+   a swipe over the rows never reaches a host that scrolls, such as a tall floating panel. The page root stops overscroll. */
+.option-list-rows { flex: 1 1 auto; min-block-size: var(--control-size); overflow-y: auto; padding: var(--space-1); }
 .option-list-group + .option-list-group { margin-block-start: var(--space-1); padding-block-start: var(--space-1); border-block-start: var(--hairline) solid var(--line); }
 .option-list-heading { display: block; margin: 0; padding: var(--space-2) var(--space-3) var(--space-1);
   color: var(--muted-foreground); font-size: var(--label-text); font-weight: 500; }
