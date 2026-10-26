@@ -130,3 +130,45 @@ it("gates when an untracked nested repository cannot be backed up", async () => 
   const disposable = disposableWorktree({scratchRoot: scratch, childWorktrees: () => Promise.resolve([]), projectBackup: {git, directory: join(base, "backups"), now: () => new Date()}});
   expect(await disposable(target)).toBe(false);
 });
+
+it("reads a bare remote's default branch live when origin/HEAD is missing, without writing local refs", async () => {
+  const remote = join(base, "remote.git");
+  await git(project, ["init", "--bare", "-q", "-b", "main", remote]);
+  await git(project, ["remote", "add", "origin", remote]);
+  await git(project, ["push", "-q", "origin", "main"]);
+  const {remoteDefaultBranchReader} = await import("./gatedGitRemote.js");
+  let networkReads = 0;
+  const observedGit = async (cwd: string, args: readonly string[]) => { if (args[0] === "ls-remote") networkReads++; return git(cwd, args); };
+  const observed = {...reads([]), git: observedGit, remoteDefaultBranch: remoteDefaultBranchReader(observedGit)};
+  const classify = (command: string) => gatedAction("bash", {command}, project, observed);
+  await expect(git(project, ["symbolic-ref", "refs/remotes/origin/HEAD"])).rejects.toThrow();
+  expect(await classify("git push origin main:feature")).toBeUndefined();
+  expect((await classify("git push origin main"))?.category).toBe("push-default");
+  expect((await classify("git push --force-with-lease origin main:feature"))?.category).toBe("force-push");
+  expect((await classify("git push origin :feature"))?.category).toBe("delete-remote");
+  expect(networkReads).toBe(1);
+  // Exercise the admitted command itself, then observe the actual remote ref.
+  await git(project, ["push", "-q", "origin", "main:feature"]);
+  expect((await git(remote, ["rev-parse", "refs/heads/feature"])).trim()).toBe((await git(project, ["rev-parse", "HEAD"])).trim());
+  await expect(git(project, ["symbolic-ref", "refs/remotes/origin/HEAD"])).rejects.toThrow();
+  await git(project, ["remote", "set-url", "origin", join(base, "missing.git")]);
+  expect((await classify("git push origin main:feature"))?.category).toBe("force-push");
+});
+
+it("uses real literal loop targets and backs up each project worktree before admission", async () => {
+  const backups = join(base, "loop-backups");
+  for (const name of ["s2-seam", "s2-engine"]) {
+    const target = join(project, ".worktree", name);
+    await git(project, ["worktree", "add", "-qb", name, target]);
+    await writeFile(join(target, "notes"), name);
+  }
+  const observed = {...reads([]), disposable: disposableWorktree({scratchRoot: scratch, childWorktrees: () => Promise.resolve([]),
+    projectBackup: {git, directory: backups, now: () => new Date()}})};
+  const command = "for w in s2-seam s2-engine; do git worktree remove --force .worktree/$w; done";
+  expect(await gatedAction("bash", {command}, project, observed)).toBeUndefined();
+  expect(await readdir(backups)).toHaveLength(2);
+  // Execute exactly the classified shell path in this temporary repository.
+  await run("bash", ["-c", command], {cwd: project, env: sanitizedGitEnv()});
+  const trees = await git(project, ["worktree", "list", "--porcelain"]);
+  expect(trees).not.toContain("s2-seam"); expect(trees).not.toContain("s2-engine");
+});

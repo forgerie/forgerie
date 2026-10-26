@@ -1,3 +1,4 @@
+import { remoteDefaultBranchReader, REMOTE_HEAD_TIMEOUT_MS } from "./gatedGitRemote.js";
 import type { WorkflowGlance } from "../../shared/workflowGlance.js";
 import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -556,14 +557,14 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   private async startGatedActions(): Promise<void> {
     this.gateUnsubscribe?.();
-    const gitRead = async (cwd: string, args: readonly string[]) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8", maxBuffer: 64 * 1024 * 1024})).stdout;
+    const gitRead = async (cwd: string, args: readonly string[]) => (await promisify(execFile)("git", ["-C", cwd, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0"}, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...(args[0] === "ls-remote" ? {timeout: REMOTE_HEAD_TIMEOUT_MS} : {})})).stdout;
     const parent = this.journal.conversation.id;
     this.gateOptions = {name: `forgerie.gated-actions:${String(parent)}`, parent,
       harness: () => this.journal.harness,
       ...(this.options.decisionHints === undefined ? {} : {riskLabels: {hints: this.options.decisionHints, onError: (error: unknown) => { this.report(error, DECISION_HINT_ERROR_EVENT); }}}),
       ...(this.options.autonomyPolicy === undefined ? {} : {policy: this.options.autonomyPolicy}),
       pushDefaultFolders: () => (this.options.workflowAutonomy?.() ?? WAIT_FOR_USER).pushDefaultFolders,
-      reads: {git: gitRead,
+      reads: {git: gitRead, remoteDefaultBranch: remoteDefaultBranchReader(gitRead),
         issueLabels: this.options.gatedIssueLabels ?? (() => Promise.reject(new Error("GitHub labels unavailable"))),
         // Child worktrees are read at call time: they start after the gate and change as children spawn and land.
         disposable: disposableWorktree({scratchRoot: SCRATCH_ROOT, childWorktrees: async () => await this.childWorktrees?.activePaths() ?? [],

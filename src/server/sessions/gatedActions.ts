@@ -1,5 +1,7 @@
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
+import { expandGatedShellLiterals } from "./gatedShellLiterals.js";
+import { readRemoteDefaultBranch } from "./gatedGitRemote.js";
 import type { GatedCategory } from "../../shared/autonomyPolicy.js";
 
 export interface GatedActionMatch {
@@ -9,6 +11,8 @@ export interface GatedActionMatch {
 }
 export interface GatedActionReads {
   git(cwd: string, args: readonly string[]): Promise<string>;
+  /** A bounded, cached live observation, used only when the local remote HEAD is absent. */
+  remoteDefaultBranch?(cwd: string, remote: string): Promise<string>;
   issueLabels(cwd: string, issue: string | number, repo?: string, worktreeId?: string): Promise<readonly string[]>;
   /** Whether a Git worktree root holds only throwaway files, so discarding them needs no approval. */
   disposable(worktreeRoot: string): Promise<boolean>;
@@ -65,7 +69,7 @@ async function shellAction(script: string, cwd: string, reads: GatedActionReads,
   let movedInList = false; let conditionalCd = false;
   // Heredoc bodies run when their line runs, so they read the folder at the start of that line.
   const lineStarts = new Map<number, {folder: string; uncertain: boolean}>(); const cdLines = new Set<number>();
-  for (const command of parseShell(script)) {
+  for (const command of parseShell(expandGatedShellLiterals(script))) {
     let commandFolder = folder; let uncertainHere: boolean;
     if (command.heredoc) {
       const start = lineStarts.get(command.line);
@@ -108,7 +112,7 @@ async function shellAction(script: string, cwd: string, reads: GatedActionReads,
         else if (option?.startsWith("--git-dir=") === true || option?.startsWith("--work-tree=") === true || option?.startsWith("--config-env=") === true || option?.startsWith("--namespace=") === true) overriddenGitState = true;
       }
       const action = tokens.shift();
-      const found = await gitAction(action, tokens, gitCwd, (overriddenGitState || uncertainHere) ? {...reads, git: unavailableReads.git.bind(unavailableReads)} : reads);
+      const found = await gitAction(action, tokens, gitCwd, (overriddenGitState || uncertainHere) ? {...reads, git: unavailableReads.git.bind(unavailableReads), remoteDefaultBranch: () => Promise.reject(new Error("Git state unavailable"))} : reads);
       if (found !== undefined) return found;
     }
     if (executable === "gh") {
@@ -249,6 +253,23 @@ async function gitAction(action: string | undefined, tokens: string[], cwd: stri
   } catch { /* An unknown worktree is not disposable. */ }
   return found;
 }
+function discardingSwitch(tokens: readonly string[]): boolean {
+  const valued = ["--source", "-s", "-b", "--orphan", "-c", "--create"];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i] ?? "";
+    if (token === "--") break;
+    if (valued.includes(token)) { i++; continue; }
+    if (token.startsWith("--")) {
+      if (["--force", "--discard-changes", "--merge", "--force-create"].some(option => option.startsWith(token))) return true;
+    } else if (/^-[^-]/u.test(token)) {
+      for (let j = 1; j < token.length; j++) {
+        if ("fBmC".includes(token[j] ?? "")) return true;
+        if (valued.includes(`-${token[j] ?? ""}`)) { if (j === token.length - 1) i++; break; }
+      }
+    }
+  }
+  return false;
+}
 async function gitMatch(action: string | undefined, tokens: string[], cwd: string, reads: GatedActionReads): Promise<GatedActionMatch | undefined> {
   if (action === "push") {
     const words = operands(tokens, PUSH_VALUE_OPTIONS);
@@ -261,9 +282,14 @@ async function gitMatch(action: string | undefined, tokens: string[], cwd: strin
     if (refs.length === 0) return effectiveFlag(tokens, "--tags", undefined, PUSH_VALUE_OPTIONS) ? undefined : match("force-push", "Push Git refs with unknown implicit destination");
     try {
       const prefix = `refs/remotes/${remote}/`;
-      const remoteHead = (await reads.git(cwd, ["symbolic-ref", `${prefix}HEAD`])).trim();
-      if (!remoteHead.startsWith(prefix) || remoteHead === `${prefix}HEAD`) throw new Error("Default branch unknown");
-      const defaultBranch = remoteHead.slice(prefix.length);
+      let defaultBranch: string;
+      try {
+        const remoteHead = (await reads.git(cwd, ["symbolic-ref", `${prefix}HEAD`])).trim();
+        if (!remoteHead.startsWith(prefix) || remoteHead === `${prefix}HEAD`) throw new Error("Default branch unknown");
+        defaultBranch = remoteHead.slice(prefix.length);
+      } catch {
+        defaultBranch = await (reads.remoteDefaultBranch ?? ((folder, name) => readRemoteDefaultBranch(reads.git.bind(reads), folder, name)))(cwd, remote);
+      }
       if (defaultBranch === "") throw new Error("Default branch unknown");
       const branch = refs.includes("HEAD") ? (await reads.git(cwd, ["symbolic-ref", "--short", "HEAD"])).trim() : "";
       if (refs.includes("HEAD") && branch === "") throw new Error("HEAD destination unknown");
@@ -285,20 +311,25 @@ async function gitMatch(action: string | undefined, tokens: string[], cwd: strin
   if (action === "reset" && flag(tokens, "--hard")) return match("destroy-local", "Discard local changes with git reset --hard");
   // ADR 0003 gates git clean, including an interactive clean. Preview-only clean is read-only.
   if (action === "clean" && !effectiveFlag(tokens, "--dry-run", "n", ["--exclude", "-e"])) return match("destroy-local", "Remove untracked files with git clean");
-  if (action === "restore" || action === "checkout") {
+  if (action === "restore" || action === "checkout" || action === "switch") {
+    const dangerous = discardingSwitch(tokens);
+    const values = operands(tokens, ["--source", "-s", "-b", "-B", "--orphan", "-c", "-C"]);
+    if (action === "switch" && !dangerous && !tokens.includes("--")) return undefined;
+    if (action === "checkout" && !dangerous && !flag(tokens, "--patch", "p") && !tokens.includes("--") && !values.includes(".") && values.length <= 1 && effectiveFlag(tokens, "--detach", undefined, ["-b", "-B", "--orphan"])) return undefined;
     let paths: string[];
-    if (action === "checkout" && (flag(tokens, "--force", "f") || flag(tokens, "--patch", "p"))) paths = [];
+    if (action === "switch" || (action === "checkout" && (dangerous || flag(tokens, "--patch", "p")))) paths = [];
     else if (tokens.includes("--")) paths = tokens.slice(tokens.indexOf("--") + 1);
     else {
-      paths = operands(tokens, ["--source", "-s", "-b", "-B", "--orphan"]);
+      paths = values;
       if (action === "checkout") {
         if (paths.length === 0) return undefined;
         try {
-          if ((await reads.git(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${paths[0] ?? ""}^{tree}`])).trim() !== "") {
-            if (paths.length === 1) return undefined; // Ordinary branch/tree-ish switch, without force.
-            paths = paths.slice(1);
+          const revision = paths[0] ?? "";
+          if (revision !== "." && (await reads.git(cwd, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${revision}^{commit}`])).trim() !== "") {
+            if (paths.length === 1 && (await reads.git(cwd, ["ls-files", "--cached", "--others", "--directory", "--", revision])).trim() === "") return undefined;
+            if (paths.length > 1) paths = paths.slice(1);
           }
-        } catch { /* Non-revisions may be checkout pathspecs; status must prove them clean. */ }
+        } catch { /* Non-revisions and ambiguous paths still need a clean status observation. */ }
       }
     }
     try { if ((await reads.git(cwd, ["status", "--porcelain", "--", ...paths])).trim() === "") return undefined; } catch { /* Unknown is not clean. */ }
@@ -438,6 +469,10 @@ function parseShell(script: string, readSubstitutions = true): ShellCommand[] {
       const inner = text.slice(i + (c === "`" ? 1 : 2), endIndex);
       if (readSubstitutions) substitutions.push(...parseShell(inner, false).map(command => command.words));
       word += "<substitution>"; started = true; i = endIndex; continue;
+    }
+    if (quote !== "'" && c === "$" && text[i + 1] === "{") {
+      const variable = /^\$\{[A-Za-z_][A-Za-z_0-9]*\}/u.exec(text.slice(i));
+      if (variable !== null) { word += variable[0]; started = true; i += variable[0].length - 1; continue; }
     }
     if (quote !== "") { if (c === quote) quote = ""; else word += c; started = true; continue; }
     if (c === "'" || c === '"') { quote = c; started = true; continue; }

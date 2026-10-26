@@ -141,7 +141,8 @@ it.each(cases)("classifies %s", async (command, category, state) => {
     if (state === "clean" && args[0] === "status") return Promise.resolve("");
     if (state === "unknown-remote" && args[0] === "symbolic-ref" && args[1]?.startsWith("refs/remotes/") === true) return Promise.reject(new Error("Unknown remote HEAD"));
     if (state === "unknown-remote" && args[0] === "for-each-ref") return Promise.resolve("main\n");
-    if (args[0] === "rev-parse") return args.at(-1) === "HEAD^{tree}" || args.at(-1) === "feature^{tree}" ? Promise.resolve("tree-id") : Promise.reject(new Error("Not a tree-ish"));
+    if (args[0] === "ls-files") return Promise.resolve("");
+    if (args[0] === "rev-parse") return args.at(-1) === "HEAD^{commit}" || args.at(-1) === "feature^{commit}" ? Promise.resolve("tree-id") : Promise.reject(new Error("Not a tree-ish"));
     return reads.git(cwd, args);
   }};
   expect((await gatedAction("bash", {command}, "/repo", configured))?.category).toBe(category);
@@ -311,6 +312,7 @@ it("accepts redirects on cd and keeps every folder it cannot prove uncertain", a
   for (const command of ["cd /tmp/x 2>/dev/null && git checkout -- dirty.txt", "cd /tmp/x >/dev/null 2>&1 && git clean -fd", "cd /tmp/x 2> /dev/null && git reset --hard", "cd -- /tmp/x &>/dev/null && git restore dirty.txt"]) {
     expect(await classify(command, "/repo")).toBeUndefined();
   }
+  expect(await classify("for d in a; do cd /tmp/clone; done && git clean -fd")).toBeUndefined();
   // Both folders are disposable, so only an uncertain folder, whose Git reads fail closed, can gate these.
   expect(await classify("cd /tmp/clone && git clean -fd")).toBeUndefined();
   expect(await classify("cd /tmp/clone\nbash <<EOF\ngit clean -fd\nEOF")).toBeUndefined();
@@ -323,7 +325,7 @@ it("accepts redirects on cd and keeps every folder it cannot prove uncertain", a
     "git fetch && cd /tmp/clone; git clean -fd", "cd /tmp/clone | cat && git clean -fd", "cd /tmp/clone |& cat && git clean -fd",
     "(cd /tmp/clone) && git clean -fd", "(cd /tmp/clone && true); git clean -fd", "{ cd /tmp/clone; } && git clean -fd",
     "cd /tmp/clone & git clean -fd", "cd /tmp/clone && true & git clean -fd", "echo $(cd /tmp/clone) && git clean -fd",
-    "if true; then cd /tmp/clone; fi; git clean -fd", "for d in a; do cd /tmp/clone; done && git clean -fd",
+    "if true; then cd /tmp/clone; fi; git clean -fd",
     "cd \"$DIR\" && git clean -fd", "cd $(mktemp -d) && git clean -fd", "cd `mktemp -d` && git clean -fd", "cd /tmp/cl* && git clean -fd",
     "cd ~other && git clean -fd", "cd -P /tmp/clone && git clean -fd", "cd - && git clean -fd", "cd && git clean -fd",
     "pushd /tmp/clone && git clean -fd", "builtin cd /tmp/clone && git clean -fd", "env cd /tmp/clone && git clean -fd",
@@ -362,4 +364,112 @@ it.each(["2>& 1", "2>&1", ">& file", "&> file", "1>&-", "> file", ">& main", ">&
   });
   expect(await gatedAction("bash", {command: `git push origin feature ${redirect}`}, "/repo", reads)).toBeUndefined();
   expect((await gatedAction("bash", {command: `git push origin HEAD:main ${redirect}`}, "/repo", reads))?.category).toBe("push-default");
+});
+
+it.each([
+  ["for c in $(git rev-list main); do git checkout -q $c && git status; done", "destroy-local"],
+  ["git -C $S/verify-core checkout -q --detach 055d033", undefined],
+  ["for t in /tmp/forgerie-scratch/a /tmp/forgerie-scratch/b; do cd $t; git -C $t checkout -q --detach e40a430; done", undefined],
+  ["git switch other", undefined], ["git switch --detach $REV", undefined],
+  ["git switch --discard-changes main", "destroy-local"], ["git switch -f main", "destroy-local"],
+  ["git switch -C main", "destroy-local"], ["git switch --merge main", "destroy-local"],
+  ["git checkout file.txt", "destroy-local"], ["git checkout -- .", "destroy-local"],
+  ["git checkout -f main", "destroy-local"], ["git checkout --detach -m main", "destroy-local"],
+  ["git checkout -- flake.lock", "destroy-local"],
+  ["W=.worktree/x && git -C $W push origin cairn", undefined],
+  ["C=/path; git -C $C push origin cairn:cairn", undefined],
+  ["cd ~/code/sandbox/vela && git push origin main", "push-default"],
+  ["cd ~/code/github/simonwjackson/mountainous && git push origin cairn; cd ~/code/sandbox/voice-gateway && git push origin rust-port", undefined],
+])("classifies reported gate evidence: %s", async (command, category) => {
+  expect((await gatedAction("bash", {command}, "/repo", reads))?.category).toBe(category);
+});
+
+it("checks every literal loop iteration and fails closed on variable mutations and computed lists", async () => {
+  const roots: string[] = [];
+  const observed: GatedActionReads = {...reads,
+    git: (cwd, args) => args.includes("--show-toplevel") ? Promise.resolve(cwd) : reads.git(cwd, args),
+    disposable: root => { roots.push(root); return Promise.resolve(root.startsWith("/repo/.worktree/") || root.startsWith("/tmp/")); },
+  };
+  for (const command of [
+    "for w in s2-seam s2-engine; do git worktree remove .worktree/$w; done",
+    "for w in s2-seam s2-engine; do git worktree remove --force .worktree/${w}; done",
+    "W=/tmp/a && git -C $W reset --hard", "W=/tmp/a\ngit -C ${W} clean -fd",
+  ]) expect(await gatedAction("bash", {command}, "/repo", observed), command).toBeUndefined();
+  expect(roots).toContain("/repo/.worktree/s2-seam"); expect(roots).toContain("/repo/.worktree/s2-engine");
+  for (const command of [
+    "for w in /tmp/a /repo; do git worktree remove --force $w; done",
+    "for w in $(printf /tmp/a); do git worktree remove --force $w; done",
+    "W=/tmp/a; W=/tmp/b; git -C $W reset --hard",
+    "W=/tmp/a; export W; git -C $W reset --hard", "W=/tmp/a; read W; git -C $W reset --hard",
+    "W=/tmp/a; unset W; git -C $W reset --hard", "W=/tmp/a; (true); git -C $W reset --hard",
+    "W=/tmp/a; echo ok | cat; git -C $W reset --hard", "W=$(pwd); git -C $W reset --hard",
+    "W=/tmp/a; printf -v W /repo; git -C $W reset --hard",
+    "false && W=/tmp/a; git -C $W reset --hard",
+    "W=/tmp/a; echo ${W:=/repo}; git -C $W reset --hard",
+    "W=/tmp/a; W+=/other; git -C $W reset --hard",
+    "W=/tmp/a; C=read; $C W; git -C $W reset --hard",
+    "W=/tmp/a; C=eval; $C 'W=/repo'; git -C $W reset --hard",
+    "PWD=/tmp/a; cd /repo; git -C $PWD reset --hard",
+    "_=/tmp/a; echo /repo; git -C $_ reset --hard",
+    "DIRSTACK=/tmp/a; cd /repo; git -C $DIRSTACK reset --hard",
+    "PIPESTATUS=/tmp/a; true; git -C $PIPESTATUS reset --hard",
+    "W=/tmp/a; wait -p W; git -C $W reset --hard",
+    "W='/tmp/$OTHER'; git -C $W reset --hard",
+    'W="/tmp/$OTHER"; git -C $W reset --hard',
+    "W=/tmp/a; git -C '$W' reset --hard",
+
+  ]) expect((await gatedAction("bash", {command}, "/repo", observed))?.category, command).toBe("destroy-local");
+});
+
+
+it("does not hide substitutions in computed parameter expansions", async () => {
+  expect((await gatedAction("bash", {command: 'echo "${W:-$(git push --force)}"'}, "/repo", reads))?.category).toBe("force-push");
+});
+
+it("keeps default, forced and deleted pushes protected through literal arguments and every loop iteration", async () => {
+  for (const [command, category] of [
+    ["B=main; git push origin $B", "push-default"],
+    ["for b in cairn main; do git push origin $b; done", "push-default"],
+    ["for b in $(echo cairn); do git push origin $b; done", "force-push"],
+    ["B=--force-with-lease; git push origin cairn $B", "force-push"],
+    ["B=:cairn; git push origin $B", "delete-remote"],
+    ["B=unmerged; git branch -D $B", "destroy-local"],
+  ]) expect((await gatedAction("bash", {command}, "/repo", reads))?.category, command).toBe(category);
+});
+
+it("distinguishes commit checkouts from paths, including an ignored path with the same name as a commit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-checkout-path-"));
+  const git = async (args: readonly string[]) => (await promisify(execFile)("git", ["-C", root, ...args], {env: {...sanitizedGitEnv(), GIT_OPTIONAL_LOCKS: "0"}, encoding: "utf8"})).stdout;
+  const observed: GatedActionReads = {...reads, git: (_cwd, args) => git(args)};
+  const classify = (command: string) => gatedAction("bash", {command}, root, observed);
+  try {
+    await git(["init", "-qb", "main"]);
+    await writeFile(join(root, "base.txt"), "base"); await git(["add", "base.txt"]);
+    await git(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "Base"]);
+    await git(["branch", "feature"]);
+    await writeFile(join(root, "base.txt"), "dirty");
+    expect(await classify("git checkout -q feature")).toBeUndefined();
+    expect(await classify("git switch --detach feature")).toBeUndefined();
+    expect(await classify("git checkout --detach feature")).toBeUndefined();
+    await writeFile(join(root, "feature"), "untracked path");
+    expect((await classify("git checkout feature"))?.category).toBe("destroy-local");
+    await writeFile(join(root, ".gitignore"), "feature\n");
+    // The path ambiguity prevents the commit exemption even for ignored files. A clean status can still pass, as before.
+    const unreadableStatus: GatedActionReads = {...observed, git: (_cwd, args) => args[0] === "status" ? Promise.reject(new Error("Unknown dirty state")) : git(args)};
+    expect((await gatedAction("bash", {command: "git checkout feature"}, root, unreadableStatus))?.category).toBe("destroy-local");
+    expect((await classify("git checkout base.txt"))?.category).toBe("destroy-local");
+  } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+
+it("needs no repository observation for non-discarding switch and explicit detach forms", async () => {
+  let observations = 0;
+  const unknown: GatedActionReads = {...reads, git: () => { observations++; return Promise.reject(new Error("Unknown cwd")); }};
+  for (const command of ["git switch feature", "git switch --detach feature", "git switch -cfeature", "git switch --create branch", "git -C $S/verify-core checkout -q --detach 055d033", "cd $UNKNOWN; git checkout --detach HEAD"]) {
+    expect(await gatedAction("bash", {command}, "/repo", unknown), command).toBeUndefined();
+  }
+  expect(observations).toBe(0);
+  for (const command of ["git checkout feature", "git checkout --detach HEAD -- base.txt", "git checkout --detach --no-detach feature", "git switch --disc main", "git checkout --det -f HEAD"]) {
+    expect((await gatedAction("bash", {command}, "/repo", unknown))?.category, command).toBe("destroy-local");
+  }
 });

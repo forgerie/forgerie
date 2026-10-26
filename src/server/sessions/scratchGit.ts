@@ -1,3 +1,4 @@
+import { remoteHeadRef } from "./gatedGitRemote.js";
 import { mkdir, readFile, realpath, rm, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalGitEndpoint } from "./canonicalGitEndpoint.js";
@@ -255,7 +256,7 @@ async function remoteView(git: ScratchGitDeps["git"], cwd: string, remote: strin
 }
 async function readRemote(git: ScratchGitDeps["git"], cwd: string, url: string, endpoint: string): Promise<RemoteView> {
   const lines = gitLine(await git(cwd, ["ls-remote", "--symref", url])).split("\n");
-  const head = lines.find(line => /^ref: refs\/heads\/\S+\tHEAD$/u.test(line))?.slice(5).split("\t")[0];
+  const head = remoteHeadRef(lines.join("\n"));
   if (head === undefined) refuse(`Cannot read the default branch of ${url}`);
   const refs = new Map<string, string>();
   for (const line of lines) {
