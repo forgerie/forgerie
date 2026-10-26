@@ -2,11 +2,12 @@ import { usePortalTarget } from "./portalLayer";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, useAuiState, unstable_useTriggerPopoverScopeContext, type Unstable_TriggerItem } from "@assistant-ui/react";
-import { EyeIcon, EyeOffIcon, FileTextIcon, FolderIcon, XIcon } from "lucide-react";
+import { EyeIcon, EyeOffIcon, FileTextIcon, FolderIcon } from "lucide-react";
 import type { MentionSource, ModelSuggestions, ModelThinking } from "../mentionSource";
 import { mentionFormatter, mentionMatcher, mentionPlacement, type MentionTrigger } from "../mentionSyntax";
 import type { ComposerInputElement } from "./ComposerEditor";
 import { FloatingPanel } from "./FloatingPanel";
+import { SuggestionHeader } from "./SuggestionHeader";
 import { OptionList, type OptionGroup, type OptionItem } from "./OptionList";
 import { ToggleGroup } from "./ToggleGroup";
 
@@ -183,11 +184,7 @@ function MentionResults({ label, result, input, snapshot, onQuery, showHidden, o
   const level = chosen ?? model?.preset ?? "";
   const levels = model?.levels ?? [];
   return <FloatingPanel ref={positionPopup}>
-    <div className="mention-header">
-      <span>{label}</span>
-      <button type="button" className="mention-close" tabIndex={-1} aria-label={`Dismiss ${label.toLowerCase()} suggestions`}
-        onMouseDown={(event) => event.preventDefault()} onClick={scope.close}><XIcon size={14} aria-hidden /></button>
-    </div>
+    <SuggestionHeader label={label} onDismiss={scope.close} />
     <OptionList label={`${label} suggestions`} groups={found?.groups ?? []} status={status}
       action={toggle ? { label: showHidden ? toggle.hide : toggle.show, pressed: showHidden,
         icon: showHidden ? <EyeOffIcon aria-hidden size={14} /> : <EyeIcon aria-hidden size={14} />, onPress: () => onShowHidden(!showHidden) } : undefined}

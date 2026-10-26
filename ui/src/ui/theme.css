@@ -181,13 +181,6 @@
 html { overscroll-behavior: none; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; }
 button, textarea { font: inherit; }
-/* Trigger suggestions: a FloatingPanel placed by mentionPlacement, holding an OptionList.
-   The label lines up with the row names below it. */
-.mention-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
-  padding-inline: var(--space-4) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); }
-.mention-close { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
-  background: transparent; border: 0; border-radius: var(--radius-control); }
-.mention-close:hover { background: var(--hover-surface); }
 /* The level for the model a # reference inserts. It stays under the list while the rows scroll. */
 .mention-thinking { flex: none; display: flex; align-items: center; gap: var(--space-1) var(--space-3);
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4); border-block-start: var(--hairline) solid var(--line); }

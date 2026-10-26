@@ -7,6 +7,7 @@ import { TitleField } from "../ui/TitleField";
 import { ChoiceList } from "../ui/ChoiceList";
 import { TextSubmit, type TextSubmitFollowUp } from "../ui/TextSubmit";
 import type { Project } from "../newSession";
+import type { PathSuggest } from "../ui/PathField";
 
 export interface GroupDraft { name: string; projectIds: string[] }
 
@@ -15,7 +16,7 @@ export interface GroupDraft { name: string; projectIds: string[] }
  * title, its projects the body. The header saves; rare commands wait in ⋯.
  * Changes stay a draft until Save, and a refused save keeps the draft.
  */
-export function GroupEditor({ back, close, fresh, draft, projects, dirty, pending, error, onChange, onSave, onDiscard, onDelete, onRegister }: {
+export function GroupEditor({ back, close, fresh, draft, projects, dirty, pending, error, onChange, onSave, onDiscard, onDelete, onRegister, suggestFolders }: {
   back?: ReactNode; close?: ReactNode;
   /** A group that is not saved yet. */
   fresh: boolean;
@@ -29,6 +30,7 @@ export function GroupEditor({ back, close, fresh, draft, projects, dirty, pendin
    * does not exist comes back as an offer to create it.
    */
   onRegister: (path: string) => Promise<TextSubmitFollowUp | void>;
+  suggestFolders: PathSuggest;
 }) {
   const form = useId();
   const commands: MenuCommand[] = [
@@ -51,6 +53,6 @@ export function GroupEditor({ back, close, fresh, draft, projects, dirty, pendin
         chosen={draft.projectIds} onChange={(projectIds) => onChange({ ...draft, projectIds })} />
     </form>
     <TextSubmit label="Add a project folder" hint="For a repository that is not in the list yet. Forgerie adds the folder as a project and checks it here. If the folder does not exist, Forgerie offers to create it."
-      action="Add folder" placeholder="/path/to/repository" pending={pending} onSubmit={onRegister} />
+      action="Add folder" placeholder="/path/to/repository" pending={pending} onSubmit={onRegister} suggestions={{ label: "Folders", source: suggestFolders }} />
   </SettingsFrame>;
 }

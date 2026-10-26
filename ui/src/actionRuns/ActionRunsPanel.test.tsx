@@ -42,7 +42,7 @@ async function render(api: ActionRunApi, options: { readOnly?: boolean; first?: 
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 async function type(value: string) {
-  const input = document.querySelector<HTMLInputElement>(".text-submit-input")!;
+  const input = document.querySelector<HTMLInputElement>(".text-submit input")!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -59,7 +59,7 @@ describe("the Actions tab", () => {
     expect(api.link).toHaveBeenCalledWith(session, passedRun.url);
     expect(text()).not.toContain("No linked runs");
     expect(button(/^CI.*Retry dropped upload chunks/)?.textContent).toContain("Success");
-    expect(document.querySelector<HTMLInputElement>(".text-submit-input")?.value).toBe("");
+    expect(document.querySelector<HTMLInputElement>(".text-submit input")?.value).toBe("");
   });
 
   it("keeps a refused value and says why: not a run, or the server's words", async () => {
@@ -70,7 +70,7 @@ describe("the Actions tab", () => {
     expect(document.querySelector(".text-submit-error")?.textContent).toContain("Paste a run's URL from GitHub");
     await type("4");
     expect(document.querySelector(".text-submit-error")?.textContent).toBe("GitHub has no run 4 on forgerie/forgerie.");
-    expect(document.querySelector<HTMLInputElement>(".text-submit-input")?.value).toBe("4");
+    expect(document.querySelector<HTMLInputElement>(".text-submit input")?.value).toBe("4");
   });
 
   it("lists linked runs oldest first with their state, facts, and watch", async () => {

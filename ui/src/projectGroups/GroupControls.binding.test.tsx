@@ -12,6 +12,7 @@ let served: GroupCatalog;
 const calls: unknown[][] = [];
 const api = {
   list: async () => served,
+  directories: async () => [],
   allWorkspaces: async () => ({ related: [] }),
   save: async (...args: unknown[]) => { calls.push(["save", ...args]); throw new Error("This group changed in another window."); },
   remove: async (group: { id: string }) => { calls.push(["remove", group.id]); served = { ...served, groups: served.groups.filter((item) => item.id !== group.id) }; return { removed: true }; },

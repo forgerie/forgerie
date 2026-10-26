@@ -1,0 +1,2 @@
+/* The header stays put while only the completion rows scroll, as in the composer. */
+.path-field-options { display: flex; flex: 1 1 auto; min-block-size: 0; }

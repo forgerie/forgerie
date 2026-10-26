@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { PathField, type PathSuggestions } from "./PathField";
+import { TextField } from "./TextField";
 import "./TextSubmit.css";
 
 /**
@@ -21,10 +23,12 @@ export interface TextSubmitFollowUp {
  * it, or edits the value it was for. A refusal given as `error` shows under
  * the field until the next submit.
  */
-export function TextSubmit({ label, hint, action, placeholder, pending, error, onSubmit }: {
+export function TextSubmit({ label, hint, action, placeholder, pending, error, suggestions, onSubmit }: {
   label: string; hint?: string | undefined; action: string; placeholder: string; pending: boolean;
   /** Why the last value was refused, in the server's words. */
   error?: string | undefined;
+  /** A path-only value uses the same popup as file discovery, without a mention marker. */
+  suggestions?: PathSuggestions | undefined;
   onSubmit: (value: string) => Promise<TextSubmitFollowUp | void>;
 }) {
   const id = useId();
@@ -34,6 +38,8 @@ export function TextSubmit({ label, hint, action, placeholder, pending, error, o
   // The field often sits at the foot of a scrolling page, so the offer would open out of sight.
   useEffect(() => { if (followUp) offer.current?.scrollIntoView?.({ block: "nearest" }); }, [followUp]);
   const done = () => { setFollowUp(undefined); setValue(""); };
+  const change = (next: string) => { setValue(next); setFollowUp(undefined); };
+  const field = { id, placeholder, value, disabled: pending, "aria-describedby": hint ? `${id}-hint` : undefined };
   return <form className="text-submit" onSubmit={(event) => {
     event.preventDefault(); setFollowUp(undefined);
     void onSubmit(value.trim()).then((next) => { if (next) setFollowUp(next); else done(); }).catch(() => undefined);
@@ -41,8 +47,8 @@ export function TextSubmit({ label, hint, action, placeholder, pending, error, o
     <label className="text-submit-label" htmlFor={id}>{label}</label>
     {hint ? <p className="text-submit-hint" id={`${id}-hint`}>{hint}</p> : null}
     <div className="text-submit-row">
-      <input className="text-submit-input" id={id} placeholder={placeholder} value={value} disabled={pending} aria-describedby={hint ? `${id}-hint` : undefined}
-        autoComplete="off" autoCapitalize="off" spellCheck={false} onChange={(event) => { setValue(event.target.value); setFollowUp(undefined); }} />
+      {suggestions ? <PathField {...field} suggestions={suggestions} onChange={change} />
+        : <TextField {...field} autoComplete="off" autoCapitalize="off" spellCheck={false} onChange={(event) => change(event.target.value)} />}
       <button className="text-submit-button" type="submit" disabled={pending || !value.trim()}>{action}</button>
     </div>
     {error ? <p className="text-submit-error" role="alert">{error}</p> : null}

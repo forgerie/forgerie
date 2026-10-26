@@ -160,7 +160,7 @@ describe("a proposal's sheet", () => {
     // Before each stage and after each, but never after the land stop.
     expect(gaps).toHaveLength(4);
     await act(async () => { (gaps[3] as HTMLButtonElement).click(); });
-    const input = sheet().querySelector<HTMLInputElement>(".text-submit-input")!;
+    const input = sheet().querySelector<HTMLInputElement>(".text-submit input")!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "Docs");
       input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -279,7 +279,7 @@ describe("a proposal's sheet", () => {
     await press("Edit stages");
     expect(sheet().querySelector(".route-list-empty")?.textContent).toBe("No stages yet. Add the first one.");
     await press("Add a stage");
-    const input = sheet().querySelector<HTMLInputElement>(".text-submit-input")!;
+    const input = sheet().querySelector<HTMLInputElement>(".text-submit input")!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "Split the suites");
       input.dispatchEvent(new Event("input", { bubbles: true }));

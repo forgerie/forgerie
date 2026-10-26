@@ -16,7 +16,7 @@ export const isMissingFolder = (cause: unknown) => cause instanceof ApiError && 
 const refusalSchema = z.object({ error: z.string(), code: z.string().optional() });
 export function createProjectGroupApi(request: Fetch) {
   async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
-    const response = await request(url, { ...init, signal: AbortSignal.timeout(60_000) });
+    const response = await request(url, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000) });
     const body: unknown = await response.json();
     if (!response.ok) {
       const refusal = refusalSchema.safeParse(body).data;
@@ -27,6 +27,8 @@ export function createProjectGroupApi(request: Fetch) {
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return {
     list: () => call("/api/project-groups", catalogSchema),
+    directories: (query: string, signal: AbortSignal) => call(`/api/project-directories?${new URLSearchParams({ q: query })}`,
+      z.array(z.object({ path: z.string().min(1) })), { signal }).then((items) => items.map((item) => item.path)),
     /** `create` makes the folder first when it does not exist. */
     register: (path: string, create = false) => call("/api/projects", projectSchema, json("POST", create ? { path, create } : { path })),
     allWorkspaces: () => call("/api/project-workspaces/all", z.object({ related: z.array(worktreeInfoSchema) })),

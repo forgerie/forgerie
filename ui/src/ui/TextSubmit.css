@@ -4,10 +4,6 @@
 .text-submit-label { font-size: var(--small-text); font-weight: 500; }
 .text-submit-hint { margin: 0; color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
 .text-submit-row { display: flex; flex-wrap: wrap; gap: var(--space-2); min-inline-size: 0; }
-.text-submit-input { flex: 1 1 14rem; min-inline-size: 0; min-block-size: var(--control-size); padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--line);
-  border-radius: var(--radius-control); background: var(--code-surface); color: var(--foreground); font-family: var(--code-font); font-size: var(--code-size);
-  transition: border-color 150ms; }
-.text-submit-input:focus-visible { outline: none; border-color: var(--line-focus); }
 .text-submit-button { flex: none; min-block-size: var(--control-size); padding-inline: var(--space-4); border: var(--hairline) solid var(--line); border-radius: var(--radius-control);
   background: transparent; color: var(--foreground); font-size: var(--small-text); font-weight: 500; transition: background-color 150ms, opacity 150ms; }
 .text-submit-button:not(:disabled):hover { background: var(--hover-surface); }
@@ -23,4 +19,4 @@
 .text-submit-button[data-emphasis="strong"] { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
 .text-submit-button[data-emphasis="strong"]:not(:disabled):hover { background: var(--primary); opacity: 0.88; }
 .text-submit-button[data-emphasis="quiet"] { border-color: transparent; color: var(--muted-foreground); }
-@media (prefers-reduced-motion: reduce) { .text-submit-input, .text-submit-button { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .text-submit-button { transition: none; } }

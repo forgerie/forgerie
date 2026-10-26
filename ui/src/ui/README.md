@@ -9,6 +9,9 @@ The gates in `ui/gates/` enforce the rules.
 One line per component: the name in backticks, its layer, and what it decides.
 
 - `ActionFooter` (molecule): a pinned decision group with a reason and wrapping primary, secondary, or destructive actions; an input such as a reply box can take the actions' place under the reason; a failed action's problem shows in the failure ink above them; a `quiet` action is words without a frame; `noteLastWhenShort` puts the note after the actions in a container under 42rem tall.
+- `TextField` (atom): a code-face input shared by text submission and path completion.
+- `SuggestionHeader` (molecule): a suggestion list’s label and dismissal, keeping focus in its input.
+- `PathField` (molecule): a path-only combobox with file or folder suggestions supplied by its caller; it uses the composer’s popup surface, arrow navigation, Enter/Tab completion and Escape dismissal. Choosing a folder lists its children; Enter then submits the chosen folder unless the reader highlights a child.
 - `TextSubmit` (molecule): one typed value and the action that sends it; the button drops under the field when the row is narrow, a refused value stays with the refusal's words under it, and a refusal may offer one follow-up (such as Create) to confirm in place.
 - `ValueList` (molecule): a short list of typed values: each in its own box with a Remove named for it, a problem under any box, an empty text, and an add action that turns off at a limit; focus moves into a new box and stays in the list after a removal.
 - `HeaderButton` (atom): a page header's one filled action, with a control-sized hit area; it can submit a form elsewhere on the page; `plain` draws a second action beside it with a hairline.

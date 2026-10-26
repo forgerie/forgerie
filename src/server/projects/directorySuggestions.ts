@@ -15,7 +15,11 @@ export async function listDirectorySuggestions(query = ""): Promise<ClientFileSu
   const endsWithSeparator = raw === "" || raw.endsWith("/") || raw.endsWith("\\") || raw === "~";
   const parent = endsWithSeparator ? expanded : dirname(expanded);
   const search = endsWithSeparator ? "" : basename(expanded).toLowerCase();
-  const entries = await readdir(parent, { withFileTypes: true });
+  const entries = await readdir(parent, { withFileTypes: true }).catch((error: unknown) => {
+    // A path typed halfway names no folder yet; that is no match, not a failure.
+    if (isMissingFolder(error)) return [];
+    throw error;
+  });
   const suggestions: ClientFileSuggestion[] = [];
 
   for (const entry of entries) {
@@ -33,4 +37,9 @@ export async function listDirectorySuggestions(query = ""): Promise<ClientFileSu
   }
 
   return suggestions.sort((a, b) => a.path.localeCompare(b.path)).slice(0, 80);
+}
+
+function isMissingFolder(error: unknown): boolean {
+  const code = error instanceof Error && "code" in error ? error.code : undefined;
+  return code === "ENOENT" || code === "ENOTDIR";
 }

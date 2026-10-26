@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { StateChecks } from "@simonwjackson/caliper/checks";
 import { GroupEditor, type GroupDraft } from "./GroupEditor";
 import { catalog, manyProjects } from "./fixtures/groups";
+import { suggestFolders } from "../ui/fixtures/paths";
 
 export const name = "Project group";
 export const note = "One group as a document: its name, then the projects it holds";
@@ -15,13 +16,13 @@ export const checks = {
       expect(canvas.getByText("Saved 3 projects")).toBeVisible();
     },
     "a folder that does not exist is offered for creation": async ({ canvas, input, expect }) => {
-      await input.type(canvas.getByRole("textbox", { name: "Add a project folder" }), "/code/new-repo");
+      await input.type(canvas.getByRole("combobox", { name: "Add a project folder" }), "/code/new-repo");
       await input.click(canvas.getByRole("button", { name: "Add folder" }));
       expect(canvas.getByRole("button", { name: "Create folder" })).toBeVisible();
       expect(canvas.queryByRole("checkbox", { name: /new-repo/ })).toBeNull();
     },
     "a folder that does not exist is created only on confirm": async ({ canvas, input, expect }) => {
-      await input.type(canvas.getByRole("textbox", { name: "Add a project folder" }), "/code/new-repo");
+      await input.type(canvas.getByRole("combobox", { name: "Add a project folder" }), "/code/new-repo");
       await input.click(canvas.getByRole("button", { name: "Add folder" }));
       expect(canvas.getByText("No folder at /code/new-repo. Create it and add it as a project?")).toBeVisible();
       await input.click(canvas.getByRole("button", { name: "Create folder" }));
@@ -46,12 +47,12 @@ function Editor({ fresh, start, error }: { fresh: boolean; start: GroupDraft; er
   const dirty = draft.name !== base.name || draft.projectIds.join() !== base.projectIds.join();
   return <>
     <GroupEditor back={back} fresh={fresh} draft={draft} projects={projects} dirty={dirty} pending={false} error={error}
-      onChange={setDraft} onDiscard={() => setDraft(base)} onSave={() => { setBase(draft); setSaid(`Saved ${String(draft.projectIds.length)} projects`); }}
+      suggestFolders={suggestFolders} onChange={setDraft} onDiscard={() => setDraft(base)} onSave={() => { setBase(draft); setSaid(`Saved ${String(draft.projectIds.length)} projects`); }}
       onDelete={fresh ? undefined : () => setSaid("Deleted")}
       onRegister={async (path) => {
         const add = async () => {
           const id = `p-${String(projects.length)}`;
-          setProjects([...projects, { id, name: path.split("/").at(-1) ?? path, path }]);
+          setProjects([...projects, { id, name: path.split("/").filter(Boolean).at(-1) ?? path, path }]);
           setDraft({ ...draft, projectIds: [...draft.projectIds, id] });
         };
         // In this fixture, a path under /code/new- names a folder that does not exist yet.

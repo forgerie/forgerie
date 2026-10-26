@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -44,6 +44,24 @@ describe("directory suggestions", () => {
     const suggestions = await listDirectorySuggestions(`${root}/`);
 
     expect(suggestions.map((entry) => entry.path)).toEqual([`${join(root, "one")}/`, `${join(root, "two")}/`]);
+  });
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === "win32")("reports permission failures rather than claiming there are no matching folders", async () => {
+    const root = await tempDirectory();
+    const locked = join(root, "locked");
+    await mkdir(locked);
+    await chmod(locked, 0);
+    try { await expect(listDirectorySuggestions(`${locked}/`)).rejects.toMatchObject({ code: "EACCES" }); }
+    finally { await chmod(locked, 0o700); }
+  });
+
+  it("finds nothing under a folder that does not exist or is a file", async () => {
+    const root = await tempDirectory();
+    await writeFile(join(root, "notes"), "file");
+
+    await expect(listDirectorySuggestions(join(root, "missing", "de"))).resolves.toEqual([]);
+    await expect(listDirectorySuggestions(join(root, "notes", ""))).resolves.toEqual([]);
+    await expect(listDirectorySuggestions(`${join(root, "notes")}/`)).resolves.toEqual([]);
   });
 });
 

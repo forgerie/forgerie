@@ -113,7 +113,7 @@ export function ProjectGroupSettings({ api, state, group, onOpen, back, close }:
     if (!current.projectIds.includes(project.id)) change({ name: current.name, projectIds: [...current.projectIds, project.id] });
   };
   return <GroupEditor back={back} close={close} fresh={fresh} draft={draft} projects={catalog.projects} dirty={dirty} pending={pending} error={error}
-    onChange={change} onDiscard={forget}
+    onChange={change} onDiscard={forget} suggestFolders={api.directories}
     onSave={() => {
       // The draft keeps the revision it started from, so a save never overwrites a change made elsewhere.
       void mutate(() => api.save(draft.name.trim(), draft.projectIds, saved ? { ...saved, revision: draft.revision ?? saved.revision } : undefined))
