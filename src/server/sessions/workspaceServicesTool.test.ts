@@ -1,3 +1,4 @@
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { join } from "node:path";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 import type { DurableSessionRuntime } from "./durableSessionRuntime.js";
@@ -13,6 +14,9 @@ it("scopes native controls to the current worktree and enforces execution approv
     const record = await f.add("one");
     runtime = (await servicesToolRuntime(record.path, f.root, f.services)).runtime;
     const tool = createWorkspaceServicesTool(record.path, f.services);
+    expect(tool.promptGuidelines).toContain(AUTONOMY_GUIDANCE);
+    expect(tool.promptGuidelines?.join("\n")).toContain("Set approve=true when starting in-scope services");
+    expect(tool.description).not.toContain("explicit user approval");
     const context = runtime.session.extensionRunner.createToolContext("native-test", undefined);
     const cancelled = new AbortController(); cancelled.abort();
     await expect(tool.execute("start", { action: "start", approve: true }, cancelled.signal, undefined, context)).rejects.toThrow();

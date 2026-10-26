@@ -1,3 +1,4 @@
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { defineDoc, defineExtension, defineTask, defineTool, LiveDoc, type CommitPublication, type Conversation, type ConversationId, type Harness, type Tx } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { Check } from "typebox/value";
@@ -75,10 +76,10 @@ export async function overturnDecision(harness: Harness, parent: Conversation, i
 }
 export function decisionExtension() {
   return defineExtension({ name: "forgerie.decisions", tasks: [Correction], tools: [defineTool({
-    name: "record_decision", description: "Record a best guess made in place of a contradicts or stuck escalation, then keep working. Supply question, choice and reason, with guess: true. Do not log ordinary notable choices. Irreversible actions and actions outside the project in the user's name require ask_user instead.",
+    name: "record_decision", description: `Record your choice when the task, chat, code and docs leave a choice open and the autonomy rule lets you decide. Supply question, choice and reason, with guess: true, then keep working. Do not log choices already settled by the task, chat, code or docs.\n\n${AUTONOMY_GUIDANCE}`,
     parameters: RecordDecisionSchema, replay: "safe", executionMode: "sequential",
     execute: async (args, api, context) => {
-      if (!args.guess) return { content: [{ type: "text" as const, text: "record_decision records only guesses in place of an escalation (guess: true), not ordinary choices." }], isError: true };
+      if (!args.guess) return { content: [{ type: "text" as const, text: "record_decision records only open choices (guess: true), not choices already settled by the task, chat, code or docs." }], isError: true };
       try {
         await api.commit((tx) => logDecision(tx, api.conversationId, { id: `d:${String(api.taskId)}`, kind: "guess", by: "parent", question: args.question, choice: args.choice, reason: args.reason, flagged: true }), context);
         return { content: [{ type: "text" as const, text: "Guess recorded. Keep working; the user may overturn it." }] };

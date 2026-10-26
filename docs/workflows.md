@@ -196,7 +196,7 @@ The cancellation request is durable and resumes after a daemon restart. It holds
 
 ## Decision log
 
-Each parent keeps a Durable decision log. A decision made while a workflow runs carries that run's `runId`. The log records parent answers to child questions, guesses in place of an escalation, automatic stops, approved or refused gated actions, and filed issues. It does not record other choices the agent judges notable. This slice implements answers and guesses; later slices add the other three kinds.
+Each parent keeps a Durable decision log. A decision made while a workflow runs carries that run's `runId`. The log records parent answers to child questions, guesses about open choices under the [autonomy rule](child-agents.md#when-agents-need-you), automatic stops, approved or refused gated actions, and filed issues. It does not record choices already settled by the task, chat, code or docs. This slice implements answers and guesses; later slices add the other three kinds.
 
 An irreversible or external child escalation waits on you and shows the parent's guess and reason in its card. A contradicts or stuck escalation gives the child a provisional guess at once. Flagged standing guesses add to `flaggedDecisions`, not `waitingOnYou`, and never pin in the dock. Overturning records a note and sends one correction to a live child, or to its parent after the child finishes. It asks the agent to redo affected work. Delivery is a follow-up, not an interruption of an executing tool. The outbox remains pending until transcript placement. A withdrawn queued input is retried with a fresh receipt, and a correction retry checks its live target again. Already placed inputs are not resent.
 

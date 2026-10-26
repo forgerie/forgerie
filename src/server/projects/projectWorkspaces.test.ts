@@ -1,3 +1,5 @@
+import { AUTONOMY_GUIDANCE } from "../sessions/autonomyGuidance.js";
+import { createProjectTools } from "../sessions/projectTools.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, writeFile, rm, access, rename } from "node:fs/promises";
@@ -38,6 +40,10 @@ async function fixture(discovery?: GitWorktreeDiscovery) {
 }
 it("one chat prepares only the requested repo, survives reload, and lands without making the chat read-only", async () => {
   const f = await fixture();
+  const tool = createProjectTools(f.a, f).find(tool => tool.name === "project_worktree");
+  expect(tool?.promptGuidelines).toContain(AUTONOMY_GUIDANCE);
+  expect(tool?.promptGuidelines?.join("\n")).not.toContain("only on user authorization");
+  expect(tool?.description).not.toContain("explicit user approval");
   const [first, repeated] = await Promise.all([f.work.prepare(f.ref, f.pb.id, "request"), f.work.prepare(f.ref, f.pb.id, "request")]);
   expect(first.id).toBe(repeated.id);
   expect(first.sessionId).toBeUndefined();

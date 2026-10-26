@@ -68,7 +68,7 @@ This index is display-only and has no additional cache window. It can notice an 
 
 Managed worktrees can own development services through Process Compose. The declaration lives in `.forgerie/config.json` version 2. See [configuration](config.md#declared-workspace-services) for the file format and service environment.
 
-The native Pi tool is `workspace_services`. Its actions are `status`, `logs`, `start`, `stop`, `restart`, and `wait`. It resolves the current worktree from the session's cwd. It cannot target another checkout. A start requires `approve=true` after user approval.
+The native Pi tool is `workspace_services`. Its actions are `status`, `logs`, `start`, `stop`, `restart`, and `wait`. It resolves the current worktree from the session's cwd. It cannot target another checkout. A start requires the execution flag `approve=true`. For in-scope services, the agent sets it without a separate permission question under the [autonomy rule](child-agents.md#when-agents-need-you).
 
 Start the project without a service name before individual controls. Repeating a whole-project start against a running instance does not execute another launch.
 

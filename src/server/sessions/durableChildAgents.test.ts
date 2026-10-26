@@ -1,4 +1,5 @@
 // Durable-native child agents through Forgerie's real session service and Durable factory, with a scripted model.
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -340,6 +341,7 @@ describe("Durable-native child agents in a Forgerie session", () => {
     await until("looker report", async () => (await reports(ref, "looker")).length === 1);
     // Durable sends instructions and the offered tools as system sections.
     const childRequest = systemSeen.find((request) => request.includes("PROFILE-MARKER")) ?? "";
+    expect(childRequest).toContain(JSON.stringify(AUTONOMY_GUIDANCE).slice(1, -1));
     expect(childRequest).toContain("\"name\":\"read\"");
     expect(childRequest).not.toContain("\"name\":\"write\"");
     await expect(readFile(join(directory, "blocked.txt"), "utf8")).rejects.toThrow();

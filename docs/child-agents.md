@@ -28,11 +28,42 @@ The parent model sees each steer and stop as a note, so it does not undo what yo
 
 Esc in the parent does not stop its children.
 
+## When agents need you
+
+Agents ask for permission only for loss that Git, a backup or a rebuild cannot
+restore, or for actions toward other people or outside services in your name.
+Examples include erasing device storage, deleting remote data, sending messages,
+publishing to public registries, and purchases. They also ask about product intent
+that the chat, code and docs do not decide when a wrong guess is expensive to undo.
+
+Agents do other in-scope work without asking, then report it. This includes builds,
+tests, commits, landing, branch pushes, deployment to existing targets, tool and
+dependency installation, and making keys or tokens on your machines. They choose
+when a choice remains open and record a guess with `record_decision` where available.
+They can still ask you to press a device button, read a screen, or describe how
+something feels. They also respect an explicit request to consult you.
+
+**Cost:** agents can reboot your development or test device while a game or app is
+running. They can restart Forgerie and other services without asking. Expect
+interruptions and possible loss of unsaved app or game progress. A wrong guess can
+require rework. Existing [tool gates](gated-actions.md) still apply; this guidance
+does not remove them or bypass workflow stops that wait for you.
+
+`ask_user` posts a browser question form and ends the run. Your submitted answers
+return as a follow-up that resumes the agent. `end_turn` carries the final reply.
+Its `awaiting: "reply"` is only for the cases above, a physical or observation
+request, or your explicit request to be consulted. A completion report uses
+`awaiting: "nothing"`. Agents must not end with an offer such as “Shall I start?”
+when the next step is in scope. They must do that step.
+
 ## Questions and decisions
 
 A child's `ask_human` goes to its parent first as `[child <name> asks <questionId>] <question>`. The child waits. A busy parent receives one follow-up, like a completion report. The question does not create a user card or count as **Needs your response**. The parent answers from the task, contract, code, docs and chat with `child_agent({action: "answer", name, questionId, answer, reason})`.
 
-Only escalations reach you. The parent can call `child_agent({action: "escalate", questionId, kind, guess, why})`:
+The parent applies the same rule to child questions. For unresolved product intent
+that is expensive to undo, physical help, or explicit consultation, it uses
+`ask_user`, then answers the child from your reply. For loss and external effects,
+the parent can call `child_agent({action: "escalate", questionId, kind, guess, why})`:
 
 | Kind | Result |
 | --- | --- |
@@ -43,9 +74,9 @@ The parent may drop the `q:` prefix: `answer` with `313` resolves `q:313` when t
 
 When a question still waits for the parent 10 minutes after it was asked, Forgerie sends the parent one reminder: `[child <name> still waits on <questionId>, asked over 10 min ago] <question>`. The reminder uses the Durable clock, survives restart, and is skipped when the question was answered, closed or escalated to you. A reminder costs one parent turn and can interrupt a hold that is correct.
 
-Taste and scope growth are not escalations. There is no timeout that forwards a slow parent's question to you. Open question counts and `/children` question lists include only escalations waiting for you, not questions waiting for the parent. Questions already open before this change remain user-facing.
+Taste and scope choices are not escalations unless they leave product intent undecided and a wrong guess is expensive to undo. There is no timeout that forwards a slow parent's question to you. Open question counts and `/children` question lists include only escalations waiting for you, not questions waiting for the parent. Questions already open before this change remain user-facing.
 
-The decision log records parent answers and provisional guesses, not every choice an agent judges notable. User answers to escalated child questions record `by: "user"`. `by: "parent"` identifies parent answers and guesses. Each record includes the active workflow run ID, if one exists when the decision commits. A parent's own `record_decision({question, choice, reason, guess: true})` is only for guesses in place of an escalation. `guess: false` is refused; ADR 0005 excludes ordinary choices. The parent uses `ask_user` only for escalations that must wait for you.
+The decision log records parent answers and guesses about open choices, not choices already settled by the task, chat, code or docs. User answers to escalated child questions record `by: "user"`. `by: "parent"` identifies parent answers and guesses. Each record includes the active workflow run ID, if one exists when the decision commits. A parent uses `record_decision({question, choice, reason, guess: true})` when it decides an open choice under the rule above. `guess: false` is refused.
 
 Use **Looks right** to confirm a flagged guess without changing its choice or sending a correction. Confirmation clears the outstanding flag and keeps its first confirmation timestamp on retries. It creates no input or task and does not resume work. Open an inactive session before confirming its guess. A confirmed guess can still be overturned later.
 

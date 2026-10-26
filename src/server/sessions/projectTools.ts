@@ -1,3 +1,4 @@
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ProjectWorkspaces } from "../projects/projectWorkspaces.js";
@@ -21,9 +22,9 @@ export function createProjectTools(cwd: string, deps: ProjectToolDeps) {
   });
   const worktree = defineTool({
     name: "project_worktree", label: "Related worktree", exposure: MODEL_ONLY_EXPOSURE, executionMode: "sequential",
-    description: "Prepare, inspect, land or discard a secondary repo worktree owned by this same chat. No other session or agent starts. Land rebases and fast-forwards only that repo. Discard requires the exact preview token and explicit user approval. Nothing is merged or deleted automatically.",
+    description: "Prepare, inspect, land or discard a secondary repo worktree owned by this same chat. No other session or agent starts. Land rebases and fast-forwards only that repo. Discard requires the exact preview token. Inspect the preview for loss under the autonomy rule before discarding.",
     promptSnippet: "project_worktree: managed secondary worktrees for cross-repo changes by this same agent",
-    promptGuidelines: ["Call project_context before changing a related repo. Prepare returns an absolute checkout path; use that path for file tools and commands. Do not edit the target's main checkout. Land or discard only on user authorization. Supply worktreeId to github_read/github_write/github_watch for target-repo PR work. The chat's default repo remains unchanged."],
+    promptGuidelines: [AUTONOMY_GUIDANCE, "Call project_context before changing a related repo. Prepare returns an absolute checkout path; use that path for file tools and commands. Do not edit the target's main checkout. Land in-scope work without asking. Before discard, read discard-preview and check whether Git, a backup or a rebuild can restore what it removes. Supply worktreeId to github_read/github_write/github_watch for target-repo PR work. The chat's default repo remains unchanged."],
     parameters: Type.Object({ action: Type.Union([Type.Literal("prepare"), Type.Literal("status"), Type.Literal("land"), Type.Literal("discard-preview"), Type.Literal("discard")]),
       projectId: id, worktreeId: id, requestId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), confirmationToken: id }),
     async execute(callId, params, _signal, _onUpdate, ctx) {

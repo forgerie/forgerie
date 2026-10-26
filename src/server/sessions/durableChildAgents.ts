@@ -1,3 +1,4 @@
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { readToolRiskIdentity } from "./toolRiskIdentity.js";
 import { withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { RISK_LABEL_ENTRY_KIND, RiskLabelEntrySchema, type RiskLabelEntry } from "../../shared/riskLabels.js";
@@ -473,8 +474,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
       "Run a background child agent in this session. Actions: spawn (name, message, optional agent and isolation), send (name, message), answer (name, questionId, answer, reason), escalate (questionId, kind, guess, why).",
       "Writers (write, edit, or bash) and general helpers default to isolation: worktree. Read-only agents default to shared. Explicit isolation wins; two live shared writers in the same directory are refused.",
       "A child works on its own; its answer is reported back to you as a new message when it arrives. Do not wait or poll.",
-      "A child asks you first. Answer from the task, contract, code, docs and chat. Escalate only irreversible actions, actions outside the project in the user's name, contradicting what the user said or approved, or questions you cannot answer anywhere. Taste and scope are decisions, not escalations.",
-      "irreversible/external wait for the user. contradicts/stuck give your best guess at once, marked provisional in the decision log. Do not wait or poll. The user can open, steer and stop children. Several spawns in one reply run in parallel.",
+      AUTONOMY_GUIDANCE,
+      "A child asks you first. Answer from the task, contract, code, docs and chat under the same rule. Use irreversible/external only for categories (a)/(b); those escalations wait for the user. For category (c), a physical or observation request, or explicit user consultation, use ask_user, then answer the child from the user's reply. Otherwise answer the child yourself. contradicts/stuck give your best guess at once, marked provisional in the decision log; do not use them for category (c). Do not wait or poll. The user can open, steer and stop children. Several spawns in one reply run in parallel.",
       ...(agentList === "" ? [] : [`Agents (pass one as \`agent\`; omit for a general helper):\n${agentList}`]),
     ].join("\n"),
     parameters: Type.Union([
@@ -642,7 +643,7 @@ export const CHILD_CHECKS = "Check your work with focused checks: the tests for 
 function childInstructions(name: string, profile: ChildAgentProfile | undefined, plan: ChildRuntimePlan, projectContext: string | undefined): string {
   const project = profile?.inheritProjectContext !== false && projectContext !== undefined && projectContext !== ""
     ? `\n\n<project_context>\n${projectContext}\n</project_context>` : "";
-  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.\nDo not file issues. Suggest issues in your report; the parent files them.\n${CHILD_CHECKS}${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
+  return `${profile?.prompt ?? "You are a helper agent. Do the task you are given, then reply with a short result."}\n\nYou are the child agent "${name}" of a parent agent. Your final reply goes back to the parent. Use ask_human only when you are blocked; it asks your parent, not the user.\n${AUTONOMY_GUIDANCE}\nDo not file issues. Suggest issues in your report; the parent files them.\n${CHILD_CHECKS}${plan.section === "" ? "" : `\n\n${plan.section}`}${project}`;
 }
 
 function withChildAdmission<T>(worktrees: DurableChildWorktrees | undefined, operation: () => Promise<T>): Promise<T> {

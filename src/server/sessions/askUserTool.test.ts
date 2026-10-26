@@ -1,3 +1,4 @@
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { transcriptAsks } from "./sessionAsks.testSupport.js";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
@@ -39,13 +40,12 @@ describe("createAskUserToolDefinition", () => {
     const { tool } = toolOverStore();
 
     expect(tool.name).toBe("ask_user");
-    expect(tool.description).toContain("Escalations only");
-    expect(tool.description).toContain("irreversible");
-    expect(tool.description).toContain("record_decision");
+    expect(tool.description).toContain(AUTONOMY_GUIDANCE);
     expect(tool.description).toContain("Answers arrive later as a follow-up message");
     expect(tool.promptSnippet).toBe("ask_user: post a question set to the user; ends the run, answers return as a follow-up");
     expect(tool.promptGuidelines).toEqual([
-      expect.stringContaining("Ask only for escalations"),
+      AUTONOMY_GUIDANCE,
+      expect.stringContaining("Answer child questions yourself"),
     ]);
   });
 

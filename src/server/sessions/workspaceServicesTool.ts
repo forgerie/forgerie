@@ -1,3 +1,4 @@
+import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { defineTool, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ManagedWorktreeRequired, type WorkspaceServices } from "../workspaces/workspaceServices.js";
@@ -5,9 +6,9 @@ import { ManagedWorktreeRequired, type WorkspaceServices } from "../workspaces/w
 export function createWorkspaceServicesTool(cwd: string, services: WorkspaceServices) {
   return defineTool({
     name: "workspace_services", label: "Workspace services", executionMode: "sequential",
-    description: "Manage the current managed worktree's declared Process Compose services. Read status or bounded logs, start, stop, restart a service, or wait for readiness with a deadline. Services survive Forgerie restarts. Start executes repository code and needs explicit user approval. This does not manage ad-hoc process tool commands.",
+    description: "Manage the current managed worktree's declared Process Compose services. Read status or bounded logs, start, stop, restart a service, or wait for readiness with a deadline. Services survive Forgerie restarts. Start executes repository code. This does not manage ad-hoc process tool commands.",
     promptSnippet: "workspace_services: declared development services scoped to this worktree, with readiness and bounded logs",
-    promptGuidelines: ["Use wait with a deadline rather than polling status repeatedly. Start the project without a service name before individual controls. Set approve=true only after the user approves execution of this repository's services. Stop services before worktree removal. Service data remains retained after shutdown. Never start a second Process Compose instance with a shell command."],
+    promptGuidelines: [AUTONOMY_GUIDANCE, "Use wait with a deadline rather than polling status repeatedly. Start the project without a service name before individual controls. Set approve=true when starting in-scope services; this execution flag does not require a separate permission question. Stop services before worktree removal. Service data remains retained after shutdown. Never start a second Process Compose instance with a shell command."],
     parameters: Type.Object({
       action: Type.Union([Type.Literal("status"), Type.Literal("logs"), Type.Literal("start"), Type.Literal("stop"), Type.Literal("restart"), Type.Literal("wait")]),
       service: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
