@@ -240,7 +240,8 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     const retrying = retry.current;
     retry.current = undefined;
     const site = retrying ? { destination: { kind: "fresh-worktree" as const }, setupId: retrying.id, worktree: retrying }
-      : where && !defaultBranch ? { destination: { kind: fresh ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
+      : destination.placement !== undefined || where?.kind === "non-git"
+        ? { destination: { kind: destination.placement === "fresh" ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
     const placement = item ? { ...site, item, ...(itemTitle ? { title: itemTitle } : {}) } : site;
     if (retrying) { setInspected(undefined); setFailedSetups((current) => current && { ...current, records: current.records.filter((record) => record.id !== retrying.id) }); }
     const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft, placement);
@@ -267,7 +268,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
       return;
     }
     refuse(outcome.error);
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, onLaunching, putBack, saved, where, fresh, defaultBranch, item, itemTitle, canSend, removeItem]);
+  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, onLaunching, putBack, saved, where, destination.placement, item, itemTitle, canSend, removeItem]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({

@@ -159,6 +159,15 @@ describe("a new session's worktree", () => {
     expect(label()).toBe("forgerie · ui");
   });
 
+  it("preserves an explicit fresh choice when options cannot be read", async () => {
+    const h = harness();
+    h.worktrees.options = async () => { throw new Error("Options unavailable"); };
+    await render(h, { placement: "fresh" });
+    await type("Fix in isolation");
+    await send();
+    expect(h.starts[0]![3]).toMatchObject({ destination: { kind: "fresh-worktree" } });
+  });
+
   it("starts a project outside Git in its folder, with no worktree offer", async () => {
     const h = harness();
     await render(h, { cwd: "/code/notes" });
