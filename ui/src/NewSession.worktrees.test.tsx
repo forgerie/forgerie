@@ -141,6 +141,21 @@ describe("a new session's worktree", () => {
     expect(document.querySelector('[data-option-id="w3"]')).not.toBeNull();
   });
 
+  it("keeps New worktree available when the workspace list fails", async () => {
+    const h = harness();
+    h.api.workspaces = async () => { throw new Error("Workspace list unavailable"); };
+    await render(h);
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    expect(document.querySelector('[aria-label="Workspaces of forgerie"]')?.textContent).toContain("Workspaces unavailable: Workspace list unavailable");
+    expect(document.querySelector('[data-option-id="w1"]')).toBeNull();
+    await click(button("New worktreefrom main"));
+    expect(label()).toBe("forgerie · new worktree from main");
+    await type("Fix in isolation");
+    await send();
+    expect(h.starts[0]![3]).toMatchObject({ destination: { kind: "fresh-worktree" } });
+  });
+
   it("keeps fresh worktree creation as an explicit choice", async () => {
     const h = harness();
     const onDestination = vi.fn();
