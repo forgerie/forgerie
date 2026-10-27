@@ -12,10 +12,11 @@ export function PendingSession({ launch }: { launch: Launch<LaunchDraft> }) {
   const messages = useMemo<ThreadMessage[]>(() => [{ id: launch.id, role: "user", createdAt: new Date(launch.startedAt),
     content: [{ type: "text", text: launch.draft.text }], attachments: [...launch.draft.attachments], metadata: { custom: {} } }], [launch.id, launch.startedAt, launch.draft]);
   const runtime = useExternalStoreRuntime({ messages, onNew: async () => {}, isRunning: false, isDisabled: true });
-  const progress = launch.state.type === "starting" ? launch.state.progress ?? "Starting…" : "Opening…";
-  return <SessionFrame name={launch.title} status={<StatusChip label="Starting…" tone="neutral" />}>
+  const failed = launch.state.type === "failed";
+  const progress = launch.state.type === "starting" ? launch.state.progress ?? "Starting…" : launch.state.type === "failed" ? launch.state.error : "Opening…";
+  return <SessionFrame name={launch.title} status={<StatusChip label={failed ? "Start failed" : "Starting…"} tone={failed ? "bad" : "neutral"} />}>
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread readOnly={<p className="ns-status" role="status">{progress}</p>}
+      <Thread readOnly={<p className={failed ? "ns-error" : "ns-status"} role={failed ? "alert" : "status"}>{progress}</p>}
         head={launch.worktree ? <WorktreeSetupCard setup={launch.worktree.setup} hookSeen={launch.hookSeen === true} branch={launch.worktree.branch} /> : undefined} />
     </AssistantRuntimeProvider>
   </SessionFrame>;

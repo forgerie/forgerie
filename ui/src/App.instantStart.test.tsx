@@ -119,6 +119,33 @@ it("keeps the pending transcript and retained modal when its own launch row is s
   await succeed();
 });
 
+it("keeps Close sessions and Escape available while the pending transcript is open", async () => {
+  await send();
+  await act(async () => visibleShell()!.querySelector<HTMLButtonElement>('[aria-label="Sessions"]')!.click());
+  expect(document.querySelector(".app-shell")?.getAttribute("data-sheet")).toBe("open");
+  const close = document.querySelector<HTMLButtonElement>('[aria-label="Close sessions"]');
+  expect(close).not.toBeNull();
+  await act(async () => close!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+  expect(document.querySelector(".app-shell")?.getAttribute("data-sheet")).toBe("closed");
+  expect(params().has("launch")).toBe(true);
+  await succeed();
+});
+
+it("shows the failure instead of startup when Forward returns to a failed background launch", async () => {
+  await send();
+  const token = params().get("launch");
+  await act(async () => window.history.back());
+  await until(() => params().get("session") === "old" && !params().has("new"));
+  await act(async () => creation.resolve(Response.json({ error: "Unknown model from fixture" }, { status: 400 })));
+  await until(() => document.querySelector(".toast")?.textContent?.includes("did not start") === true);
+  await act(async () => window.history.forward());
+  await until(() => params().get("launch") === token);
+  expect(visibleShell()?.textContent).toContain("Start failed");
+  expect(visibleShell()?.querySelector('[role="alert"]')?.textContent).toContain("Unknown model from fixture");
+  expect(visibleShell()?.textContent).not.toContain("Opening…");
+  expect(dialog()).toBeNull();
+});
+
 it("reopens the very same modal after a failure with exact text, placement, model and thinking unchanged", async () => {
   const originalDialog = dialog()!; const originalInput = input();
   // Model a native queued close event that arrives only after the fast failure has reopened the modal.

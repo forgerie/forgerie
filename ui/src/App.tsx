@@ -634,7 +634,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
         onTriggers: triggers ? () => placeTriggers(triggerPlace ?? { view: "list" }) : undefined, triggersOpen: triggerPlace !== undefined,
         triggers: triggers ? { title: triggers.entry.title, chip: triggers.entry.chip } : undefined,
         onFullscreen: fullscreen.state.type === "unsupported" ? undefined : fullscreen.toggle, fullscreen: fullscreen.state.type === "fullscreen",
-        onClose: layout === "overlay" && (selectedId || settings || backlog || triggerPlace) ? () => setOpen(false) : undefined }} />}
+        onClose: layout === "overlay" && (selectedId || selectedLaunch || settings || backlog || triggerPlace) ? () => setOpen(false) : undefined }} />}
     // Direct URLs retain the frame while the catalog resolves; only resolved sessions join the registry.
     thread={<>{chats}{thread}{dialog}</>} />{toast}</>;
 }
