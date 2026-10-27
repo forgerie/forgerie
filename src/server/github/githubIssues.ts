@@ -20,6 +20,7 @@ const IssueSchema = Type.Object({
   assignees: Type.Optional(Type.Array(Type.Object({ login: Type.String() }))),
   pull_request: Type.Optional(Type.Unknown()),
 });
+const SingleIssueSchema = Type.Object({ ...IssueSchema.properties, state: Type.Union([Type.Literal("open"), Type.Literal("closed")]) });
 const PageSchema = Type.Array(Type.Unknown());
 export type GitHubIssue = Omit<Static<typeof IssueSchema>, "pull_request" | "labels"> & {
   labels: string[];
@@ -63,6 +64,32 @@ export class GitHubIssueClient {
     const run = this.queue.then(() => this.read(slug, trustedBots), () => this.read(slug, trustedBots));
     this.queue = run.catch(() => undefined);
     return run;
+  }
+
+  /** Exact reads must not depend on a cached or eventually consistent issue list. */
+  openIssue(slug: string, itemId: string, trustedBots: readonly string[] = []): Promise<IssuesResult> {
+    const run = this.queue.then(() => this.readIssue(slug, itemId, trustedBots), () => this.readIssue(slug, itemId, trustedBots));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async readIssue(slug: string, itemId: string, trustedBots: readonly string[]): Promise<IssuesResult> {
+    if (!/^[1-9]\d*$/u.test(itemId)) return { ok: true, issues: [], truncated: false };
+    if (this.now() < this.blockedUntil) return stale(undefined, `GitHub rate limit reached; Forgerie asks again after ${clock(this.blockedUntil)}.`);
+    try {
+      const granted = await this.deps.app.tokenFor(slug);
+      if (!granted.ok) return granted;
+      const response = await this.deps.fetch(`${GITHUB_API}/repos/${slug}/issues/${itemId}`, { headers: apiHeaders(granted.token) });
+      if (response.status === 404) return { ok: true, issues: [], truncated: false };
+      if (!response.ok) return this.refused(response, slug, undefined);
+      const body: unknown = await response.json();
+      if (!Check(SingleIssueSchema, body) || String(body.number) !== itemId) throw new Error("GitHub sent an unexpected issue");
+      const issues = body.state === "open" && body.pull_request === undefined ? [toIssue(body)] : [];
+      await this.checkAuthors(slug, issues, granted.token, trustedBots);
+      return { ok: true, issues, truncated: false };
+    } catch (error) {
+      return stale(undefined, `GitHub is unreachable: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** Serialize after in-flight reads, so a pre-creation response cannot repopulate a stale listing. */
@@ -109,14 +136,13 @@ export class GitHubIssueClient {
       return stale(cached, `GitHub is unreachable: ${error instanceof Error ? error.message : String(error)}`);
     }
     const listing: Listing = { pages, truncated, fetchedAt: this.now() };
-    await this.checkAuthors(slug, listing, token, trustedBots);
+    await this.checkAuthors(slug, listing.pages.flatMap(page => page.issues), token, trustedBots);
     this.cache.set(key, listing);
     return listed(listing);
   }
 
   /** Marks each issue trusted or not, so the backlog can hide outside contributions. */
-  private async checkAuthors(slug: string, listing: Listing, token: string, trustedBots: readonly string[]): Promise<void> {
-    const issues = listing.pages.flatMap((page) => page.issues);
+  private async checkAuthors(slug: string, issues: readonly GitHubIssue[], token: string, trustedBots: readonly string[]): Promise<void> {
     const authorOf = (issue: GitHubIssue) => ({ login: issue.user?.login, association: issue.author_association });
     const trusted = await this.trust.judge(slug, token, issues.map(authorOf), trustedBots);
     for (const issue of issues) issue.trusted = trusted(authorOf(issue));

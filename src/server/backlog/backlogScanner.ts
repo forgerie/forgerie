@@ -35,7 +35,7 @@ export async function canonicalBacklogRoot(path: string): Promise<string> {
  * `providers` is what this host can offer; the project's `backlog.providers` picks among them.
  * One failing provider does not hide another's items.
  */
-export async function scanProjectBacklog(project: Project, claims: readonly BacklogClaim[], providers: readonly BacklogProvider[] = defaultBacklogProviders, options: { settings?: Pick<BacklogSettingsStore, "read">; scope?: BacklogScope; githubLogin?: string; config?: BacklogConfig } = {}): Promise<BacklogProviderScan> {
+export async function scanProjectBacklog(project: Project, claims: readonly BacklogClaim[], providers: readonly BacklogProvider[] = defaultBacklogProviders, options: { settings?: Pick<BacklogSettingsStore, "read">; scope?: BacklogScope; githubLogin?: string; config?: BacklogConfig; itemId?: string } = {}): Promise<BacklogProviderScan> {
   const warnings: BacklogWarning[] = [];
   const entries: ScannedBacklogItem[] = [];
   const failed = (error: unknown, provider?: BacklogProviderId) => { warnings.push({ projectId: project.id, ...(provider === undefined ? {} : { provider }), kind: "project-error", path: project.path, message: backlogErrorMessage(error) }); };
@@ -54,7 +54,7 @@ export async function scanProjectBacklog(project: Project, claims: readonly Back
   for (const provider of providers) {
     if (provider.id === "azure-devops" || !enabled.has(provider.id)) continue;
     try {
-      const scan = await provider.scan(project, repo, config, { scope: options.scope ?? "mine", ...(options.githubLogin === undefined ? {} : { githubLogin: options.githubLogin }) });
+      const scan = await provider.scan(project, repo, config, { scope: options.scope ?? "mine", ...(options.itemId === undefined ? {} : { itemId: options.itemId }), ...(options.githubLogin === undefined ? {} : { githubLogin: options.githubLogin }) });
       entries.push(...scan.entries); warnings.push(...scan.warnings);
     } catch (error) { failed(error, provider.id); }
   }

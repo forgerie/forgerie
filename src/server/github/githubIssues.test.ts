@@ -17,6 +17,66 @@ function fixture(options: { granted?: TokenResult } = {}) {
 }
 
 describe("GitHub issue client", () => {
+  it("reads the exact open issue without consulting or populating the cached list", async () => {
+    const f = fixture();
+    f.github.on(LIST, json([issue(1)]));
+    f.github.on(`${LIST}/98`, json(issue(98)), json(issue(98, { state: "closed" })));
+    await f.client.openIssues("korri-os/korri");
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: true, issues: [{ number: 98, trusted: true }] });
+    expect(await f.client.openIssue("korri-os/korri", "98")).toEqual({ ok: true, issues: [], truncated: false });
+    expect(await f.client.openIssues("korri-os/korri")).toMatchObject({ ok: true, issues: [{ number: 1 }] });
+    expect(f.github.count(LIST)).toBe(1);
+  });
+
+  it("applies author trust on each exact read, including removal of a trusted bot", async () => {
+    const f = fixture();
+    f.github.always(`${LIST}/98`, json(issue(98, { author_association: "NONE", user: { login: "trusted[bot]" } })));
+    f.github.always("GET https://api.github.com/repos/korri-os/korri/collaborators/trusted%5Bbot%5D/permission", json({ permission: "read" }));
+    expect(await f.client.openIssue("korri-os/korri", "98", ["trusted[bot]"])).toMatchObject({ ok: true, issues: [{ trusted: true }] });
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: true, issues: [{ trusted: false }] });
+  });
+
+  it.each([issue(98, { state: "closed" }), issue(98, { pull_request: {} })])("excludes closed issues and pull requests on exact reads", async body => {
+    const f = fixture(); f.github.on(`${LIST}/98`, json(body));
+    expect(await f.client.openIssue("korri-os/korri", "98")).toEqual({ ok: true, issues: [], truncated: false });
+  });
+
+  it.each([{}, issue(99), issue(98, { state: "unexpected" })])("rejects malformed or mismatched exact issue responses", async body => {
+    const f = fixture(); f.github.on(`${LIST}/98`, json(body));
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: false, kind: "unavailable" });
+  });
+
+  it.each(["0", "-1", "98/../99", "1?state=closed"])("rejects invalid issue identity %s without a request", async itemId => {
+    const f = fixture();
+    expect(await f.client.openIssue("korri-os/korri", itemId)).toEqual({ ok: true, issues: [], truncated: false });
+    expect(f.github.requests).toHaveLength(0);
+  });
+
+  it("returns no issue on a missing exact read, without dropping the installation token", async () => {
+    const f = fixture(); f.github.on(`${LIST}/98`, json({ message: "Not Found" }, { status: 404 }));
+    expect(await f.client.openIssue("korri-os/korri", "98")).toEqual({ ok: true, issues: [], truncated: false });
+    expect(f.dropped).toEqual([]);
+  });
+
+  it("does not use stale content for an exact read when GitHub refuses or fails", async () => {
+    const f = fixture();
+    f.github.on(`${LIST}/98`, json(issue(98)), json({}, { status: 401 }), () => { throw new TypeError("fetch failed"); }, json({}, { status: 429, headers: { "retry-after": "60" } }));
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: true });
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: false });
+    expect(f.dropped).toEqual(["korri-os/korri"]);
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: false });
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: false });
+    expect(await f.client.openIssue("korri-os/korri", "98")).toMatchObject({ ok: false });
+    expect(f.github.count(`${LIST}/98`)).toBe(4);
+  });
+
+  it("requires installation access before an exact read", async () => {
+    const granted: TokenResult = { ok: false, kind: "install", message: "Install the app" };
+    const f = fixture({ granted });
+    expect(await f.client.openIssue("korri-os/korri", "98")).toEqual(granted);
+    expect(f.github.requests).toHaveLength(0);
+  });
+
   it("lists open issues across pages, leaves out pull requests, and asks only for open issues", async () => {
     const f = fixture();
     f.github.on(LIST,
@@ -72,7 +132,8 @@ describe("GitHub issue client", () => {
     const f = fixture();
     f.github.always(LIST, () => json([issue(1)]));
     f.github.always("GET https://api.github.com/repos/korri-os/other/issues", () => json([]));
-    await Promise.all([f.client.openIssues("korri-os/korri"), f.client.openIssues("korri-os/other"), f.client.openIssues("korri-os/korri")]);
+    f.github.always(`${LIST}/98`, () => json(issue(98)));
+    await Promise.all([f.client.openIssues("korri-os/korri"), f.client.openIssues("korri-os/other"), f.client.openIssue("korri-os/korri", "98"), f.client.openIssues("korri-os/korri")]);
     expect(f.github.maxInFlight).toBe(1);
   });
 

@@ -26,12 +26,14 @@ const input = { title: "Improve launch recovery", body: "Keep the first prompt."
 const issue = (number: number, title: string, labels: string[] = []) => ({ number, title, body: "Existing", state: "open", html_url: `https://github.com/owner/repo/issues/${String(number)}`, user: { login: "owner" }, author_association: "OWNER", labels, created_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z", comments: 0 });
 function inMemoryGitHub(gitResolution = false) {
   const writes: { url: string; body: unknown }[] = []; const labels = new Set<string>();
-  const rows = [issue(7, "fix: Improve launch recovery")]; let listingReads = 0; let rejectCreation = false; let nextIssue = 20;
+  const rows = [issue(7, "fix: Improve launch recovery")]; let listingReads = 0; let rejectCreation = false; let nextIssue = 20; let delayListing = false;
   const fetch: Fetch = (url, init) => {
     const method = init?.method ?? "GET";
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
     if (url.includes("/search/issues")) return Promise.resolve(json({ total_count: 1, items: [rows[0]], incomplete_results: false }));
-    if (method === "GET" && new URL(url).pathname.endsWith("/issues")) { listingReads++; return Promise.resolve(json(rows)); }
+    if (method === "GET" && new URL(url).pathname.endsWith("/issues")) { listingReads++; return Promise.resolve(json(delayListing ? rows.slice(0, 1) : rows)); }
+    const item = /\/issues\/(\d+)$/u.exec(new URL(url).pathname);
+    if (method === "GET" && item !== null) return Promise.resolve(json(rows.find(row => row.number === Number(item[1])) ?? { message: "Not Found" }, rows.some(row => row.number === Number(item[1])) ? 200 : 404));
     if (method === "GET" && url.includes("/labels")) return Promise.resolve(json([...labels].map(name => ({ name, description: null }))));
     const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); writes.push({ url, body });
     if (url.endsWith("/labels")) { labels.add("agent-filed"); return Promise.resolve(json({ name: "agent-filed", description: "Agent filed" }, 201)); }
@@ -46,7 +48,7 @@ function inMemoryGitHub(gitResolution = false) {
     app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, status: () => ({ state: "not-configured" }) }, fetch,
   });
   const client = new GitHubIssueClient({ fetch, app: { tokenFor: () => Promise.resolve({ ok: true, token: "memory" }), dropToken: () => undefined, installUrl: () => undefined } });
-  return { agent, client, writes, listingReads: () => listingReads, rejectNextCreation: () => { rejectCreation = true; } };
+  return { agent, client, writes, listingReads: () => listingReads, rejectNextCreation: () => { rejectCreation = true; }, delayNewIssuesInListing: () => { delayListing = true; } };
 }
 async function fixture() {
   const repo = await repository(); const events: BacklogSuggestion[] = [];
@@ -129,7 +131,26 @@ describe("backlog suggestions", () => {
       const record = await f.service.suggest(f.root, "chat", { ...input, title: "Export saved context as JSON" });
       const started = await f.service.file(record.id, "file-and-act", { requestId: "github-background" });
       expect(started.state).toMatchObject({ kind: "started", provider: "github", number: 20 });
-      expect(f.starts).toHaveLength(1); expect(f.prompts[0]?.text).toContain("Keep the first prompt"); expect(f.github.listingReads()).toBe(2);
+      expect(f.starts).toHaveLength(1); expect(f.prompts[0]?.text).toContain("Keep the first prompt"); expect(f.github.listingReads()).toBe(1);
+    } finally { await f.dispose(); }
+  });
+  it.each([false, true])("starts a filed GitHub issue before the issue list includes it, without filing or starting twice (retry=%s)", async retry => {
+    const f = await fixture();
+    try {
+      await f.settings.save("project", { providers: ["github"], github: { repo: "owner/repo" } }, 0);
+      f.github.delayNewIssuesInListing();
+      const record = await f.service.suggest(f.root, "chat", { ...input, title: "Export saved context as JSON" });
+      const request = { requestId: "github-delayed-list", modelSpec: "override/cheap", thinkingLevel: "high" };
+      if (retry) {
+        f.failLaunch(true);
+        expect((await f.service.file(record.id, "file-and-act", { ...request, requestId: "before-retry" })).state).toMatchObject({ kind: "filed", launchError: { message: "Configured launch failure" } });
+        await f.store.initialize(); f.failLaunch(false);
+      }
+      const started = await f.service.file(record.id, "file-and-act", request);
+      expect(started.state).toMatchObject({ kind: "started", provider: "github", number: 20 });
+      expect(f.starts).toHaveLength(1); expect(f.prompts[0]?.text).toContain("Keep the first prompt");
+      expect(await f.service.file(record.id, "file-and-act", request)).toEqual(started);
+      expect(f.starts).toHaveLength(1); expect(f.github.writes.filter(write => write.url.endsWith("/issues"))).toHaveLength(1);
     } finally { await f.dispose(); }
   });
   it("files before background launch, sends the prompt from the server, and never starts a second session on a repeated request", async () => {

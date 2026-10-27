@@ -13,7 +13,7 @@ function issue(number: number, extra: Partial<GitHubIssue> = {}): GitHubIssue {
 /** `origin` null means the checkout has no GitHub origin remote. */
 function provider(result: IssuesResult, origin: string | null = "korri-os/korri") {
   const asked: string[] = [];
-  const github = createGitHubBacklogProvider({ issues: { openIssues: (slug) => { asked.push(slug); return Promise.resolve(result); } }, originRepo: () => Promise.resolve(origin ?? undefined) });
+  const github = createGitHubBacklogProvider({ issues: { openIssues: (slug) => { asked.push(slug); return Promise.resolve(result); }, openIssue: (slug, itemId) => { asked.push(`${slug}#${itemId}`); return Promise.resolve(result); } }, originRepo: () => Promise.resolve(origin ?? undefined) });
   return { github, asked, scan: (config?: BacklogConfig) => github.scan(project, "/code/korri", config, { scope: "everyone" }) };
 }
 
@@ -29,6 +29,14 @@ describe("GitHub backlog provider", () => {
     expect(scan.entries[1]?.body).toBe("");
     expect(scan.warnings).toEqual([{ projectId: "p1", provider: "github", kind: "items-hidden", path: "korri-os/korri",
       message: "1 issue from outside contributors is hidden, because their text goes to an agent. Set backlog.github.authors to \"all\" to list them." }]);
+  });
+
+  it("reads an exact issue with the same author and assignment filters as the list", async () => {
+    const p = provider({ ok: true, truncated: false, issues: [issue(8, { trusted: false, assignees: [{ login: "octocat" }] })] });
+    expect((await p.github.scan(project, project.path, { github: { repo: "owner/pinned" } }, { scope: "everyone", itemId: "8" })).entries).toEqual([]);
+    expect(p.asked).toEqual(["owner/pinned#8"]);
+    expect((await p.github.scan(project, project.path, { github: { repo: "owner/pinned", authors: "all" } }, { scope: "mine", githubLogin: "octocat", itemId: "8" })).entries).toHaveLength(1);
+    expect((await p.github.scan(project, project.path, { github: { repo: "owner/pinned", authors: "all" } }, { scope: "mine", githubLogin: "someone-else", itemId: "8" })).entries).toEqual([]);
   });
 
   it("lists everyone when the project asks, and prefers the configured repo over origin", async () => {

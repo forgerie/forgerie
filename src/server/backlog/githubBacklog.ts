@@ -6,7 +6,7 @@ import type { BacklogProvider, BacklogProviderScan, ScannedBacklogItem, BacklogS
 export const GITHUB_LOGIN_WARNING = "Set your GitHub username in Settings → Backlog to see issues assigned to you.";
 
 export interface GitHubBacklogDependencies {
-  issues: Pick<GitHubIssueClient, "openIssues">;
+  issues: Pick<GitHubIssueClient, "openIssues" | "openIssue">;
   /** Injected so tests need no git remote. */
   originRepo?: (repo: string) => Promise<string | undefined>;
 }
@@ -24,7 +24,8 @@ export function createGitHubBacklogProvider(deps: GitHubBacklogDependencies): Ba
       if (slug === undefined) {
         return warn("provider-unavailable", repo, "This project has no GitHub repo. Add a github.com origin remote, or set backlog.github.repo to owner/name in .forgerie/config.json.");
       }
-      const result = await deps.issues.openIssues(slug, config?.github?.trustedBots);
+      const result = context.itemId === undefined ? await deps.issues.openIssues(slug, config?.github?.trustedBots)
+        : await deps.issues.openIssue(slug, context.itemId, config?.github?.trustedBots);
       if (!result.ok) return warn(result.kind === "auth" ? "provider-auth" : result.kind === "install" ? "provider-install" : "provider-unavailable", slug, result.message);
       const warnings: BacklogWarning[] = [];
       const note = (kind: BacklogWarning["kind"], message: string) => { warnings.push({ projectId: project.id, provider: "github", kind, path: slug, message }); };

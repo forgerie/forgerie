@@ -38,7 +38,7 @@ export function json(body: unknown, init: { status?: number; headers?: Record<st
 
 export function issue(number: number, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    number, title: `Issue ${String(number)}`, body: `Body of ${String(number)}`, html_url: `https://github.com/korri-os/korri/issues/${String(number)}`,
+    number, state: "open", title: `Issue ${String(number)}`, body: `Body of ${String(number)}`, html_url: `https://github.com/korri-os/korri/issues/${String(number)}`,
     created_at: "2026-10-01T12:00:00Z", author_association: "OWNER", user: { login: "simonwjackson" }, labels: [{ name: "bug" }], ...extra,
   };
 }

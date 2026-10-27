@@ -3,7 +3,12 @@ import type { BacklogImageSummary, BacklogLaunchContent } from "../../shared/bac
 import type { BacklogScope } from "../../shared/backlog.js";
 import type { BacklogConfig, BacklogItem, BacklogProviderId, BacklogWarning, Project } from "../../shared/apiTypes.js";
 
-export interface BacklogScanContext { scope: BacklogScope; githubLogin?: string }
+export interface BacklogScanContext {
+  scope: BacklogScope;
+  githubLogin?: string;
+  /** Exact item requested by detail or launch, not a list filter. */
+  itemId?: string;
+}
 export interface ScannedBacklogItem {
   item: BacklogItem; body: string;
   azureImages?: { organization: string; refs: AzureWorkItemImageRef[] };

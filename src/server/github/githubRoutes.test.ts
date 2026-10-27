@@ -76,7 +76,8 @@ describe("GitHub App routes", () => {
       html_url: "https://github.com/apps/forgerie-zao", owner: { login: "simonwjackson" }, pem: privateKey }, { status: 201 }))
       .always("GET https://api.github.com/repos/korri-os/korri/installation", json({ id: 77 }))
       .always("POST https://api.github.com/app/installations/77/access_tokens", json({ token: "ghs_secret", expires_at: "2099-01-01T00:00:00Z" }, { status: 201 }))
-      .always("GET https://api.github.com/repos/korri-os/korri/issues", json([issue(7, { title: "Remote seven" })]));
+      .always("GET https://api.github.com/repos/korri-os/korri/issues", json([issue(7, { title: "Remote seven" })]))
+      .always("GET https://api.github.com/repos/korri-os/korri/issues/7", json(issue(7, { title: "Remote seven" })));
     await f.server.inject({ method: "POST", url: "/github/app/created", payload: { code: "code-1", state: stateOf(start.action) } });
 
     const listing = await f.server.inject({ method: "GET", url: "/backlog?scope=everyone" });
