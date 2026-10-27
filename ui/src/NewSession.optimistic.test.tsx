@@ -45,7 +45,7 @@ async function render() {
     promptResources: async () => [], start: async (...args) => { starts.push(args); return reply.promise; },
   };
   const worktrees: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard"> = {
-    options: async () => ({ kind: "git", repo: "/workspace", defaultBranch: "main", defaultDestination: "fresh-worktree" }),
+    options: async () => ({ kind: "git", repo: "/workspace", defaultBranch: "main", defaultCwd: "/workspace", defaultDestination: "existing-workspace" }),
     list: async () => [failed], land: async () => ({ kind: "landed", sha: "abc", cleanup: { kind: "done" } }),
     discardPreview: async () => ({ worktreeId: "wt1", branch: "task", defaultBranch: "main", commits: [], dirtyFiles: [], confirmationToken: "t" }),
     discard: async () => ({ kind: "discarded", cleanup: { kind: "done" } }),

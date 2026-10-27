@@ -44,7 +44,7 @@ beforeEach(async () => {
     if (url.pathname === "/api/projects/p1/workspaces") return [{ id: "main", projectId: "p1", label: "main", path: "/workspace", isMain: true }];
     if (url.pathname.endsWith("/prompt-resource-catalog")) return { available: true, commands: [] };
     if (url.pathname === "/api/models") return { models: [model], model, thinkingLevel: "high" };
-    if (url.pathname === "/api/sessions/worktree-options") return { kind: "git", repo: "/workspace", defaultBranch: "main", defaultDestination: "fresh-worktree" };
+    if (url.pathname === "/api/sessions/worktree-options") return { kind: "git", repo: "/workspace", defaultBranch: "main", defaultCwd: "/workspace", defaultDestination: "existing-workspace" };
     if (url.pathname === "/api/sessions/worktrees") return { worktrees: [] };
     if (url.pathname === "/api/sessions") return creation.promise;
     if (url.pathname === "/api/sessions/real-session/prompt") return prompt.promise;
