@@ -372,10 +372,11 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     // A match bar belongs to the hit's session. Opening another session from the list ends it.
     if (found && found.hit.sessionId !== row.session.id) closeFound?.();
     const pending = starting.find((item) => item.id === row.session.id);
+    if (pending && pending.id === selectedLaunch) { setOpen(false); return; }
     if (!pending) { switchSession(row.session); return; }
     if (pending.sessionId) switchSession({ id: pending.sessionId, cwd: pending.cwd, name: pending.title });
     else void startNew();
-  }, [starting, startNew, switchSession, found, closeFound]);
+  }, [starting, selectedLaunch, startNew, switchSession, found, closeFound]);
   // A hit opens its session at the matched passage. The query and its hits stay for the next look.
   const openSearch = search?.actions.open;
   const openHit = useCallback((hit: SearchHit) => {

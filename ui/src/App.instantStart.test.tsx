@@ -105,6 +105,20 @@ it("closes the modal and renders the prompt before the create API answers, then 
   expect(params().has("new")).toBe(false);
 });
 
+it("keeps the pending transcript and retained modal when its own launch row is selected", async () => {
+  const original = dialog();
+  await send();
+  const token = params().get("launch")!;
+  await until(() => document.getElementById(`picker-row-${token}`) !== null);
+  await act(async () => document.getElementById(`picker-row-${token}`)!.click());
+  expect(params().get("launch")).toBe(token);
+  expect(params().has("new")).toBe(false);
+  expect(dialog()).toBe(original);
+  expect(dialog()?.open).toBe(false);
+  expect(visibleShell()?.querySelector(".message-text")?.textContent).toBe("Fix the build");
+  await succeed();
+});
+
 it("reopens the very same modal after a failure with exact text, placement, model and thinking unchanged", async () => {
   const originalDialog = dialog()!; const originalInput = input();
   // Model a native queued close event that arrives only after the fast failure has reopened the modal.
