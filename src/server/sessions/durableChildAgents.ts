@@ -34,6 +34,7 @@ import { planChildRuntime, runtimeGaps, childIsWriter, missingToolsRefusal, type
 import { readsImages, watchdogDiffTool } from "./durableChildTools.js";
 import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel, REVIEWER_AGENT } from "./durableWorkflowRuns.js";
 import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
+import { childParentInputExtension, childParentSubmission, submitChildParentInput } from "./durableChildParentInput.js";
 import { logDecision } from "./durableDecisions.js";
 import { WorkflowError } from "../resources/workflowLibrary.js";
 import { readChildActivity, readStoredChildActivity } from "./durableChildActivity.js";
@@ -220,7 +221,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         await runtime.commit(async (tx) => {
           const claim = (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
           const submission = claim === undefined ? undefined : await tx.submissionByRequest(claim.conversationId, claim.requestId);
-          const accepted = await tx.submissionByRequest(runtime.conversationId, `child-report:${String(owner)}`);
+          const accepted = await childParentSubmission(tx, runtime.conversationId, `child-report:${String(owner)}`);
           if (accepted === undefined && finished.state.outcome.status === "aborted") {
             await undeliveredWorkflowChild(tx, runtime.conversationId, reporter.id, "aborted");
             return { status: "terminal", outcome: { status: "completed", result: null } };
@@ -238,9 +239,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       const checkpoint = reporter.state.checkpoint;
       const report = "report" in checkpoint ? checkpoint.report : undefined;
       if (report !== undefined) {
-        const main = await runtime.conversation(runtime.conversationId, context);
-        if (main === undefined) throw new Error("Child report parent is missing");
-        await main.submit({ type: "input", content: report, whenBusy: "followUp", requestId: `child-report:${String(reporter.id)}` }, context);
+        await submitChildParentInput(runtime, `child-report:${String(reporter.id)}`, report, context);
       }
       await runtime.commit(async (tx) => {
         if (report === undefined) await undeliveredWorkflowChild(tx, runtime.conversationId, reporter.id, checkpoint.suppressed ?? "aborted");
@@ -250,7 +249,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     },
   },
   abort: (task, runtime, context) => runtime.commit(async (tx) => {
-    const accepted = await tx.submissionByRequest(runtime.conversationId, `child-report:${String(task.id)}`);
+    const accepted = await childParentSubmission(tx, runtime.conversationId, `child-report:${String(task.id)}`);
     // Preserve an answer already committed before Stop. Backoff cancellation itself settles as stopped.
     if (task.state.checkpoint.phase === "deliver") {
       const attempt = task.state.checkpoint.attempt ?? 0;
@@ -286,7 +285,8 @@ const QuestionDelivery = defineTask<{ questionId: string; text: string; requestI
       return;
     }
     await deliverInputUntilPlaced(runtime, task.state.checkpoint, { requestId: task.input.requestId ?? `child-question:${task.input.questionId}`, content: task.input.text,
-      previousRecipient: runtime.conversationId, selectRecipient: () => Promise.resolve(runtime.conversationId) }, context);
+      previousRecipient: runtime.conversationId, selectRecipient: () => Promise.resolve(runtime.conversationId),
+      submit: (requestId) => submitChildParentInput(runtime, requestId, task.input.text, context) }, context);
   } },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
@@ -473,7 +473,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     description: [
       "Run a background child agent in this session. Actions: spawn (name, message, optional agent and isolation), send (name, message), answer (name, questionId, answer, reason), escalate (questionId, kind, guess, why).",
       "Writers (write, edit, or bash) and general helpers default to isolation: worktree. Read-only agents default to shared. Explicit isolation wins; two live shared writers in the same directory are refused.",
-      "A child works on its own; its answer is reported back to you as a new message when it arrives. Do not wait or poll.",
+      "A child works on its own. Pending child reports and questions arrive together in one message. Read every child section. Do not wait or poll.",
       AUTONOMY_GUIDANCE,
       "A child asks you first. Answer from the task, contract, code, docs and chat under the same rule. Use irreversible/external only for categories (a)/(b); those escalations wait for the user. For category (c), a physical or observation request, or explicit user consultation, use ask_user, then answer the child from the user's reply. Otherwise answer the child yourself. contradicts/stuck give your best guess at once, marked provisional in the decision log; do not use them for category (c). Do not wait or poll. The user can open, steer and stop children. Several spawns in one reply run in parallel.",
       ...(agentList === "" ? [] : [`Agents (pass one as \`agent\`; omit for a general helper):\n${agentList}`]),
@@ -613,7 +613,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     },
   });
   const extensions = {
-    parent: [defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter, QuestionDelivery, QuestionReminder], tools: [childTool] })],
+    parent: [childParentInputExtension, defineExtension({ name: "forgerie.child-agents", tasks: [Anchor, Reporter, QuestionDelivery, QuestionReminder], tools: [childTool] })],
     childOnly: [ChildTools],
     refresh: () => durableChildExtensions(options),
   };

@@ -7,6 +7,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
 import { WorkflowOutcomeSchema, WorkflowModelSchema, WorkflowModelsSchema, WorkflowRunSchema, WORKFLOW_RETENTION_DAYS, type WorkflowChildDelivery, type WorkflowInputs, type WorkflowModels, type WorkflowOutcome, type WorkflowRun, type WorkflowStopDecision } from "../../shared/workflowRuns.js";
 import { logDecision } from "./durableDecisions.js";
+import { childParentSubmission } from "./durableChildParentInput.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, reviewRoundRefusal, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
 import { gateWaitsInTx } from "./durableGateRecords.js";
@@ -820,7 +821,7 @@ async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: Work
       if (child.state.kind === "working") continue;
     }
     // A crash/abort can occur after admission but before the delivery marker commits.
-    if (await tx.submissionByRequest(parent, `child-report:${String(id)}`) !== undefined) child.state.delivered = true;
+    if (await childParentSubmission(tx, parent, `child-report:${String(id)}`) !== undefined) child.state.delivered = true;
     else if (outcome.status === "aborted") child.state.delivered = "aborted";
     else child.state.deliveryError = reason;
   }

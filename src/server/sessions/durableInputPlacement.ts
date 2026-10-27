@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/chord";
-import type { ConversationId, EntryId, TaskRuntime, Tx } from "@earendil-works/pi-durable";
+import type { ConversationId, EntryId, Submission, TaskRuntime, Tx } from "@earendil-works/pi-durable";
 
 // Optional fields keep version-1 outboxes replayable with their original receipt. Checkpoints need a JSON-compatible alias.
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
@@ -10,6 +10,7 @@ interface InputPlacementOptions {
   previousRecipient: ConversationId;
   selectRecipient(tx: Tx): Promise<ConversationId>;
   onPlaced?(tx: Tx, entry: EntryId): Promise<void>;
+  submit?(requestId: string): Promise<Submission>;
 }
 
 /** Each withdrawn attempt reserves a fresh request ID, so a retry never reuses the withdrawn receipt. */
@@ -44,7 +45,7 @@ export async function deliverInputUntilPlaced<I>(runtime: TaskRuntime<I, InputPl
   if (progress.rerouted) return;
   const conversation = await runtime.conversation(recipient, context);
   if (conversation === undefined) throw new Error("Input delivery target is missing");
-  const submission = await conversation.submit({ type: "input", content: options.content, whenBusy: "followUp", requestId }, context);
+  const submission = await (options.submit?.(requestId) ?? conversation.submit({ type: "input", content: options.content, whenBusy: "followUp", requestId }, context));
   for (;;) {
     const receipt = await submission.status(context);
     // Even unanswered inputs were delivered if they have an entry (for example, a run aborted after placement).

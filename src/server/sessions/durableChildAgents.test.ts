@@ -145,7 +145,8 @@ async function until<T>(what: string, check: () => Promise<T | undefined | false
 interface Message { role?: string; content?: unknown; customType?: string; details?: { questionId?: string } }
 interface Ref { id: string; cwd: string }
 const transcript = async (ref: Ref): Promise<Message[]> => (await service.messages(ref, { limit: 500 })).messages.flatMap((message) => typeof message === "object" && message !== null ? [message] : []);
-const reports = async (ref: Ref, name: string) => (await transcript(ref)).filter((m) => m.role === "user" && text(m.content).startsWith(`[subagent ${name} `));
+const reports = async (ref: Ref, name: string) => (await transcript(ref)).flatMap((m) => m.role !== "user" ? []
+  : text(m.content).split(/(?=^\[subagent )/m).filter(section => section.startsWith(`[subagent ${name} `)).map(content => ({ ...m, content })));
 const parentAnswers = async (ref: Ref) => (await transcript(ref)).filter((m) => m.role === "assistant").length;
 const child = async (ref: Ref, name: string) => until(`child ${name}`, async () => (await service.durableChildren(ref)).find((c) => c.name === name));
 const childText = async (ref: Ref, conversationId: number) => (await service.durableChildMessages(ref, conversationId)).messages.map((m) => `${m.role}: ${text(m.content)}`);
