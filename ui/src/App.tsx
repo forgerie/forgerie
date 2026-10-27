@@ -17,10 +17,10 @@ import { StatusChip } from "./ui/StatusChip";
 import { StatusDetail } from "./session/StatusDetail";
 import { browserStorage, createDraftStore } from "./draftStore";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
-import { createWorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
-import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken, type Project } from "./newSession";
+import { createWorktreeApi, type WorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
+import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken, type NewSessionApi, type Project } from "./newSession";
 import { Toast } from "./ui/Toast";
-import { createLaunchStore, type StartupListener, type WorktreeListener } from "./launches";
+import { createLaunchStore, type Launch, type LaunchOutcome, type StartupListener, type WorktreeListener } from "./launches";
 import { newSessionShortcut, searchShortcut } from "./shortcuts";
 import type { SessionSearch } from "./search/useSessionSearch";
 import type { SearchHit } from "./search/searchApi";
@@ -46,6 +46,8 @@ const SettingsView = lazy(() => import("./ui/settings/SettingsView").then((modul
 const BacklogView = lazy(() => import("./ui/backlog/BacklogView").then((module) => ({ default: module.BacklogView })));
 
 const readSelected = () => new URLSearchParams(window.location.search).get("session")?.trim() || undefined;
+// A browser-local launch token is never a server session ID.
+const readLaunch = () => new URLSearchParams(window.location.search).get("launch") || undefined;
 /**
  * `?new=<folder>` keeps the new-session dialog open across a reload, over whatever is open. `?new=&item=…` is a
  * backlog item with no destination yet: the dialog opens with no folder, and the author picks one.
@@ -79,8 +81,8 @@ const clearSettings = (url: URL) => {
   url.searchParams.delete("settings"); url.searchParams.delete("agent"); url.searchParams.delete("plugin"); url.searchParams.delete("group"); url.searchParams.delete("backlog"); url.searchParams.delete("project");
   for (const param of TRIGGER_PARAMS) url.searchParams.delete(param);
 };
-const newSessionApi = createNewSessionApi((path, init) => fetch(path, init));
-const worktreeApi = createWorktreeApi((path, init) => fetch(path, init));
+const defaultNewSessionApi = createNewSessionApi((path, init) => fetch(path, init));
+const defaultWorktreeApi = createWorktreeApi((path, init) => fetch(path, init));
 const backlogApi = createBacklogApi((path, init) => fetch(path, init));
 const suggestionsApi = createSuggestionsApi((path, init) => fetch(path, init));
 const githubApi = createGitHubApi((path, init) => fetch(path, init));
@@ -113,15 +115,22 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `search` is session search, held by the binding above this app so its query and hits outlive every layout.
  * `triggers` is the triggers screen and its entry at the foot of the session list, held by the binding above this app.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings, newSessions, pendingSession }: {
+  /** The launch's read-only transcript, supplied by the app binding, never a server session transport. */
+  pendingSession?: ((launch: Launch<LaunchDraft>) => ReactNode) | undefined;
+  /** Production and fixture launches use the same app-owned lifecycle. */
+  newSessions?: { api: NewSessionApi; worktrees: WorktreeApi };
   search?: SessionSearch | undefined; triggers?: TriggersSlot | undefined;
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
   backlogSettings?: SettingsPageRenderer | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
 } = {}) {
+  const newSessionApi = newSessions?.api ?? defaultNewSessionApi;
+  const worktreeApi = newSessions?.worktrees ?? defaultWorktreeApi;
   const registryRef = useRef<SessionRegistry | undefined>(undefined);
   const [selectedId, setSelectedId] = useState(readSelected);
+  const [selectedLaunch, setSelectedLaunch] = useState(readLaunch);
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // The new-session dialog: the folder it starts in, over the open session.
   const [composing, setComposing] = useState(readNew);
@@ -215,7 +224,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const [shownSuggestion, setShownSuggestion] = useState<{ sessionId: string; suggestionId: string; key: number }>();
   useEffect(() => () => launches.dispose(), [launches]);
   useEffect(() => {
-    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setComposing(readNew()); setComposeItem(readItem()); setSettings(readSettings()); setBacklog(readBacklog()); setTriggerPlace(readTriggers()); };
+    const onPop = () => { setCommandSelection(undefined); setSelectedId(readSelected()); setSelectedLaunch(readLaunch()); setComposing(readNew()); setComposeItem(readItem()); setSettings(readSettings()); setBacklog(readBacklog()); setTriggerPlace(readTriggers()); };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -243,7 +252,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const switchSession = useCallback((session: Session, draft?: string, error?: string) => {
     registryRef.current?.select(session);
     setOpen(false);
-    const fromComposer = readNew() !== undefined;
+    const fromComposer = readNew() !== undefined || readLaunch() !== undefined;
+    setSelectedLaunch(undefined);
     setComposing(undefined);
     setComposeItem(undefined);
     setCommandSelection({ session, draft, ...(error ? { error } : {}) });
@@ -257,11 +267,46 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     url.searchParams.delete("new");
     url.searchParams.delete("item");
     url.searchParams.delete("itemScope");
+    url.searchParams.delete("launch");
     url.searchParams.set("session", session.id);
     // A started session replaces the dialog's entry: Back must not reopen an emptied dialog.
     if (fromComposer) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSelectedId(session.id);
   }, [selectedId]);
+  // Replace the dialog immediately, but keep its binding mounted until the outcome restores or consumes it.
+  const launchOptimistically = useCallback((id: string) => {
+    const composeUrl = window.location.href;
+    const composeHistory = window.history.state;
+    const url = new URL(composeUrl);
+    clearSettings(url);
+    for (const param of ["session", "new", "item", "itemScope", "place"]) url.searchParams.delete(param);
+    url.searchParams.set("launch", id);
+    window.history.replaceState({}, "", url);
+    setSelectedId(undefined);
+    setCommandSelection(undefined);
+    setSelectedLaunch(id);
+    setSettings(undefined); setBacklog(undefined); setTriggerPlace(undefined); setOpen(false);
+    return (outcome: LaunchOutcome) => {
+      // History and deliberate navigation, not completion timing, own the visible page.
+      if (readLaunch() !== id || readNew() !== undefined || readSettings() || readBacklog() || readTriggers()) return false;
+      if (outcome.type === "failed") {
+        window.history.replaceState(composeHistory, "", composeUrl);
+        setSelectedLaunch(undefined);
+        setSelectedId(readSelected());
+        setSettings(readSettings()); setBacklog(readBacklog()); setTriggerPlace(readTriggers());
+      }
+      return true;
+    };
+  }, []);
+  // Returning to a pending history entry after its dialog unmounted resolves that same entry, not a new one.
+  useEffect(() => {
+    if (!selectedLaunch || composing !== undefined || settings || backlog || triggerPlace) return;
+    const launch = launchList.find((item) => item.id === selectedLaunch);
+    if (launch?.state.type !== "started" && launch?.state.type !== "unsent") return;
+    switchSession(launch.state.session, launch.state.type === "unsent" ? launch.draft.text : undefined,
+      launch.state.type === "unsent" ? launch.state.error : undefined);
+    launches.take(launch.id);
+  }, [selectedLaunch, composing, settings, backlog, triggerPlace, launchList, launches, switchSession]);
   // New session: the dialog starts where the reader is, over whatever is open, and the URL remembers it.
   const { find, recent } = picker;
   // Two quick presses must open one window, not push two history entries.
@@ -277,6 +322,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       const projects = await newSessionApi.projects().catch(() => []).finally(() => { opening.current = false; });
       const cwd = launchFolder(item, projects) ?? "";
       const url = new URL(window.location.href);
+      url.searchParams.delete("launch"); setSelectedLaunch(undefined);
       const reopen = readNew() !== undefined;
       url.searchParams.set("new", cwd);
       url.searchParams.delete("place");
@@ -303,10 +349,11 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     setComposeMode(mode);
     if (!cwd) { setComposing(""); return; }
     const url = new URL(window.location.href);
+    url.searchParams.delete("launch"); setSelectedLaunch(undefined);
     url.searchParams.set("new", cwd);
     window.history.pushState(DIALOG_ENTRY, "", url);
     setComposing(cwd);
-  }, [find, recent, backlogScope]);
+  }, [find, recent, backlogScope, newSessionApi]);
   // Ctrl+Enter opens the dialog, Ctrl+Shift+Enter opens it in Rapidfire, as in the legacy client.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -376,6 +423,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const placeSettings = useCallback((place: SettingsPlace | undefined, replace = false) => {
     const url = new URL(window.location.href);
     clearSettings(url);
+    if (place && readLaunch()) { url.searchParams.delete("launch"); setSelectedLaunch(undefined); setComposing(undefined); }
     if (place) {
       url.searchParams.set("settings", place.section);
       if (place.section === "backlog" && place.project) url.searchParams.set("project", place.project);
@@ -399,6 +447,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const placeBacklog = useCallback((place: BacklogPlace | undefined, replace = false) => {
     const url = new URL(window.location.href);
     clearSettings(url);
+    if (place && readLaunch()) { url.searchParams.delete("launch"); setSelectedLaunch(undefined); setComposing(undefined); }
     if (place) url.searchParams.set("backlog", place.item ? itemParam(place.item) : "");
     if (replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     // Opening the list reads the folders again: an agent may have written an item since.
@@ -413,6 +462,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const placeTriggers = useCallback((place: TriggerPlace | undefined, options: { replace?: boolean } = {}) => {
     const url = new URL(window.location.href);
     clearSettings(url);
+    if (place && readLaunch()) { url.searchParams.delete("launch"); setSelectedLaunch(undefined); setComposing(undefined); }
     if (place) writeTriggersPlace(url, place);
     if (options.replace) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setTriggerPlace(place);
@@ -487,7 +537,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   } : undefined;
   const sessionFound = search && found && found.hit.sessionId === selectedId ? foundBinding(found, search.actions) : undefined;
   const dialog = composing === undefined ? null : composing || composeItem
-    ? <NewSession key={composeKey} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
+    ? <NewSession key={composeKey} hidden={selectedLaunch !== undefined} onLaunching={launchOptimistically} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
       item={composeItem} backlog={backlogApi} lookSession={picker.look} onItemRemoved={dropComposeItem}
       launches={launches} deferred={deferred} drafts={drafts}
       onDestination={(next, place) => {
@@ -561,6 +611,12 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       onOpenSession: (session) => switchSession(session), sessionName: (id) => picker.find(id)?.name })
     : composing === "" && !composeItem && !selectedId
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
+    : selectedLaunch ? (() => {
+      const launch = launchList.find((item) => item.id === selectedLaunch);
+      return launch && pendingSession ? pendingSession(launch) : <SessionFrame name={launch?.title ?? "New session"}
+        status={<StatusChip label={launch ? "Starting…" : "Launch unavailable"} tone={launch ? "neutral" : "bad"} />}>
+        <div className="thread-empty">{launch?.draft.text}</div></SessionFrame>;
+    })()
     : selectedId ? pendingChat
     // The picker covers this area whenever nothing is selected, so it holds no
     // message of its own: the picker is the instruction.

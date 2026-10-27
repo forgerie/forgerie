@@ -13,7 +13,7 @@ import { LaunchTray, NewSessionDialog, type StartPhase } from "./ui/NewSessionDi
 import { createAttachmentAdapter, promptOf, reusableAttachment } from "./attachments";
 import { createMentionSource } from "./mentionSource";
 import type { CommandCatalog } from "./commands";
-import type { Launch, LaunchStore } from "./launches";
+import type { Launch, LaunchOutcome, LaunchStore } from "./launches";
 import { destinationLabel, keepChoice, thinkingLevelsFor, type AgentChoice, type DeferredFiles, type NewSessionApi, type Project, type PromptResource } from "./newSession";
 import { mergeRecord, type WorktreeApi, type WorktreeOptions, type WorktreeRecord } from "./worktrees/worktreeApi";
 import { freshLabel } from "./worktrees/worktreeModel";
@@ -71,7 +71,11 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * retried: a step that may have worked is reported, never repeated.
  */
 export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "switch", api, worktrees, launches, deferred, drafts, onStarted, onDestination, onClose,
-  item: initialItem, backlog, lookSession, onItemRemoved }: {
+  item: initialItem, backlog, lookSession, onItemRemoved, hidden = false, onLaunching }: {
+  /** Retain every composer choice while its optimistic page is visible, without a modal or focus trap. */
+  hidden?: boolean;
+  /** Switch-mode only. Return a settlement guard: false leaves the result for background review. */
+  onLaunching?: ((id: string) => (outcome: LaunchOutcome) => boolean) | undefined;
   cwd: string; initialMode?: LaunchMode; api: NewSessionApi; launches: LaunchStore<LaunchDraft>; drafts?: DraftStore | undefined;
   /** A backlog item the session takes. Its file leads the first message, and starting claims it. */
   item?: ItemRef | undefined;
@@ -200,15 +204,12 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   const known = defaults?.cwd === cwd ? defaults : undefined;
   const model = choice.model ?? known?.model;
   const thinkingLevel = choice.thinkingLevel ?? known?.thinkingLevel;
-  const putBack = useCallback(async (draft: LaunchDraft) => {
-    const composer = runtimeRef.current?.thread.composer;
-    if (!composer) { saved?.saveChat([draft.text, saved.chat()].filter(Boolean).join("\n")); return; }
-    composer.setText([draft.text, composer.getState().text].filter(Boolean).join("\n"));
-    for (const attachment of draft.attachments) await composer.addAttachment(reusableAttachment(attachment));
-  }, [saved]);
+  const [restoring, setRestoring] = useState<LaunchDraft>();
+  const putBack = useCallback((draft: LaunchDraft) => { setRestoring(draft); }, []);
   const onNew = useCallback(async (message: AppendMessage) => {
-    const typed = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n").trim();
-    const draft: LaunchDraft = { text: typed, attachments: message.attachments ?? [] };
+    const authored = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
+    const typed = authored.trim();
+    const draft: LaunchDraft = { text: authored, attachments: message.attachments ?? [] };
     const refuse = (error: string) => { setPhase({ type: "composing", error }); void putBack(draft); };
     let prompt: ReturnType<typeof promptOf>;
     try { prompt = promptOf(message); } catch (error) { refuse(messageOf(error)); return; }
@@ -244,11 +245,12 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     // One item goes to one session. In Rapidfire the bar clears for the next start, so the item leaves with this one.
     if (mode === "rapidfire") { if (item) removeItem(); return; }
     setPhase({ type: "starting", id: launch.id });
+    const settleLaunch = onLaunching?.(launch.id);
     const outcome = await launch.done;
     const failedSetup = launch.worktree();
     // The window closed while it started (Back, the row, a reload): the start stays in the list,
     // so the app's notice says how it went and "Put back" still has its files. A success needs nothing.
-    if (!alive.current) { if (outcome.type === "started") launches.take(launch.id); return; }
+    if (!alive.current || (settleLaunch && !settleLaunch(outcome))) { if (outcome.type === "started" && !settleLaunch) launches.take(launch.id); return; }
     launches.take(launch.id);
     if (outcome.type === "started") { onStarted(outcome.session); return; }
     if (outcome.type === "unsent") { onStarted(outcome.session, { draft: typed, error: outcome.error }); return; }
@@ -263,7 +265,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
       return;
     }
     refuse(outcome.error);
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, putBack, saved, where, fresh, item, itemTitle, itemBlocks, removeItem]);
+  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, onLaunching, putBack, saved, where, fresh, item, itemTitle, itemBlocks, removeItem]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({
@@ -271,6 +273,17 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     isRunning: false, isDisabled: starting, isSendDisabled: defaults?.cwd !== cwd || itemBlocks,
   });
   useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
+  // Restore after the runtime has committed its enabled composer. Restoring during the disabled → enabled
+  // transition lets the runtime's composer synchronization overwrite the first restored attachment.
+  useEffect(() => {
+    if (!restoring) return;
+    setRestoring(undefined);
+    const composer = runtime.thread.composer;
+    composer.setText([restoring.text, composer.getState().text].filter(Boolean).join("\n"));
+    void (async () => {
+      for (const attachment of restoring.attachments) await composer.addAttachment(reusableAttachment(attachment));
+    })();
+  }, [restoring, runtime]);
   useEffect(() => {
     if (!saved) return;
     chatDraft.hydrate(saved.chat());
@@ -297,7 +310,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     : phase.error ? { type: "failed", message: phase.error } : { type: "ready" };
   // What the card shows: the setup of the start in progress, or a failed setup the reader is looking at.
   const failedList = failedSetups && failedSetups.repo === repo ? failedSetups.records : [];
-  const shown = phase.type === "starting" ? current?.worktree && { record: current.worktree, hookSeen: current.hookSeen === true }
+  const shown = phase.type === "starting" && !onLaunching ? current?.worktree && { record: current.worktree, hookSeen: current.hookSeen === true }
     : inspected ? (() => { const record = failedList.find((item) => item.id === inspected); return record && { record, hookSeen: record.setup.log !== "" }; })() : undefined;
   const setupCard = shown ? <WorktreeSetupCard setup={shown.record.setup} hookSeen={shown.hookSeen} branch={shown.record.branch}
     actions={shown.record.setup.phase === "failed" && phase.type !== "starting" ? <>
@@ -319,7 +332,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
       <ImageViewerProvider>
-        <NewSessionDialog carry={carry ? {
+        <NewSessionDialog hidden={hidden} carry={carry ? {
             card: <BacklogCarry state={carry} onRemove={removeItem} />,
             note: carry.type === "ready" ? <p className="bl-note">Starting gives this item to the new session until you archive it.</p> : undefined,
             placeholder: "Add anything the item does not say, or start with the item as written…",

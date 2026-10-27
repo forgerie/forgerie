@@ -96,7 +96,8 @@ try {
   await until("!document.querySelector('.floating-panel') && document.querySelector('.ns-dialog .model-trigger').textContent.includes('Claude Sonnet 5')");
   await type("Fix the build");
   await pressCombo(cdp, "ctrl+enter");
-  await until("document.querySelector('.ns-status')?.textContent === 'Starting session…'");
+  await until("!document.querySelector('.ns-dialog')?.open && document.querySelector('.session-shell .ns-status')?.textContent === 'Starting…'");
+  assert.equal(await evaluate(cdp, "document.querySelector('.session-shell .message-text')?.textContent"), "Fix the build");
   assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').disabled || document.querySelector('.ns-dialog .model-trigger').disabled"), true);
   await until("!!document.documentElement.dataset.started");
   assert.deepEqual(JSON.parse(await evaluate(cdp, "document.documentElement.dataset.started")), { cwd: "/home/simon/code/sandbox/forgerie", text: "Fix the build" });

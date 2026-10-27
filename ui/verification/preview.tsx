@@ -1,5 +1,5 @@
 // Separate dev-only entry point. This preview has no transport or network data.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { ToastRegion } from "../src/ui/ToastRegion";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
@@ -22,6 +22,7 @@ import type { CommandResult } from "../src/commands";
 import { createMentionSource, type MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { NewSession, type LaunchDraft } from "../src/NewSession";
+import { PendingSession } from "../src/app/PendingSession.binding";
 import { createLaunchStore } from "../src/launches";
 import { createDeferredFiles, type NewSessionApi, type Project, type Workspace } from "../src/newSession";
 import { createAttachmentAdapter } from "../src/attachments";
@@ -952,6 +953,9 @@ async function dropFiles(name: string) {
 /** The dialog over a session, as it opens in the app. No network. */
 function NewSessionPreview() {
   const [started, setStarted] = useState<string>();
+  const [pending, setPending] = useState<string>();
+  const launches = useSyncExternalStore(previewLaunches.subscribe, previewLaunches.getSnapshot);
+  const launch = launches.find((item) => item.id === pending);
   const [open, setOpen] = useState(true);
   const runtime = useExternalStoreRuntime({ messages: useThreadMessages(initialMessages, false), onNew: async () => {} });
   useEffect(() => {
@@ -969,10 +973,13 @@ function NewSessionPreview() {
     return () => timers.forEach(clearTimeout);
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
-    <SessionFrame name={started ?? "Session client"} status={<StatusChip label="Connected" tone="quiet" />}><Thread /></SessionFrame>
-    {open && <NewSession cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches} deferred={previewDeferred}
+    {launch ? <PendingSession launch={launch} /> : <SessionFrame name={started ?? "Session client"} status={<StatusChip label="Connected" tone="quiet" />}><Thread /></SessionFrame>}
+    {open && <NewSession hidden={pending !== undefined} onLaunching={(id) => {
+      setPending(id);
+      return (outcome) => { if (outcome.type === "failed") setPending(undefined); return true; };
+    }} cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches} deferred={previewDeferred}
       initialMode={scenario === "new-session-rapidfire" ? "rapidfire" : "switch"}
-      onStarted={(session) => { setStarted(`Opened ${session.id} in ${session.cwd}`); setOpen(false); }} onClose={() => setOpen(false)} />}
+      onStarted={(session) => { setPending(undefined); setStarted(`Opened ${session.id} in ${session.cwd}`); setOpen(false); }} onClose={() => setOpen(false)} />}
   </AssistantRuntimeProvider>;
 }
 const root = document.getElementById("root");

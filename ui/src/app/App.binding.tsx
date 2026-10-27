@@ -2,6 +2,9 @@ import { lazy, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import { BacklogSettingsView } from "../backlog/BacklogSettings.binding";
 import { createBacklogSettingsApi } from "../backlog/backlogSettingsApi";
 import { App } from "../App";
+import { PendingSession } from "./PendingSession.binding";
+import type { Launch } from "../launches";
+import type { LaunchDraft } from "../NewSession";
 import { ProjectGroupSettings, useProjectGroups } from "../projectGroups/GroupControls.binding";
 import { RelatedWorkspaces } from "../projectGroups/RelatedWorkspaces.binding";
 import { createProjectGroupApi } from "../projectGroups/projectGroupApi";
@@ -39,6 +42,7 @@ const triggerMemory = createTriggerMemory();
 const triggerListeners = new Set<() => void>();
 const triggerChanges = (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; };
 const triggersChanged = () => { for (const listener of triggerListeners) listener(); };
+const pendingSession = (launch: Launch<LaunchDraft>) => <PendingSession launch={launch} />;
 const resourceLens: ResourceLensRenderer = ({ id, cwd, onClose }) => <ResourceLens key={id} api={resourceApi} sessionId={id} cwd={cwd} onClose={onClose} />;
 /**
  * The app with project groups (a filter in the session list's menu, a settings page, and related worktrees in each chat's header menu)
@@ -60,6 +64,6 @@ export function AppBinding({ shelves }: { shelves?: ReactNode }) {
     render: (args) => <Suspense fallback={<SessionFrame name="Triggers" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
       <TriggersScreen args={args} list={triggerList} api={triggersApi} directory={directory} memory={triggerMemory} /></Suspense>,
   }), [triggerList]);
-  return <App triggers={triggers} shelves={shelves} backlogSettings={backlogSettings} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
+  return <App pendingSession={pendingSession} triggers={triggers} shelves={shelves} backlogSettings={backlogSettings} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
     projectFilter={groups.filter} projectSettings={settings} search={search} relatedWork={related} resourceSettings={resourceSettings} resourceLens={resourceLens} />;
 }

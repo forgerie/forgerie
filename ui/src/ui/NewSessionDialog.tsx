@@ -40,7 +40,8 @@ export interface Carry {
   blocked?: boolean | undefined;
 }
 
-export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, setup, carry, onRapidfire, onDiscard, onClose }: {
+export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, setup, carry, onRapidfire, onDiscard, onClose, hidden = false }: {
+  hidden?: boolean;
   /** The destination chip and its picker. */
   destination: ReactNode;
   carry?: Carry | undefined;
@@ -60,19 +61,28 @@ export function NewSessionDialog({ destination, model, mentions, commands, rapid
   const titleId = useId();
   const [dialog, setDialog] = useState<HTMLDialogElement | null>(null);
   const pressedBackdrop = useRef(false);
+  // Native close events are queued. A fast failure can reopen this dialog before its hide event arrives.
+  const hiding = useRef(false);
   const busy = phase.type === "starting";
   // Read before showModal moves focus, so closing returns it where it was.
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
   useLayoutEffect(() => {
-    if (dialog && !dialog.open && typeof dialog.showModal === "function") dialog.showModal();
-  }, [dialog]);
+    if (!dialog) return;
+    if (hidden) { if (dialog.open) { hiding.current = true; dialog.close(); } }
+    else if (!dialog.open && typeof dialog.showModal === "function") dialog.showModal();
+  }, [dialog, hidden]);
   useLayoutEffect(() => () => { if (opener?.isConnected) opener.focus({ preventScroll: true }); }, [opener]);
   const close = () => { if (!busy) onClose(); };
-  return createPortal(<dialog ref={setDialog} className="ns-dialog" aria-labelledby={titleId}
+  return createPortal(<dialog ref={setDialog} hidden={hidden} className="ns-dialog" aria-labelledby={titleId}
     // Nested dialogs (the image viewer) send their own cancel and close events up through React. Only ours count.
     onCancel={(event) => { if (event.target !== event.currentTarget) return; event.preventDefault(); close(); }}
     // The browser can still close it (a second Escape). While a start runs, its outcome must be seen.
-    onClose={(event) => { if (event.target !== event.currentTarget) return; if (busy) dialog?.showModal(); else onClose(); }}
+    onClose={(event) => {
+      if (event.target !== event.currentTarget) return;
+      if (hiding.current) { hiding.current = false; return; }
+      if (hidden) return;
+      if (busy) dialog?.showModal(); else onClose();
+    }}
     onPointerDown={(event) => { pressedBackdrop.current = event.target === event.currentTarget; }}
     onClick={(event) => {
       if (pressedBackdrop.current && event.target === event.currentTarget) close();
