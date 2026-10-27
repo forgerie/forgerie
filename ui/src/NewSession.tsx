@@ -85,7 +85,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   lookSession?: ((sessionId: string) => SessionLook | undefined) | undefined;
   /** The author took the item off this session. The URL follows. */
   onItemRemoved?: (() => void) | undefined;
-  /** The author's last explicit choice. Absent: a fresh worktree in a Git project. */
+  /** The author's explicit choice. Absent: the default branch checkout in a Git project. */
   initialPlacement?: Placement | undefined;
   /** Worktree options and failed setups. Absent: every start uses the folder itself, as before worktrees. */
   worktrees?: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard"> | undefined;
@@ -153,9 +153,10 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   }, [worktrees, destination.cwd]);
   const where = options?.cwd === destination.cwd ? options.value : undefined;
   const git = where?.kind === "git" ? where : undefined;
-  const fresh = git !== undefined && destination.placement !== "existing";
-  // A fresh worktree starts from the default branch, so the main checkout stands in for it: models, skills, and files.
-  const cwd = fresh ? git.repo : destination.cwd;
+  const fresh = git !== undefined && destination.placement === "fresh";
+  const defaultBranch = git !== undefined && destination.placement === undefined;
+  // Resolve implicit starts to the default branch before reading its models, skills, and files.
+  const cwd = defaultBranch ? git.defaultCwd ?? git.repo : fresh ? git.repo : destination.cwd;
   const repo = git?.repo;
   useEffect(() => {
     if (!worktrees || !repo) return;
@@ -204,6 +205,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   const known = defaults?.cwd === cwd ? defaults : undefined;
   const model = choice.model ?? known?.model;
   const thinkingLevel = choice.thinkingLevel ?? known?.thinkingLevel;
+  const canSend = defaults?.cwd === cwd && (!worktrees || options?.cwd === destination.cwd) && !itemBlocks;
   const [restoring, setRestoring] = useState<LaunchDraft>();
   const putBack = useCallback((draft: LaunchDraft) => { setRestoring(draft); }, []);
   const onNew = useCallback(async (message: AppendMessage) => {
@@ -214,7 +216,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     let prompt: ReturnType<typeof promptOf>;
     try { prompt = promptOf(message); } catch (error) { refuse(messageOf(error)); return; }
     const { text, files } = deferred.split(prompt.text);
-    if (itemBlocks) { void putBack(draft); return; }
+    if (!canSend) { void putBack(draft); return; }
     if (text === "" && !prompt.attachments?.length && files.length === 0 && !item) return;
     if (text.startsWith("!")) { refuse("Shell commands need a running session. Send a first message, then run the command."); return; }
     let command: PromptResource["identity"] | undefined;
@@ -238,7 +240,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     const retrying = retry.current;
     retry.current = undefined;
     const site = retrying ? { destination: { kind: "fresh-worktree" as const }, setupId: retrying.id, worktree: retrying }
-      : where ? { destination: { kind: fresh ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
+      : where && !defaultBranch ? { destination: { kind: fresh ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
     const placement = item ? { ...site, item, ...(itemTitle ? { title: itemTitle } : {}) } : site;
     if (retrying) { setInspected(undefined); setFailedSetups((current) => current && { ...current, records: current.records.filter((record) => record.id !== retrying.id) }); }
     const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft, placement);
@@ -265,12 +267,12 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
       return;
     }
     refuse(outcome.error);
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, onLaunching, putBack, saved, where, fresh, item, itemTitle, itemBlocks, removeItem]);
+  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, onLaunching, putBack, saved, where, fresh, defaultBranch, item, itemTitle, canSend, removeItem]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({
     messages: useThreadMessages([], false), onNew, adapters: { dictation, attachments },
-    isRunning: false, isDisabled: starting, isSendDisabled: defaults?.cwd !== cwd || itemBlocks,
+    isRunning: false, isDisabled: starting, isSendDisabled: !canSend,
   });
   useEffect(() => { runtimeRef.current = runtime; return () => { runtimeRef.current = null; }; }, [runtime]);
   // Restore after the runtime has committed its enabled composer. Restoring during the disabled → enabled
@@ -302,7 +304,8 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   }), [model, thinkingLevel, starting, known, api, cwd]);
   const mentions = useMemo(() => createMentionSource({ id: NEW_SESSION_DRAFT, cwd }, (path, init) => fetch(path, init),
     `/api/models?${new URLSearchParams({ cwd })}`), [cwd]);
-  const label = !cwd ? "Choose a project" : fresh ? freshLabel(destinationLabel(git.repo, projects), git) : destination.label ?? destinationLabel(cwd, projects);
+  const label = !cwd ? "Choose a project" : fresh ? freshLabel(destinationLabel(git.repo, projects), git)
+    : defaultBranch && cwd !== git.repo ? `${destinationLabel(git.repo, projects)} · ${git.defaultBranch}` : destination.label ?? destinationLabel(cwd, projects);
   const current = phase.type === "starting" ? started.find((item) => item.id === phase.id) : undefined;
   const progress = current?.state;
   const view: StartPhase = phase.type === "starting"
@@ -336,7 +339,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
             card: <BacklogCarry state={carry} onRemove={removeItem} />,
             note: carry.type === "ready" ? <p className="bl-note">Starting gives this item to the new session until you archive it.</p> : undefined,
             placeholder: "Add anything the item does not say, or start with the item as written…",
-            onSendEmpty: defaults?.cwd === cwd ? () => { void onNew(EMPTY_MESSAGE); } : undefined,
+            onSendEmpty: canSend ? () => { void onNew(EMPTY_MESSAGE); } : undefined,
             blocked: itemBlocks,
           } : undefined}
           phase={view} rapidfire={mode === "rapidfire"} onRapidfire={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")}
@@ -344,7 +347,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
           commands={{ catalog: resources?.cwd === cwd ? resources.catalog : { type: "loading" }, onRetry: () => setResourceAttempt((n) => n + 1) }}
           setup={setupCard}
           destination={<DestinationPicker binding={{
-            cwd: destination.cwd, label, disabled: starting, placement: worktrees ? (fresh ? "fresh" : "existing") : undefined,
+            cwd, label, disabled: starting, placement: worktrees ? (fresh ? "fresh" : "existing") : undefined,
             listProjects: (signal) => api.projects(signal),
             listWorkspaces: (projectId, signal) => api.workspaces(projectId, signal),
             ...(worktrees ? { worktreeOptions: (path: string, signal: AbortSignal) => worktrees.options(path, signal) } : {}),

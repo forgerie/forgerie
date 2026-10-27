@@ -53,7 +53,7 @@ const workspaces: Record<string, Workspace[]> = {
 
 // A local worktree API with scripted outcomes.
 const worktreeApi: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard" | "get"> = {
-  options: async (cwd) => cwd.startsWith(repo) ? { kind: "git", repo, defaultBranch: "main", defaultDestination: "fresh-worktree" } : { kind: "non-git" },
+  options: async (cwd) => cwd.startsWith(repo) ? { kind: "git", repo, defaultBranch: "main", defaultCwd: repo, defaultDestination: "existing-workspace" } : { kind: "non-git" },
   list: async () => scenario === "new-failed" ? [record({ setup: { phase: "failed", log: failedLog, exitCode: 1, error: "Post-create hook exited with 1" } })] : [],
   get: async () => ({ worktree: record(), info: info() }),
   land: async () => {
@@ -78,7 +78,8 @@ const newApi: NewSessionApi = {
   workspaces: async (id) => workspaces[id] ?? [{ id: `${id}-main`, path: projects.find((item) => item.id === id)!.path, label: "main", isMain: true }],
   models: async () => ({ models, model: models[0], thinkingLevel: "high" }),
   promptResources: async () => [],
-  start: async (_cwd, _first, _choice, options) => {
+  start: async (cwd, _first, _choice, options) => {
+    if (options?.destination?.kind !== "fresh-worktree") return { type: "started", session: { id: "new-session", cwd } };
     const token = options?.startupToken;
     emitWorktree(record({ startupToken: token }));
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -106,14 +107,14 @@ function NewSessionPreview() {
     if (scenario === "new-hook") timers.push(setTimeout(() => typeAndSend("Fix the empty-password login and add a regression test."), 500));
     if (scenario === "new-picker") {
       timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
-      timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[data-project="p1"]')?.click(), 800));
+      timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')?.click(), 800));
     }
     if (scenario === "new-failed") timers.push(setTimeout(() => [...document.querySelectorAll<HTMLButtonElement>(".ns-tray button")].find((node) => node.textContent === "View setup")?.click(), 600));
     return () => timers.forEach(clearTimeout);
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Fix the empty-password login" status="Connected"><Thread /></SessionFrame>
-    <NewSession cwd={`${repo}/.worktree/new-ui-mvp`} api={newApi} worktrees={worktreeApi} launches={launches} deferred={createDeferredFiles()}
+    <NewSession cwd={`${repo}/.worktree/new-ui-mvp`} initialPlacement={scenario === "new-hook" ? "fresh" : undefined} api={newApi} worktrees={worktreeApi} launches={launches} deferred={createDeferredFiles()}
       onStarted={() => {}} onClose={() => {}} />
   </AssistantRuntimeProvider>;
 }

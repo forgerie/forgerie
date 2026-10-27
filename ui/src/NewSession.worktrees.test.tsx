@@ -35,7 +35,7 @@ function harness(outcome: (args: StartArgs) => StartResult | Promise<StartResult
     start: async (...args) => { starts.push(args); return outcome(args); },
   };
   const worktrees: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard"> = {
-    options: async (cwd) => cwd.startsWith("/code/forgerie") ? { kind: "git", repo: "/code/forgerie", defaultBranch: "main", defaultDestination: "fresh-worktree" } : { kind: "non-git" },
+    options: async (cwd) => cwd.startsWith("/code/forgerie") ? { kind: "git", repo: "/code/forgerie", defaultBranch: "main", defaultCwd: "/code/forgerie", defaultDestination: "existing-workspace" } : { kind: "non-git" },
     list: async () => inventory,
     land: async () => ({ kind: "landed", sha: "abc1234", cleanup: { kind: "done" } }),
     discardPreview: async (id) => ({ worktreeId: id, branch: "s-1", defaultBranch: "main", commits: [], dirtyFiles: [], confirmationToken: "tok" }),
@@ -71,23 +71,79 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe("a new session's worktree", () => {
-  it("defaults a Git project to a fresh worktree from its default branch, started from the main checkout", async () => {
+  it("defaults a Git project to its main checkout even when opened from a linked worktree", async () => {
     const h = harness();
+    const models = vi.spyOn(h.api, "models");
+    const resources = vi.spyOn(h.api, "promptResources");
     await render(h);
-    expect(label()).toBe("forgerie · new worktree from main");
+    expect(label()).toBe("forgerie");
+    expect(models).toHaveBeenLastCalledWith("/code/forgerie", expect.any(AbortSignal));
+    expect(resources).toHaveBeenLastCalledWith("/code/forgerie", expect.any(AbortSignal));
     await type("Fix the login");
     await send();
     expect(h.starts[0]![0]).toBe("/code/forgerie");
-    expect(h.starts[0]![3]).toMatchObject({ destination: { kind: "fresh-worktree" } });
+    expect(h.starts[0]![3]?.destination).toBeUndefined();
   });
 
-  it("opts out to an existing workspace, and says so on the next reload", async () => {
+  it("uses a named default branch checkout rather than assuming it is called main", async () => {
+    const h = harness();
+    h.worktrees.options = async () => ({ kind: "git", repo: "/code/forgerie", defaultBranch: "trunk",
+      defaultCwd: "/code/forgerie/.worktree/trunk", defaultDestination: "existing-workspace" });
+    await render(h);
+    expect(label()).toBe("forgerie · trunk");
+    await type("Fix the login");
+    await send();
+    expect(h.starts[0]![0]).toBe("/code/forgerie/.worktree/trunk");
+    expect(h.starts[0]![3]?.destination).toBeUndefined();
+  });
+
+  it("waits for the default checkout before enabling the first send", async () => {
+    const h = harness();
+    let resolve!: (value: Awaited<ReturnType<WorktreeApi["options"]>>) => void;
+    h.worktrees.options = () => new Promise((done) => { resolve = done; });
+    await render(h);
+    await type("Fix it");
+    expect(button("Start session")?.disabled).toBe(true);
+    await send();
+    expect(h.starts).toEqual([]);
+    await act(async () => resolve({ kind: "git", repo: "/code/forgerie", defaultBranch: "main",
+      defaultCwd: "/code/forgerie", defaultDestination: "existing-workspace" }));
+    await settle();
+    expect(button("Start session")?.disabled).toBe(false);
+    await send();
+    expect(h.starts[0]![0]).toBe("/code/forgerie");
+  });
+
+  it("keeps fresh worktree creation as an explicit choice", async () => {
     const h = harness();
     const onDestination = vi.fn();
     await render(h, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
     await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
-    expect(button("New worktreefrom main")?.getAttribute("aria-current")).toBe("true");
+    expect(button("New worktreefrom main")?.getAttribute("aria-current")).not.toBe("true");
+    expect(document.querySelector('[data-option-id="w1"]')?.getAttribute("aria-current")).toBe("true");
+    await click(button("New worktreefrom main"));
+    expect(label()).toBe("forgerie · new worktree from main");
+    expect(onDestination).toHaveBeenLastCalledWith("/code/forgerie", "fresh");
+    await type("Fix in isolation");
+    await send();
+    expect(h.starts[0]![0]).toBe("/code/forgerie");
+    expect(h.starts[0]![3]).toMatchObject({ destination: { kind: "fresh-worktree" } });
+  });
+
+  it("keeps an explicit fresh choice from the URL", async () => {
+    const h = harness();
+    await render(h, { placement: "fresh" });
+    expect(label()).toBe("forgerie · new worktree from main");
+  });
+
+  it("selects an existing workspace explicitly, and says so on the next reload", async () => {
+    const h = harness();
+    const onDestination = vi.fn();
+    await render(h, { onDestination });
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    expect(document.querySelector('[data-option-id="w1"]')?.getAttribute("aria-current")).toBe("true");
     await click([...document.querySelectorAll<HTMLButtonElement>(".option-row")].find((row) => row.textContent?.startsWith("feat/ui")));
     expect(label()).toBe("forgerie · feat/ui");
     expect(onDestination).toHaveBeenLastCalledWith("/code/forgerie/.worktree/ui", "existing");
@@ -115,7 +171,7 @@ describe("a new session's worktree", () => {
   it("shows setup steps while the worktree is prepared", async () => {
     let finish!: (result: StartResult) => void;
     const h = harness(() => new Promise((done) => { finish = done; }));
-    await render(h);
+    await render(h, { placement: "fresh" });
     await type("Fix it");
     await send();
     const token = (h.starts[0]![3] as { startupToken: string }).startupToken;
@@ -131,7 +187,7 @@ describe("a new session's worktree", () => {
       h.emit(failedRecord({ startupToken: options?.startupToken }));
       return { type: "failed", failure: { stage: "start", message: "Post-create hook exited with 1", maybeStarted: true } };
     });
-    await render(h);
+    await render(h, { placement: "fresh" });
     await type("Fix it");
     await send();
     expect(document.querySelector(".wt-setup-title")?.textContent).toBe("Worktree setup failed");

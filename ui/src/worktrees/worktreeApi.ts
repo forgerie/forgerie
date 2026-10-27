@@ -6,7 +6,7 @@ import { z } from "zod";
 
 const text = z.string().min(1);
 
-/** Where a new browser session starts. Omitted: fresh for a Git project, existing otherwise. */
+/** Where a new browser session starts. Omitted: the default branch checkout for Git, the folder otherwise. */
 export const destinationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("fresh-worktree") }),
   z.object({ kind: z.literal("existing-workspace") }),
@@ -14,7 +14,7 @@ export const destinationSchema = z.discriminatedUnion("kind", [
 export type NewSessionDestination = z.infer<typeof destinationSchema>;
 
 export const worktreeOptionsSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("git"), repo: text, defaultBranch: text, defaultDestination: z.literal("fresh-worktree").catch("fresh-worktree") }),
+  z.object({ kind: z.literal("git"), repo: text, defaultBranch: text, defaultCwd: text.optional(), defaultDestination: z.literal("existing-workspace").catch("existing-workspace") }),
   z.object({ kind: z.literal("non-git") }),
 ]);
 export type WorktreeOptions = z.infer<typeof worktreeOptionsSchema>;

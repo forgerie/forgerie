@@ -2,7 +2,7 @@
 
 ## Decision
 
-New browser-created sessions in Git projects use a fresh worktree by default. The draft creates nothing until the browser sends its first message and calls the session creation API. The user can choose an existing workspace for that session.
+New browser-created sessions in Git projects use the existing checkout of the repository's default branch. This also applies when the dialog opens from a linked worktree. The user can explicitly choose a new worktree or another existing workspace. The draft creates nothing until the browser sends its first message.
 
 Agent-created sessions do not use this default. `spawn_session` and handoff keep their existing cwd inheritance. Their internal creation path does not call the browser coordinator.
 
@@ -14,7 +14,7 @@ Schemas and wire types live in `src/shared/sessionWorktree.ts`. Session projecti
 
 | Request | Result |
 | --- | --- |
-| `GET /sessions/worktree-options?cwd=<absolute path>` | `{kind:"git",repo,defaultBranch,defaultDestination:"fresh-worktree"}` or `{kind:"non-git"}`. |
+| `GET /sessions/worktree-options?cwd=<absolute path>` | `{kind:"git",repo,defaultBranch,defaultCwd?,defaultDestination:"existing-workspace"}` or `{kind:"non-git"}`. |
 | `POST /sessions` | Accepts `{cwd,startupToken?,modelSpec?,thinkingLevel?,destination?,setupId?}`. Returns `SessionInfo` with the actual new cwd and `worktree` for a fresh session. |
 | `GET /sessions/worktrees?cwd=<absolute path>` | `{worktrees: SessionWorktreeRecord[]}`. The optional filter matches the main repo path or exact worktree path. Without it, returns the machine inventory. |
 | `GET /sessions/worktrees/:worktreeId` | `{worktree: SessionWorktreeRecord,info: SessionWorktreeInfo}` with fresh Git status. |
@@ -22,7 +22,9 @@ Schemas and wire types live in `src/shared/sessionWorktree.ts`. Session projecti
 | `POST /sessions/worktrees/:worktreeId/discard-preview` | `WorktreeDiscardPreview` with commit SHAs, subjects, dirty file paths, and `confirmationToken`. |
 | `POST /sessions/worktrees/:worktreeId/discard` | Accepts `{confirmationToken}` from the preview. Returns `WorktreeActionResult`. |
 
-`destination` is `{kind:"fresh-worktree"}` or `{kind:"existing-workspace"}`. Omission means fresh for Git and existing for non-Git. To opt out, send the existing workspace's cwd and `destination:{kind:"existing-workspace"}`. This is also required when the chosen workspace is already a linked worktree. Fresh always starts from the main repository's default branch, not the selected worktree's branch.
+`destination` is `{kind:"fresh-worktree"}` or `{kind:"existing-workspace"}`. Omission selects `defaultCwd`, the existing checkout of the Git default branch. If that branch has no checkout, creation fails and asks the user to choose a workspace. Forgerie does not switch branches or create a worktree implicitly. Non-Git projects stay in the requested folder.
+
+To use a specific folder, send its cwd and `destination:{kind:"existing-workspace"}`. To create a worktree, send `destination:{kind:"fresh-worktree"}`. Fresh always starts from the main repository's default branch, not the selected worktree's branch. Sessions in an existing checkout share its files with other sessions; choose a new worktree for isolation.
 
 `setupId` retries an unowned failed setup in the same repository. Reuse it rather than allocating another worktree. `startupToken` correlates first-send progress before a session ID exists. Repeated fresh creation with the same token and repository returns the original owned session. Concurrent requests with the same cwd and token share one creation. The token does not change a session's model or cwd after creation. Use a new token for a new draft.
 
@@ -40,7 +42,7 @@ Malformed creation requests return HTTP 400 with `{error:string}`. An unknown wo
 
 ## Setup and live status
 
-Creation allocates `<main repo>/.worktrees/s-<8 characters>` and a short temporary branch. It uses the current local default-branch tip. The default branch comes from `origin/HEAD` when a corresponding local branch exists, then `init.defaultBranch`, then `main`, `master`, or the main checkout's branch. No network fetch occurs. An unborn repository without a commit cannot allocate a worktree.
+Explicit fresh-worktree creation allocates `<main repo>/.worktrees/s-<8 characters>` and a short temporary branch. It uses the current local default-branch tip. The default branch comes from `origin/HEAD` when a corresponding local branch exists, then `init.defaultBranch`, then `main`, `master`, or the main checkout's branch. No network fetch occurs. An unborn repository without a commit cannot allocate a worktree.
 
 The first allocation adds `/.worktrees/` to the common Git directory's `info/exclude`. It leaves `.gitignore` and existing exclusions unchanged. Legacy `.worktree/` checkouts keep their persisted paths. No folder or checkout moves automatically.
 
