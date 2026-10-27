@@ -24,6 +24,7 @@ const WINDOW_ORDER = [
   "antigravity_gemini",
   "antigravity_claude",
   "antigravity_gpt_oss",
+  "elevenlabs_credits",
   "openrouter_key_limit",
   "openrouter_credits",
 ];
@@ -38,6 +39,8 @@ const WINDOW_LABELS: Readonly<Record<string, string>> = {
   // reset, so it carries no countdown and no pace line.
   openrouter_credits: "Credits",
   openrouter_key_limit: "Key limit",
+  // A monthly credit allowance: a bar with a reset, unlike OpenRouter's balance.
+  elevenlabs_credits: "Credits",
 };
 
 /**

@@ -24,6 +24,7 @@ export const accountMetersManifest: AppPluginManifest = {
     { type: "boolean", id: "antigravity_gpt_oss", label: "Antigravity GPT-OSS pool", description: "The pool the router sends Antigravity GPT-OSS work to.", default: true },
     { type: "boolean", id: "openrouter_key_limit", label: "OpenRouter key limit", description: "The key's own spend limit.", default: true },
     { type: "boolean", id: "openrouter_credits", label: "OpenRouter credits", description: "The account's prepaid balance.", default: true },
+    { type: "boolean", id: "elevenlabs_credits", label: "ElevenLabs credits", description: "The plan's monthly credit allowance.", default: true },
   ],
 };
 

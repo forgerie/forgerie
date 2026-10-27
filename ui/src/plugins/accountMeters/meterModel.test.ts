@@ -65,6 +65,18 @@ describe("the meters", () => {
     expect(inService(meterModel(payload, {}, now)).map((provider) => [provider.id, provider.accounts.length]))
       .toEqual([["claude", 1], ["codex", 1], ["openrouter", 1], ["antigravity", 1]]);
   });
+  it("draws an ElevenLabs credit allowance as a paced bar with its monthly reset, not as dollars", () => {
+    const [eleven] = meterModel(parseQuotaPayload({ version: 1, updatedAt: "2026-10-09T03:59:00Z", providers: [
+      { id: "elevenlabs", name: "ElevenLabs", routing: "rotating", accounts: [{ email: "sk_8d261...d4c", available: true, selected: true, priority: 0, windows: [
+        // Read live on 2026-10-27: 387 of 90,000 credits used, reset on the 17th; a 31-day month.
+        { id: "elevenlabs_credits", name: "Credits", usedPercent: 0.43, remainingPercent: 99.57, resetsAt: "2026-10-17T04:00:00Z", lengthSeconds: 31 * 86400 },
+      ] }] },
+    ] }), {}, now);
+    const account = eleven!.accounts[0]!;
+    expect(account.routed).toBe(false);
+    expect(account.lines[0]).toMatchObject({ label: undefined, share: "100", clock: { text: "8d" }, mark: { kind: "bar", standing: { kind: "loss" } } });
+    expect(account.lines[0]!.words).toMatch(/^Credits: 100% left, resets in 8d, \d+ points ahead of an even spend\.$/);
+  });
   it("hides the bars the user turned off, and says so when nothing is left", () => {
     const [hidden] = meterModel(payload, { five_hour: false, seven_day: false, weekly_fable: false }, now);
     expect(hidden!.accounts[0]!.empty).toBe("Every bar is turned off");
