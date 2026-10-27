@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeRun, launchInputs, runStatus, stopIsOpen, stopOutcome, stripSegments, waitingStops, workflowEntryOf, type WorkflowRun } from "./workflowsModel";
+import { activeRun, launchInputs, runStatus, stopIsOpen, stopOutcome, stripSegments, stripStages, waitingStops, workflowEntryOf, type WorkflowRun } from "./workflowsModel";
 import { BUILDING, CONTRACT_STOP, CONTRACT_WAITING, FAILED, LAND_STOP, LAND_WAITING, LANDED, SAVED, STAGES, STALLED } from "./fixtures/runs";
 
 const RUN_ID = "a".repeat(64);
@@ -68,6 +68,11 @@ describe("a run at a glance", () => {
     expect(stripSegments(FAILED)).toEqual([
       { key: "contract", lanes: ["done"] }, { key: "build", lanes: ["done", "failed"] }, { key: "review", lanes: ["next"] }, { key: "land", lanes: ["next"] }]);
     expect(stripSegments({ ...FAILED, state: { kind: "running" } })[1]?.lanes).toEqual(["done", "failed"]);
+  });
+
+  it("flattens the route to one state per stage, the worst of its lanes", () => {
+    expect(stripStages(BUILDING)).toEqual(["done", "working", "next", "next"]);
+    expect(stripStages({ ...FAILED, state: { kind: "running" } })).toEqual(["done", "failed", "next", "next"]);
   });
 
   it.each([{ workers: [] }, { workers: [{ name: "review" }] }])("marks a failed single-lane stage with workers $workers", ({ workers }) => {

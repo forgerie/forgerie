@@ -2,7 +2,7 @@
 // the routes are src/server/sessions/workflowRoutes.ts; the stop rules are src/shared/workflowStops.ts.
 import { z } from "zod";
 import { viewsOf } from "@shared/workflowGlance";
-export { viewsOf, stripSegments, waitingStops } from "@shared/workflowGlance";
+export { viewsOf, stripSegments, stripStages, waitingStops } from "@shared/workflowGlance";
 import { textOf, type PiMessage } from "../contracts";
 import type { ChildRetry } from "../childAgents/childAgentsModel";
 

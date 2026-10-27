@@ -5,7 +5,7 @@ import "./StageStrip.css";
 
 /** done: finished. working: at work now. waiting: waits on the reader. failed: its worker failed. next: not reached. */
 export type StageStripState = "done" | "working" | "waiting" | "failed" | "next";
-/** One stage as a bar. A stage with several lanes, such as parallel workers, is stacked bars. */
+/** One stage with its lanes, such as parallel workers. The grid plan (stageStripPlan.ts) takes stages in this shape. */
 export interface StageStripSegment { key: string; lanes: readonly StageStripState[] }
 
 /** The root size the plan's thresholds assume, in CSS px. */
@@ -37,15 +37,16 @@ function useInnerWidth<T extends HTMLElement>() {
 const foldTone = (state: StripCell | undefined) => state === "failed" ? "bad" : state === "waiting" || state === "working" ? "live" : undefined;
 
 /**
- * Molecule: a whole process as one row: a block grid, its name, its status,
- * and a count of what waits on the reader; the whole strip opens the process.
- * It sits above an input. The grid has a column per stage and a block per
- * lane, stacked from the floor, and takes at most 40% of the strip; past
- * that, the leading stages fold into a `+n` count in the worst tone they
- * hide. Without stages, `icon` stands where the grid would be. A narrow
+ * Molecule: a whole process as one row: a line of blocks, its name, its
+ * status, and a count of what waits on the reader; the whole strip opens the
+ * process. It sits above an input. The blocks are one per stage, start to
+ * finish, as the inbox's StageLine draws them; a stage with parallel work
+ * shows the worst state of its lanes. The line takes at most 40% of the strip;
+ * past that, the leading stages fold into a `+n` count in the worst tone they
+ * hide. Without stages, `icon` stands where the blocks would be. A narrow
  * strip drops the name first.
  */
-export function StageStrip({ icon, title, status, count = 0, label, segments, onPress }: {
+export function StageStrip({ icon, title, status, count = 0, label, stages, onPress }: {
   /** Drawn in place of the grid when there are no stages. */
   icon: ReactNode;
   title: string;
@@ -54,19 +55,18 @@ export function StageStrip({ icon, title, status, count = 0, label, segments, on
   count?: number;
   /** Accessible name of the press. */
   label: string;
-  segments: readonly StageStripSegment[];
+  /** One state per stage, in order. Empty for a process without stages. */
+  stages: readonly StageStripState[];
   onPress: () => void;
 }) {
   const [ref, width] = useInnerWidth<HTMLButtonElement>();
-  const grid = stripGrid(segments, width);
+  const grid = stripGrid(stages.map((state, index) => ({ key: String(index), lanes: [state] })), width);
   return <button ref={ref} type="button" className="stage-strip" aria-label={`${label}: ${status}`} onClick={onPress}>
-    {segments.length === 0
+    {stages.length === 0
       ? <span className="stage-strip-icon" aria-hidden>{icon}</span>
       : <span className="stage-strip-grid" aria-hidden>
         {grid.fold > 0 && <span className="stage-strip-fold" data-tone={foldTone(grid.foldTone)}>+{grid.fold}</span>}
-        {grid.columns.map((cells, index) => <span key={segments[grid.fold + index]?.key ?? index} className="stage-strip-column">
-          {cells.map((state, row) => <span key={row} className="stage-strip-block" data-state={state} />)}
-        </span>)}
+        {grid.columns.map((cells, index) => <span key={grid.fold + index} className="stage-strip-block" data-state={cells[0]} />)}
       </span>}
     <span className="stage-strip-title">{title}</span>
     <span className="stage-strip-status">{status}</span>

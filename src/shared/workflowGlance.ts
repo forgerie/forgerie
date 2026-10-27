@@ -53,6 +53,11 @@ export function stripSegments(run: StripRun): StageStripSegment[] {
   });
 }
 
+/** The route flat: one state per stage, the worst of its lanes. The inbox and the run strip both draw this. */
+export function stripStages(run: StripRun): StageStripState[] {
+  return stripSegments(run).map((segment) => worstState(segment.lanes));
+}
+
 /** How many stops wait on the reader in this run. */
 export function waitingStops(run: Pick<WorkflowRun, "state" | "stops" | "stall"> | undefined): number {
   if (run?.state.kind !== "running") return 0;
@@ -69,6 +74,6 @@ export function workflowGlance(run: WorkflowRun): WorkflowGlance | undefined {
   const current = waiting ?? (run.stall?.state === "flagged"
     ? stages.find((stage) => stage.id === stalledChild?.stage)
     : stages.find((stage) => views[stage.id] === "working"));
-  return { name: run.definition.name, stages: stripSegments(run).map((segment) => worstState(segment.lanes)),
+  return { name: run.definition.name, stages: stripStages(run),
     stage: current?.name ?? "", waiting: waitingStops(run) };
 }
