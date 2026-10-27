@@ -1,5 +1,5 @@
 // Dev-only entry point for session-worktree states. No transport or network data.
-// Scenarios (?scenario=): new, new-picker, new-hook, new-failed, session, session-menu,
+// Scenarios (?scenario=): new, new-picker, new-picker-slow, new-hook, new-failed, session, session-menu,
 // land, conflict, discard, landed, discarded, picker, archive-note.
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -53,7 +53,11 @@ const workspaces: Record<string, Workspace[]> = {
 
 // A local worktree API with scripted outcomes.
 const worktreeApi: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard" | "get"> = {
-  options: async (cwd) => cwd.startsWith(repo) ? { kind: "git", repo, defaultBranch: "main", defaultCwd: repo, defaultDestination: "existing-workspace" } : { kind: "non-git" },
+  options: async (cwd) => {
+    if (!cwd.startsWith(repo)) return { kind: "non-git" };
+    if (scenario === "new-picker-slow") await new Promise((resolve) => setTimeout(resolve, 1500));
+    return { kind: "git", repo, defaultBranch: "main", defaultCwd: repo, defaultDestination: "existing-workspace" };
+  },
   list: async () => scenario === "new-failed" ? [record({ setup: { phase: "failed", log: failedLog, exitCode: 1, error: "Post-create hook exited with 1" } })] : [],
   get: async () => ({ worktree: record(), info: info() }),
   land: async () => {
@@ -105,7 +109,7 @@ function NewSessionPreview() {
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (scenario === "new-hook") timers.push(setTimeout(() => typeAndSend("Fix the empty-password login and add a regression test."), 500));
-    if (scenario === "new-picker") {
+    if (scenario === "new-picker" || scenario === "new-picker-slow") {
       timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
       timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')?.click(), 800));
     }
@@ -114,7 +118,7 @@ function NewSessionPreview() {
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name="Fix the empty-password login" status="Connected"><Thread /></SessionFrame>
-    <NewSession cwd={`${repo}/.worktree/new-ui-mvp`} initialPlacement={scenario === "new-hook" ? "fresh" : undefined} api={newApi} worktrees={worktreeApi} launches={launches} deferred={createDeferredFiles()}
+    <NewSession cwd={scenario === "new-picker-slow" ? "/home/simon/notes" : `${repo}/.worktree/new-ui-mvp`} initialPlacement={scenario === "new-hook" ? "fresh" : undefined} api={newApi} worktrees={worktreeApi} launches={launches} deferred={createDeferredFiles()}
       onStarted={() => {}} onClose={() => {}} />
   </AssistantRuntimeProvider>;
 }

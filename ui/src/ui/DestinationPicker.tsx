@@ -168,12 +168,14 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
     </FloatingPanel>;
   }
   const chosen = step.project;
-  const fresh: OptionItem[] = git ? [{ id: FRESH, name: "New worktree", variant: `from ${git.defaultBranch}`, icon: <GitBranchPlusIcon size={16} />,
+  // Show the complete list together. A late prepended row must never move a live click target.
+  const choicesReady = workspaces.type === "ready" && optionsSettled;
+  const fresh: OptionItem[] = git && choicesReady ? [{ id: FRESH, name: "New worktree", variant: `from ${git.defaultBranch}`, icon: <GitBranchPlusIcon size={16} />,
     details: ["Its own branch and folder. Land or discard it when the work is done."], current: freshHere }] : [];
-  const listed = workspaces.type === "ready" ? workspaces.value : [];
+  const listed = choicesReady ? workspaces.value : [];
   const folders: OptionItem[] = listed.map((item) => ({ id: item.id, name: item.branch ?? item.label, variant: item.isMain ? "main checkout" : undefined,
     details: [path(item.path)], current: binding.cwd === item.path && binding.placement !== "fresh" }));
-  const status: OptionStatus | undefined = workspaces.type === "loading" ? { tone: "status", text: "Loading workspaces…" }
+  const status: OptionStatus | undefined = workspaces.type === "loading" || !optionsSettled ? { tone: "status", text: "Loading workspaces…" }
     : workspaces.type === "failed" ? { tone: "alert", text: `Workspaces unavailable: ${workspaces.message}` } : undefined;
   return <FloatingPanel ref={panel} id={id} role="dialog" tabIndex={-1} onBlur={onBlur} aria-label={`Workspaces of ${chosen.name}`} onKeyDown={onKeyDown}>
     <button type="button" className="destination-back" onClick={() => setStep({ type: "projects" })}>

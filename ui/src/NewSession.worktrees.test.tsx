@@ -114,6 +114,33 @@ describe("a new session's worktree", () => {
     expect(h.starts[0]![0]).toBe("/code/forgerie");
   });
 
+  it("reuses the current project's branch options when opening its workspace menu", async () => {
+    const h = harness();
+    const options = vi.spyOn(h.worktrees, "options");
+    await render(h);
+    expect(options).toHaveBeenCalledTimes(1);
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    expect(options).toHaveBeenCalledTimes(1);
+    expect(button("New worktreefrom main")).toBeDefined();
+  });
+
+  it("does not expose workspace targets before a cold project's branch options arrive", async () => {
+    const h = harness();
+    const original = h.worktrees.options;
+    let resolve!: (value: Awaited<ReturnType<WorktreeApi["options"]>>) => void;
+    h.worktrees.options = (cwd, signal) => cwd === "/code/notes" ? new Promise((done) => { resolve = done; }) : original(cwd, signal);
+    await render(h);
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p2"]')!);
+    expect(document.querySelector('[data-option-id="w3"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Workspaces of notes"]')?.textContent).toContain("Loading workspaces");
+    await act(async () => resolve({ kind: "git", repo: "/code/notes", defaultBranch: "trunk", defaultCwd: "/code/notes", defaultDestination: "existing-workspace" }));
+    await settle();
+    expect(button("New worktreefrom trunk")).toBeDefined();
+    expect(document.querySelector('[data-option-id="w3"]')).not.toBeNull();
+  });
+
   it("keeps fresh worktree creation as an explicit choice", async () => {
     const h = harness();
     const onDestination = vi.fn();

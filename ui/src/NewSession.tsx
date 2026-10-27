@@ -351,7 +351,8 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
             cwd, label, disabled: starting, placement: worktrees ? (fresh ? "fresh" : "existing") : undefined,
             listProjects: (signal) => api.projects(signal),
             listWorkspaces: (projectId, signal) => api.workspaces(projectId, signal),
-            ...(worktrees ? { worktreeOptions: (path: string, signal: AbortSignal) => worktrees.options(path, signal) } : {}),
+            ...(worktrees ? { worktreeOptions: (path: string, signal: AbortSignal) =>
+              where && (path === destination.cwd || path === git?.repo) ? Promise.resolve(where) : worktrees.options(path, signal) } : {}),
             onChoose: (next, nextLabel, placement) => {
               setDestination({ cwd: next, ...(placement === "fresh" ? {} : { label: nextLabel }), placement });
               setInspected(undefined);
