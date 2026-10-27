@@ -23,7 +23,7 @@ The first version (2026-10-05) was the chat composer on a tab, with no frame. Th
 | Files | Small images go with the message. Other files wait in the dialog until the session exists, then the start saves them in the session's folder and names them in the message, as in a running session. |
 | Skills and prompt templates | `/` lists the destination's skills and prompt templates. A first message that starts with one runs it through Pi's prompt-resource route with the identity the folder listed. A `/command` the folder does not list is refused and stays in the bar: built-in commands need a running session. |
 | Model and thinking level | The picker shows Pi's default for the destination. Moving to another folder keeps a chosen model only where that folder offers it. The session starts with exactly what the picker shows. |
-| Send | The session starts and opens. While it starts, the card shows Pi's own startup progress ("Refreshing provider models", for example) or "Starting session…". Escape, the backdrop, and Close wait until the start ends. |
+| Send | A normal start closes the dialog and opens the pending session immediately, without waiting for the server. The pending view shows the first message and startup progress. Success opens the created session in the same history entry. If startup fails, the dialog reopens with the original message, attachments, destination, model, and thinking level. Leaving the pending session prevents its completion from moving you back. |
 | Rapidfire | The chip in the bar. Send starts the session in the background, empties the bar, and keeps the dialog open for the next one. A list under the card shows each start: its progress, "Started" with Open, or the failure with Put back, which returns the message and its files to the bar. Starts keep going after the dialog closes. |
 | Session list | A start shows at once as a Working row named by its first line, with no row menu. Once Pi has created the session and listed it, Pi's own row replaces it. Selecting it before then opens the session if it exists, or the window, where its progress shows. |
 | Background failures | A Rapidfire start that fails after the window closed shows a notice over the thread, with Review, which reopens the window and its "Put back". A reload while any start is in flight asks first. |
@@ -35,8 +35,8 @@ Nothing is retried. Each failure says which step failed:
 
 | Failure | What you see |
 | --- | --- |
-| The server rejected the request: a missing field, an unknown model, or an unknown thinking level. | "The session did not start: <reason>". The message stays in the bar. |
-| Any other failure before the session exists: a lost reply, a 5xx, or a 400 from inside the start. | The reason, then "The session may have started anyway. Check the session list before you try again." The message stays in the bar. |
+| The server rejected the request: a missing field, an unknown model, or an unknown thinking level. | The dialog reopens with "The session did not start: <reason>" and the original input. |
+| Any other failure before the session exists: a lost reply, a 5xx, or a 400 from inside the start. | The dialog reopens with the original input and the reason, then "The session may have started anyway. Check the session list before you try again." |
 | The session started, but its files or first message failed. | The session opens with the message back in its draft and "The session started, but its first message may not have reached Pi". In Rapidfire, its row says so and offers Open. |
 | A `!` shell command. | "Shell commands need a running session." Nothing is sent. |
 | A `/command` the folder does not list, or the list could not load. | The reason. Nothing is sent. Retry from the `/` list. |
