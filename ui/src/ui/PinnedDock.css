@@ -15,8 +15,11 @@
 /* The names cut at one line; the items they stand for are one press away. */
 .pinned-dock-names { flex: 1 1 0; min-inline-size: 0; overflow: hidden; color: var(--muted-foreground); text-overflow: ellipsis; white-space: nowrap; }
 .pinned-dock-chevron { flex: none; inline-size: 1rem; block-size: 1rem; margin-inline-start: auto; color: var(--muted-foreground); }
+/* The items scroll up and down only. Their content wraps to the dock's width, but a control's invisible press area
+   (an icon button's ::before) can reach a few pixels past the dock's edge; overflow-y alone would make that a
+   sideways scroll and a second scroll bar. */
 .pinned-dock-items { --surface: var(--background); --shade: var(--scroll-shade);
-  display: grid; gap: var(--space-2); min-block-size: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: grid; gap: var(--space-2); min-block-size: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
   background:
     linear-gradient(var(--surface) 50%, transparent) top / 100% 2rem no-repeat local,
     linear-gradient(transparent, var(--surface) 50%) bottom / 100% 2rem no-repeat local,
