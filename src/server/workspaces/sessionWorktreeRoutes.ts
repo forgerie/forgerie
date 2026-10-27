@@ -11,7 +11,7 @@ import { normalizeRequestCwd } from "../workingDirectory.js";
 
 const discardBody = Type.Object({ confirmationToken: Type.String({ minLength: 1 }) }, { additionalProperties: false });
 
-/** Browser creation is the only entry point that chooses fresh-worktree by default. Agent creation stays unchanged. */
+/** Browser creation resolves the default branch checkout. Agent creation stays unchanged. */
 export class UserSessionWorktrees {
   private readonly pending = new Map<string, Promise<ClientSession>>();
   constructor(readonly worktrees: SessionWorktrees, private readonly sessions: SessionRouteService) {}
@@ -44,6 +44,10 @@ export class UserSessionWorktrees {
     if (options.kind === "non-git") {
       if (requestedDestination?.kind === "fresh-worktree" || input.setupId !== undefined) throw new Error("Fresh worktrees require a Git project");
       return this.sessions.start(cwd, choices);
+    }
+    if (requestedDestination === undefined && input.setupId === undefined) {
+      if (options.defaultCwd === undefined) throw new Error(`Default branch "${options.defaultBranch}" is not checked out. Choose an existing workspace or a fresh worktree.`);
+      return this.sessions.start(options.defaultCwd, choices);
     }
     const prior = input.startupToken === undefined || input.setupId !== undefined ? undefined
       : (await this.worktrees.store.list()).find((record) => record.repo === options.repo && record.startupToken === input.startupToken);

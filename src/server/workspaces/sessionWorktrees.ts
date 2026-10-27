@@ -61,7 +61,7 @@ export class SessionWorktrees {
     }
   }
 
-  async options(cwd: string): Promise<{ kind: "non-git" } | { kind: "git"; repo: string; defaultBranch: string; defaultDestination: "fresh-worktree" }> {
+  async options(cwd: string): Promise<{ kind: "non-git" } | { kind: "git"; repo: string; defaultBranch: string; defaultDestination: "existing-workspace"; defaultCwd?: string }> {
     if (!await isGitRepository(cwd)) return { kind: "non-git" };
     const worktrees = await discoverGitWorktrees(cwd);
     const main = worktrees[0];
@@ -72,7 +72,14 @@ export class SessionWorktrees {
     const candidates = [remote?.replace(/^origin\//, ""), configured, "main", "master", main.branch];
     for (const branch of candidates) {
       if (branch !== undefined && await optionalGit(repo, "show-ref", "--verify", `refs/heads/${branch}`) !== undefined) {
-        return { kind: "git", repo, defaultBranch: branch, defaultDestination: "fresh-worktree" };
+        // Git lists the canonical main checkout first; prefer it when branches match.
+        let defaultCwd: string | undefined;
+        for (const checkout of worktrees) {
+          if (checkout.branch !== branch || checkout.prunable === true || checkout.bare === true) continue;
+          try { defaultCwd = await realpath(checkout.path); break; }
+          catch (error) { if (!(error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR"))) throw error; }
+        }
+        return { kind: "git", repo, defaultBranch: branch, defaultDestination: "existing-workspace", ...(defaultCwd === undefined ? {} : { defaultCwd }) };
       }
     }
     throw new Error("Cannot resolve a local default branch with a commit");
