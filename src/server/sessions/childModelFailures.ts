@@ -1,5 +1,6 @@
 import { isChildCredentialFailure } from "../../shared/childModelDiagnostic.js";
 import { parseModelChoice, modelKey, selectChainModel, type ModelCooldowns } from "../../shared/modelChains.js";
+import { MAX_CHILD_ATTEMPT } from "./childRequestIds.js";
 
 export const CHILD_RETRY_DELAYS = [30_000, 120_000, 300_000] as const;
 export type ChildModelFailure = "switch-now" | "wait-then-switch" | "fatal";
@@ -47,9 +48,14 @@ export function childModelCooldown(error: string, now: number): number | undefin
 export type ChainProgress = { failed: string[]; waited: string[]; budget: number; exhausted?: boolean };
 export type ChildFailurePlan = { kind: "report" } | { kind: "retry"; delay: number; progress: ChainProgress; retryAttempt: number }
   | { kind: "switch"; to: string; progress: ChainProgress; delay?: number; retryAttempt?: number };
-/** One-model chains deliberately retain the old transient-only retry policy. */
-export function planChildModelFailure(input: { models: string[]; current: string; error: string; now: number; cooldowns: ModelCooldowns; progress?: ChainProgress; assessment?: ChildFailureAssessment }): ChildFailurePlan {
+/**
+ * One-model chains deliberately retain the old transient-only retry policy. `attempt` is the request attempt that
+ * just failed. A chain edited during a run can add models without end, so no attempt past MAX_CHILD_ATTEMPT is
+ * admitted: recovery probes only that far, and a later attempt would hide its receipt.
+ */
+export function planChildModelFailure(input: { models: string[]; current: string; error: string; now: number; cooldowns: ModelCooldowns; progress?: ChainProgress; assessment?: ChildFailureAssessment; attempt?: number }): ChildFailurePlan {
   const { models, current, error, now, cooldowns } = input;
+  if ((input.attempt ?? 0) >= MAX_CHILD_ATTEMPT) return { kind: "report" };
   const progress = structuredClone(input.progress ?? { failed: [], waited: [], budget: 0 });
   const assessment = input.assessment ?? assessChildModelFailure(error);
   // This predicate intentionally predates fallback classification, including its historical text matching.

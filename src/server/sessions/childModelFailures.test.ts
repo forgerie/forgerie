@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { childModelCooldown, childModelResetTime, classifyChildModelError, planChildModelFailure, unavailableChildModel } from "./childModelFailures.js";
+import { MAX_CHILD_ATTEMPT } from "./childRequestIds.js";
 
 describe("child model failures", () => {
   it.each([
@@ -30,6 +31,12 @@ describe("child model failures", () => {
     const first = planChildModelFailure(input); expect(first).toMatchObject({ kind: "retry", delay: 60000 });
     if (first.kind !== "retry") throw new Error("Expected retry");
     expect(planChildModelFailure({ ...input, progress: first.progress })).toMatchObject({ kind: "switch", to: "b/two" });
+  });
+  it("admits no attempt past the recovery bound, even when a chain edit adds untried models", () => {
+    const input = { models: ["a/one", "b/two"], current: "a/one", error: "insufficient_quota", now: 0, cooldowns: {} };
+    expect(planChildModelFailure({ ...input, attempt: MAX_CHILD_ATTEMPT - 1 })).toMatchObject({ kind: "switch", to: "b/two" });
+    expect(planChildModelFailure({ ...input, attempt: MAX_CHILD_ATTEMPT })).toEqual({ kind: "report" });
+    expect(planChildModelFailure({ ...input, models: ["a/one"], error: "429", attempt: MAX_CHILD_ATTEMPT })).toEqual({ kind: "report" });
   });
   it("keeps the single-model transient schedule", () => {
     let progress;

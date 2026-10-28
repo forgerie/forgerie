@@ -219,7 +219,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           catch (error) { runtime.report(error); models = current === undefined ? [] : [current]; } // A deleted chain keeps the admitted model.
           const checkpoint = reporter.state.checkpoint;
           const plan = current === undefined || detail === undefined || models.length === 0 ? { kind: "report" as const }
-            : planChildModelFailure({ models, current, error: detail, now: runtime.now(), cooldowns,
+            : planChildModelFailure({ models, current, error: detail, now: runtime.now(), cooldowns, attempt,
               progress: checkpoint.progress ?? { failed: [], waited: [], budget: attempt }, ...(failure === undefined ? {} : { assessment: failure }) });
           if (plan.kind !== "report") {
             progress.delegated = true;
