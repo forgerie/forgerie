@@ -3,6 +3,8 @@
   padding-inline: var(--space-2) 0; border: var(--hairline) solid var(--line); border-radius: var(--radius-control); font-size: var(--small-text); }
 .filter-chip > svg { flex: none; inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
 .filter-chip-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* The count of further choices: never cut, set apart from the name it follows. */
+.filter-chip-more { flex: none; margin-inline-start: calc(-1 * var(--space-1)); font-weight: 500; font-variant-numeric: tabular-nums; }
 .filter-chip-detail { flex: none; color: var(--muted-foreground); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
 .filter-chip-clear { position: relative; flex: none; display: grid; place-items: center; inline-size: 2.25rem; block-size: 2.25rem; margin-inline-start: auto; padding: 0;
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); transition: color 150ms, background-color 150ms; }

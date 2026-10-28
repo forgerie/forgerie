@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProjectGroupSettings, useProjectGroups, type ProjectGroupState } from "./GroupControls.binding";
 import { ApiError, type GroupCatalog, type ProjectGroupApi } from "./projectGroupApi";
-import { catalog } from "./fixtures/groups";
+import { catalog, filterCatalog } from "./fixtures/groups";
 
 let root: Root;
 let seen: ProjectGroupState | undefined;
@@ -34,27 +34,51 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); localStorage.clear(); vi.unstubAllGlobals(); });
 
-it("remembers the chosen group across a reload and scopes the list to its projects", async () => {
-  await act(async () => root.render(<Harness />));
-  await flush();
-  expect(seen?.scope).toBeUndefined();
-  expect(seen?.filter.options).toEqual([{ value: "kori", label: "KORI", detail: "2 projects" }]);
-  await act(async () => seen!.filter.onChoose("kori"));
-  expect(seen?.scope).toEqual(["core", "plugins"]);
+const remount = async () => {
   await act(async () => root.unmount());
   root = createRoot(document.body.appendChild(document.createElement("div")));
   await act(async () => root.render(<Harness />));
   await flush();
-  expect(seen?.filter.value).toBe("kori");
-  expect(seen?.scope).toEqual(["core", "plugins"]);
-});
+};
 
-it("shows all projects when the remembered group no longer exists", async () => {
-  localStorage.setItem("forgerie.projectGroup", "gone");
+it("offers groups and ungrouped projects, and scopes the list to the union of the chosen ones across a reload", async () => {
+  served = filterCatalog;
   await act(async () => root.render(<Harness />));
   await flush();
-  expect(seen?.filter.value).toBe("");
   expect(seen?.scope).toBeUndefined();
+  expect(seen?.filter.options.map((option) => option.value)).toEqual(["group:kori", "group:tools", "project:irori", "project:pyxis"]);
+  await act(async () => seen!.filter.onChoose(["group:kori", "project:pyxis"]));
+  expect(seen?.scope).toEqual(["core", "plugins", "pyxis"]);
+  expect(seen?.filter.covered).toBe(3);
+  await remount();
+  expect(seen?.filter.value).toEqual(["group:kori", "project:pyxis"]);
+  expect(seen?.scope).toEqual(["core", "plugins", "pyxis"]);
+});
+
+it("keeps a filter chosen before multi-select", async () => {
+  localStorage.setItem("forgerie.projectGroup", "kori");
+  await act(async () => root.render(<Harness />));
+  await flush();
+  expect(seen?.filter.value).toEqual(["group:kori"]);
+  expect(seen?.scope).toEqual(["core", "plugins"]);
+  await act(async () => seen!.filter.onChoose([]));
+  expect(seen?.scope).toBeUndefined();
+  expect(localStorage.getItem("forgerie.projectGroup")).toBeNull();
+  await remount();
+  expect(seen?.filter.value).toEqual([]);
+  expect(seen?.scope).toBeUndefined();
+});
+
+it("ignores a remembered group that no longer exists, and shows all projects when nothing chosen is left", async () => {
+  localStorage.setItem("forgerie.projectFilter", JSON.stringify(["group:gone"]));
+  await act(async () => root.render(<Harness />));
+  await flush();
+  expect(seen?.filter.value).toEqual([]);
+  expect(seen?.scope).toBeUndefined();
+  localStorage.setItem("forgerie.projectFilter", JSON.stringify(["group:gone", "group:kori"]));
+  await remount();
+  expect(seen?.filter.value).toEqual(["group:kori"]);
+  expect(seen?.scope).toEqual(["core", "plugins"]);
 });
 
 it("a refused save keeps the draft and the revision it started from", async () => {

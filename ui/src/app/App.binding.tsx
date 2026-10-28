@@ -50,7 +50,7 @@ const resourceLens: ResourceLensRenderer = ({ id, cwd, onClose }) => <ResourceLe
 /**
  * The app with project groups (a filter in the session list's menu, a settings page, and related worktrees in each chat's header menu)
  * and the skills and prompts editor (a settings page, and a sheet from each chat's header menu),
- * and session search, held here above the layout switch and scoped by the chosen group's folders,
+ * and session search, held here above the layout switch and scoped by the folders of the chosen groups and projects,
  * and the trigger list, held here so the session list's Triggers entry stays true while the screen is closed.
  */
 export function AppBinding({ shelves }: { shelves?: ReactNode }) {

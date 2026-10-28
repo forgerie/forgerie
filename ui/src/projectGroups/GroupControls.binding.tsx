@@ -7,23 +7,23 @@ import type { WorktreeInfo } from "../worktrees/worktreeApi";
 import { ProjectGroups } from "./ProjectGroups";
 import { GroupEditor, type GroupDraft } from "./GroupEditor";
 import { isMissingFolder, type ProjectGroupApi, type GroupCatalog } from "./projectGroupApi";
+import { filterEntries, filterScope, liveChoices, readChoices, writeChoices } from "./projectFilter";
 import type { Project } from "../newSession";
 
-/** The chosen group survives a reload, a fold and a rotation, as the list's other arrangement does. */
-const SELECTED_KEY = "forgerie.projectGroup";
-const readSelected = () => { try { return window.localStorage.getItem(SELECTED_KEY) ?? ""; } catch { return ""; } };
-const writeSelected = (id: string) => { try { if (id) window.localStorage.setItem(SELECTED_KEY, id); else window.localStorage.removeItem(SELECTED_KEY); } catch { /* The choice stays for this page only. */ } };
+/** The chosen filter survives a reload, a fold and a rotation, as the list's other arrangement does. */
+const readStored = () => { try { return readChoices(window.localStorage); } catch { return []; } };
+const store = (chosen: readonly string[]) => { try { writeChoices(window.localStorage, chosen); } catch { /* The choice stays for this page only. */ } };
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-const plural = (count: number, word: string) => `${String(count)} ${word}${count === 1 ? "" : "s"}`;
 
 /**
  * The group catalog, shared by the session list's filter and by
- * Settings → Project groups. A group that no longer exists shows all projects.
+ * Settings → Project groups. A chosen group or project that no longer exists is ignored;
+ * when none of the chosen ones is left, the list shows all projects.
  */
 export function useProjectGroups(api: ProjectGroupApi) {
   const [catalog, setCatalog] = useState<GroupCatalog>({ groups: [], projects: [] });
   const [loaded, setLoaded] = useState(false);
-  const [selected, setSelectedState] = useState(readSelected);
+  const [chosen, setChosenState] = useState<readonly string[]>(readStored);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const refresh = useCallback(async () => {
@@ -31,23 +31,25 @@ export function useProjectGroups(api: ProjectGroupApi) {
     catch (cause) { setError(message(cause)); }
   }, [api]);
   useEffect(() => { void refresh(); const read = () => { void refresh(); }; window.addEventListener("focus", read); return () => window.removeEventListener("focus", read); }, [refresh]);
-  const setSelected = useCallback((id: string) => { setSelectedState(id); writeSelected(id); }, []);
-  const group = catalog.groups.find((item) => item.id === selected);
+  const setChosen = useCallback((next: readonly string[]) => { setChosenState(next); store(next); }, []);
+  const entries = useMemo(() => filterEntries(catalog), [catalog]);
+  const live = useMemo(() => liveChoices(entries, chosen), [entries, chosen]);
   // Until the catalog loads, or when it cannot, the list shows every project.
-  const scope = loaded && error === undefined ? group?.projectIds : undefined;
+  const ready = loaded && error === undefined;
+  const scope = useMemo(() => ready ? filterScope(live) : undefined, [ready, live]);
   const mutate = useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
     setPending(true); setError(undefined);
     try { const result = await run(); await refresh(); return result; }
     catch (cause) { setError(message(cause)); throw cause; }
     finally { setPending(false); }
   }, [refresh]);
-  // The session list's filter: the groups in its ⋯ menu, and the chosen one above the list.
+  // The session list's filter: groups and ungrouped projects in its ⋯ menu, and the chosen ones above the list.
   const filter = useMemo<Omit<PickerFilter, "onManage">>(() => ({
-    value: scope ? selected : "", onChoose: setSelected,
-    options: catalog.groups.map((item) => ({ value: item.id, label: item.name, detail: plural(item.projectIds.length, "project") })),
-  }), [catalog.groups, scope, selected, setSelected]);
-  return useMemo(() => ({ catalog, loaded, selected: group ? selected : "", setSelected, scope, filter, pending, error, refresh, mutate }),
-    [catalog, loaded, group, selected, setSelected, scope, filter, pending, error, refresh, mutate]);
+    value: scope ? live.map((entry) => entry.value) : [], covered: scope?.length ?? 0, onChoose: setChosen,
+    options: entries.map(({ value, kind, label, detail, title }) => ({ value, kind, label, detail, title })),
+  }), [entries, live, scope, setChosen]);
+  return useMemo(() => ({ catalog, loaded, scope, filter, pending, error, refresh, mutate }),
+    [catalog, loaded, scope, filter, pending, error, refresh, mutate]);
 }
 export type ProjectGroupState = ReturnType<typeof useProjectGroups>;
 

@@ -840,7 +840,7 @@ summary.trace-line:hover { color: var(--foreground); }
    The list is 15 to 18rem wide, so the four icons cost the name its room first: the icons sit one hit area
    apart (44px centre to centre, so no two hit areas overlap) and never drop; the name is a readout and
    truncates. Search open, the field takes the same row, so the header never changes height. */
-.picker-header { position: relative; flex: none; block-size: var(--header-size); display: flex; align-items: center; padding-inline: var(--space-4) calc(var(--space-4) - 0.375rem); border-block-end: 1px solid var(--line); }
+.picker-header { flex: none; block-size: var(--header-size); display: flex; align-items: center; padding-inline: var(--space-4) calc(var(--space-4) - 0.375rem); border-block-end: 1px solid var(--line); }
 .app-shell[data-layout="overlay"] .picker-header { background: var(--tint-surface); }
 .picker-header .picker-icon + .picker-icon { margin-inline-start: calc(var(--control-size) - var(--icon-size)); }
 .picker-brand { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-inline-size: 0; margin: 0; margin-inline-end: var(--space-2); font-family: var(--body-font); font-size: var(--small-text); font-weight: 500; letter-spacing: normal; }
@@ -865,6 +865,19 @@ summary.trace-line:hover { color: var(--foreground); }
 .picker-row-menu button:not(:disabled):hover, .picker-row-menu button:focus-visible { background: var(--muted); outline: none; }
 .picker-menu button svg, .picker-row-menu button svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; }
 .picker-menu button[aria-checked="false"] svg { visibility: hidden; }
+/* The list's own ⋯ menu hangs from the whole list, not the header, and stays inside its height and width. The project
+   choices are the menu's collection: they scroll inside it, so the commands around them stay in view; a shadow at either
+   end says more choices lie that way. A long name is cut short, with the full name in its title. Below the choices'
+   share (two and a half rows), the whole menu scrolls instead. */
+.picker-header .picker-menu { display: flex; flex-direction: column; inset-block-start: calc(var(--header-size) - var(--space-1));
+  max-block-size: calc(100% - var(--header-size) - var(--space-1)); max-inline-size: calc(100% - 2 * var(--space-2)); overflow-y: auto; overscroll-behavior: contain; }
+.picker-header .picker-menu > button, .picker-header .picker-menu > .picker-menu-separator { flex: none; }
+.picker-header .picker-menu > .picker-menu-choices { flex: 0 1 auto; min-block-size: calc(var(--control-size) * 2.5); overflow-y: auto; overscroll-behavior: contain;
+  background: linear-gradient(var(--popover) 30%, transparent) top / 100% 2rem no-repeat local,
+    linear-gradient(transparent, var(--popover) 70%) bottom / 100% 2rem no-repeat local,
+    radial-gradient(farthest-side at 50% 0, color-mix(in oklab, var(--foreground) 16%, transparent), transparent) top / 100% 0.625rem no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in oklab, var(--foreground) 16%, transparent), transparent) bottom / 100% 0.625rem no-repeat scroll; }
+.picker-menu-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-menu-separator { block-size: 1px; margin: var(--space-1) calc(-1 * var(--space-1)); background: var(--line); }
 .picker-menu small, .picker-row-menu small { margin-inline-start: auto; padding-inline-start: var(--space-3); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); white-space: nowrap; }
 .picker-row-menu button:disabled { cursor: default; color: var(--muted-foreground); opacity: 1; }

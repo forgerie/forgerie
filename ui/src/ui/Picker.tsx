@@ -63,13 +63,17 @@ export interface PickerActions {
 }
 /**
  * Which projects the list shows. The choices live in the list's ⋯ menu, under
- * the grouping; a chosen one stands above the list until it is cleared.
+ * the grouping; the reader ticks any number of them, and the chosen ones stand
+ * above the list until they are cleared.
  */
 export interface PickerFilter {
-  options: readonly { value: string; label: string; detail: string }[];
-  /** The chosen option, or "" for all projects. */
-  value: string;
-  onChoose: (value: string) => void;
+  /** Groups first, then projects that are in no group. */
+  options: readonly { value: string; kind: "group" | "project"; label: string; detail: string; title: string }[];
+  /** The chosen options. None: all projects. */
+  value: readonly string[];
+  /** How many projects the chosen options cover together. */
+  covered: number;
+  onChoose: (value: readonly string[]) => void;
   /** Opens the page where groups are made and changed. */
   onManage: () => void;
 }
@@ -280,6 +284,8 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
 }) {
   const [menu, setMenu] = useState<"board" | undefined>();
   const [rowMenu, setRowMenu] = useState<{ id: string; confirming: boolean } | undefined>();
+  const boardMenu = useRef<HTMLDivElement>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
   const prefetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(prefetchTimer.current), []);
   const listRef = useRef<HTMLDivElement>(null);
@@ -320,7 +326,7 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
     if (event.key === "Escape") {
       if (event.defaultPrevented) return;
       event.preventDefault();
-      if (menu) setMenu(undefined);
+      if (menu) { setMenu(undefined); moreButton.current?.focus({ preventScroll: true }); }
       else if (onEscape?.()) return;
       else if (searchOpen) closeSearch();
       else actions.onClose?.();
@@ -368,10 +374,25 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
     return () => document.removeEventListener("pointerdown", onDown, true);
   }, [openMenuId]);
 
+  // The project filter's ticks keep the menu open, so a press anywhere outside it closes it, and that press then does what it was aimed at.
+  useEffect(() => {
+    if (menu !== "board") return;
+    const onDown = (event: Event) => {
+      if (!(event.target instanceof Node) || boardMenu.current?.contains(event.target) || moreButton.current?.contains(event.target)) return;
+      setMenu(undefined);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [menu]);
+
   const { connection } = view;
   const empty = view.sections.length === 0;
   const rowWithMenu = rowMenu ? order.find((row) => row.session.id === rowMenu.id) : undefined;
-  const filterChosen = filter?.value ? filter.options.find((option) => option.value === filter.value) : undefined;
+  const filterChosen = filter ? filter.options.filter((option) => filter.value.includes(option.value)) : [];
+  const toggleFilter = (value: string) => {
+    if (!filter) return;
+    filter.onChoose(filter.value.includes(value) ? filter.value.filter((item) => item !== value) : [...filter.value, value]);
+  };
   return <section className="picker" aria-label="Sessions" onKeyDown={onKeyDown}>
     {/* The homepage sidebar header: product mark and name, then the list's commands. Search opens in its place. */}
     <header className="picker-header" data-search={searchOpen ? "open" : undefined}
@@ -390,11 +411,11 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
         title="Search sessions (Ctrl+K or /)" onClick={() => { setMenu(undefined); search.onOpen(); }}><SearchIcon aria-hidden size={16} /></button> : null}
       {actions.onNew ? <button className="picker-icon" aria-label="New session" aria-keyshortcuts="N" title="New session (N)"
         onClick={actions.onNew}><SquarePenIcon aria-hidden size={16} /></button> : null}
-      <button className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
+      <button ref={moreButton} className="picker-icon" aria-label="More session commands" aria-haspopup="menu" aria-expanded={menu === "board"}
         title="Arrange the list"
         onClick={() => { setRowMenu(undefined); setMenu(menu === "board" ? undefined : "board"); }}><EllipsisIcon aria-hidden size={16} /></button>
       {actions.onClose ? <button className="picker-icon" aria-label="Close sessions" title="Close sessions" onClick={actions.onClose}><XIcon aria-hidden size={16} /></button> : null}
-      {menu === "board" ? <div className="picker-menu" role="menu" aria-label="Session commands">
+      {menu === "board" ? <div ref={boardMenu} className="picker-menu" role="menu" aria-label="Session commands">
         {(["state", "project"] as const).map((grouping) => <button key={grouping} role="menuitemradio" aria-checked={prefs.grouping === grouping}
           onClick={() => { setMenu(undefined); change({ ...prefs, grouping }); }}>
           <CheckIcon aria-hidden />Group by {grouping}{prefs.grouping === grouping ? null : <small>G</small>}</button>)}
@@ -404,12 +425,16 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
           <CheckIcon aria-hidden />Show archived <small>{view.archivedCount} · A</small></button>
         {filter ? <>
           <div className="picker-menu-separator" role="separator" />
-          {filter.options.length ? [{ value: "", label: "All projects", detail: "" }, ...filter.options].map((option) =>
-            <button key={`filter-${option.value}`} role="menuitemradio" aria-checked={filter.value === option.value}
-              onClick={() => { setMenu(undefined); filter.onChoose(option.value); }}>
-              <CheckIcon aria-hidden />{option.label}{option.detail ? <small>{option.detail}</small> : null}</button>) : null}
+          {/* Ticks keep the menu open: choosing several projects is one visit, not one per project. */}
+          {filter.options.length ? <div className="picker-menu-choices" role="group" aria-label="Projects to show">
+            <button role="menuitemcheckbox" aria-checked={filter.value.length === 0} onClick={() => filter.onChoose([])}>
+              <CheckIcon aria-hidden /><span className="picker-menu-label">All projects</span></button>
+            {filter.options.map((option) => <button key={option.value} role="menuitemcheckbox" aria-checked={filter.value.includes(option.value)}
+              title={option.title} onClick={() => toggleFilter(option.value)}>
+              <CheckIcon aria-hidden /><span className="picker-menu-label">{option.label}</span>{option.detail ? <small>{option.detail}</small> : null}</button>)}
+          </div> : null}
           <button role="menuitem" onClick={() => { setMenu(undefined); filter.onManage(); }}>
-            <FolderTreeIcon aria-hidden />{filter.options.length ? "Edit project groups…" : "Group projects…"}</button>
+            <FolderTreeIcon aria-hidden />{filter.options.some((option) => option.kind === "group") ? "Edit project groups…" : "Group projects…"}</button>
         </> : null}
         {fullScreenInMenu ? <>
           <div className="picker-menu-separator" role="separator" />
@@ -421,8 +446,9 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
       </>}
     </header>
     {searchOpen && search?.hint ? <p id={search.hint.id} className="picker-search-hint">{search.hint.text}</p> : null}
-    {filterChosen ? <FilterChip icon={<FolderTreeIcon aria-hidden />} label={filterChosen.label} detail={filterChosen.detail}
-      clear="Show all projects" onClear={() => filter?.onChoose("")} /> : null}
+    {filter && filterChosen[0] ? <FilterChip icon={<FolderTreeIcon aria-hidden />} label={filterChosen[0].label} more={filterChosen.length - 1}
+      title={filterChosen.map((option) => option.label).join(", ")} detail={count(filter.covered, "project", "projects")}
+      clear="Show all projects" onClear={() => filter.onChoose([])} /> : null}
     {connection.type === "reconnecting" ? <p className="picker-notice" role="status"><span aria-hidden="true">&gt;</span> Reconnecting…</p> : null}
     {connection.type === "failed" && !empty ? <p className="picker-notice" data-tone="error" role="alert">{connection.message}<button onClick={actions.onRetry}>Retry now</button></p> : null}
     {/* The room the list shares with plugin shelves. A shelf measures it to decide how much of it to take. */}

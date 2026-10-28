@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Picker, type PickerSearch, type PickerView } from "./Picker";
+import { useEffect, useState } from "react";
+import { Picker, type PickerFilter, type PickerSearch, type PickerView } from "./Picker";
+import { AppShell } from "./AppShell";
 import { SearchField } from "./SearchField";
 import type { Row, Section } from "../picker/board";
 import type { PickerPrefs } from "../picker/prefs";
@@ -134,3 +135,39 @@ export function Runs() {
     section("unread", "Unread", "unread", RUNS.failed),
   ]} />;
 }
+
+type FilterOption = PickerFilter["options"][number];
+const group = (id: string, label: string, projects: number): FilterOption => ({ value: `group:${id}`, kind: "group", label, detail: `${String(projects)} projects`, title: label });
+const project = (id: string): FilterOption => ({ value: `project:${id}`, kind: "project", label: id, detail: "", title: `/home/reader/code/${id}` });
+/** Two groups, then the projects in no group by name; one name has no break point. */
+const FILTER_OPTIONS: FilterOption[] = [group("kori", "KORI", 2), group("lab", "Home lab and the machines it runs on", 3),
+  ...["caliper", "forgerie", "groceries", "irori", "maps", "portal-source", "proseql", "pyxis", "the-long-project-folder-name-without-a-single-break-point"].map(project)];
+/** How many projects each option covers; KORI's and the lab's do not overlap. */
+const SIZES: Record<string, number> = { "group:kori": 2, "group:lab": 3 };
+
+/** The list in the app's own shell, as the reader meets it: slid over the thread on a phone, docked beside it on a wide screen. */
+function Filtered({ initial, menu = false }: { initial: string[]; menu?: boolean }) {
+  const [prefs, setPrefs] = useState(PREFS);
+  const [value, setValue] = useState<readonly string[]>(initial);
+  const filter: PickerFilter = { options: FILTER_OPTIONS, value, covered: value.reduce((sum, item) => sum + (SIZES[item] ?? 1), 0), onChoose: setValue, onManage: () => {} };
+  const view: PickerView = { connection: { type: "ready" }, machines: 1, archivedCount: 0, sections: SECTIONS };
+  // The menu is the reader's press, so the state presses ⋯ once it mounts.
+  useEffect(() => { if (menu) document.querySelector<HTMLButtonElement>('[aria-label="More session commands"][aria-expanded="false"]')?.click(); }, [menu]);
+  return <AppShell open onOpenChange={() => {}} thread={<div className="thread-empty" />}
+    picker={() => <Picker view={view} prefs={prefs} onPrefs={setPrefs} filter={filter}
+      actions={{ onSelect: () => {}, onRetry: () => {}, onNew: () => {}, onClose: () => {}, onSettings: () => {}, onBacklog: () => {} }} />} />;
+}
+const ONE = ["group:kori"];
+const THREE = ["group:lab", "project:forgerie", "project:the-long-project-folder-name-without-a-single-break-point"];
+/** No filter: nothing stands above the list. */
+export function FilterNone() { return <Filtered initial={[]} />; }
+/** One group: its name and size above the list, with one press to clear. */
+export function FilterOne() { return <Filtered initial={ONE} />; }
+/** A group and two projects: their names in the menu's order, cut short, and the projects they cover together. */
+export function FilterThree() { return <Filtered initial={THREE} />; }
+/** The ⋯ menu with nothing chosen: All projects is ticked, and a long list scrolls inside the list's height. */
+export function FilterMenuNone() { return <Filtered initial={[]} menu />; }
+/** The ⋯ menu with one group ticked. */
+export function FilterMenuOne() { return <Filtered initial={ONE} menu />; }
+/** The ⋯ menu with three ticks; a long name is cut short inside the list's width. */
+export function FilterMenuThree() { return <Filtered initial={THREE} menu />; }

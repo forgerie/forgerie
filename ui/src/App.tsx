@@ -110,7 +110,7 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
 /** Composition root: owns the selected session (in the URL), the sheet, and sessions being started. */
 /**
  * `shelves`: plugin shelves for the foot of the session list. The entry passes their binding in.
- * `projectFilter` offers project groups in the session list's ⋯ menu; the app adds the way to Settings → Project groups.
+ * `projectFilter` offers project groups and ungrouped projects in the session list's ⋯ menu; the app adds the way to Settings → Project groups.
  * `projectSettings` draws Settings → Project groups.
  * `resourceSettings` draws Settings → Skills and prompts; `resourceLens` draws a session's own.
  * `search` is session search, held by the binding above this app so its query and hits outlive every layout.

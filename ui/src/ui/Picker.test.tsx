@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocationResolver, DEFAULT_COLLAPSED, rows, sections, type PickerSession, type PickerStatus, type Row } from "../picker/board";
 import type { CatalogConnection } from "../picker/catalogStore";
-import { Picker, PickerToast, type PickerSearch, type PickerView } from "./Picker";
+import { Picker, PickerToast, type PickerFilter, type PickerSearch, type PickerView } from "./Picker";
 import { SearchField } from "./SearchField";
 import { readPrefs, writePrefs, PREFS_KEY, type PickerPrefs } from "../picker/prefs";
 import { shellLayout, DOCK_MIN_WIDTH } from "./AppShell";
@@ -181,50 +181,105 @@ describe("picker", () => {
 });
 
 describe("project filter", () => {
+  type Option = PickerFilter["options"][number];
+  const KORI: Option = { value: "group:kori", kind: "group", label: "KORI", detail: "2 projects", title: "KORI" };
+  const IRORI: Option = { value: "project:irori", kind: "project", label: "irori", detail: "", title: "/code/irori" };
+  const PYXIS: Option = { value: "project:pyxis", kind: "project", label: "pyxis", detail: "", title: "/code/pyxis" };
   const menuButtons = () => [...host.querySelectorAll<HTMLButtonElement>('[role="menu"] button')];
+  const menuItem = (label: string) => menuButtons().find((node) => node.textContent?.startsWith(label))!;
   const openMenu = () => act(() => host.querySelector<HTMLButtonElement>('[aria-label="More session commands"]')!.click());
-  const drawFiltered = (value: string, filter: { onChoose: (value: string) => void; onManage: () => void }, options = [{ value: "kori", label: "KORI", detail: "2 projects" }]) =>
+  const drawFiltered = (value: readonly string[], filter: Partial<Pick<PickerFilter, "onChoose" | "onManage" | "covered">> = {}, options: Option[] = [KORI, IRORI, PYXIS]) =>
     act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {} }}
-      filter={{ options, value, ...filter }} />));
+      filter={{ options, value, covered: 0, onChoose: vi.fn(), onManage: vi.fn(), ...filter }} />));
+  /** Owns the chosen values, as the binding does, so ticks build on each other. */
+  function Chooser({ onChoose }: { onChoose: (value: readonly string[]) => void }) {
+    const [value, setValue] = useState<readonly string[]>([]);
+    return <Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {} }}
+      filter={{ options: [KORI, IRORI, PYXIS], value, covered: value.length, onManage: vi.fn(), onChoose: (next) => { setValue(next); onChoose(next); } }} />;
+  }
 
-  it("draws nothing above the list until a group is chosen", () => {
-    drawFiltered("", { onChoose: vi.fn(), onManage: vi.fn() });
+  it("draws nothing above the list until something is chosen", () => {
+    drawFiltered([]);
     expect(host.querySelector("select")).toBeNull();
     expect(host.querySelector('[role="status"]')).toBeNull();
     expect(text()).not.toContain("KORI");
   });
 
-  it("offers groups in the menu under the grouping, with a way to edit them", () => {
-    const onChoose = vi.fn();
+  it("offers groups, then ungrouped projects, as ticks in the menu, with a way to edit groups", () => {
     const onManage = vi.fn();
-    drawFiltered("", { onChoose, onManage });
+    drawFiltered([], { onManage });
     openMenu();
-    expect(menuButtons().map((node) => node.textContent)).toEqual(["Group by state", "Group by projectG", "Show archived 0 · A", "All projects", "KORI2 projects", "Edit project groups…"]);
-    act(() => menuButtons()[4]!.click());
-    expect(onChoose).toHaveBeenCalledWith("kori");
-    openMenu();
+    expect(menuButtons().map((node) => node.textContent)).toEqual(["Group by state", "Group by projectG", "Show archived 0 · A",
+      "All projects", "KORI2 projects", "irori", "pyxis", "Edit project groups…"]);
+    expect(menuButtons().slice(3, 7).map((node) => [node.getAttribute("role"), node.getAttribute("aria-checked")])).toEqual([
+      ["menuitemcheckbox", "true"], ["menuitemcheckbox", "false"], ["menuitemcheckbox", "false"], ["menuitemcheckbox", "false"]]);
+    expect(menuItem("irori").title).toBe("/code/irori");
     act(() => menuButtons().at(-1)!.click());
     expect(onManage).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it("offers only the way to make a group when none exist", () => {
-    drawFiltered("", { onChoose: vi.fn(), onManage: vi.fn() }, []);
+  it("ticks several entries in one visit, and unticks one", () => {
+    const onChoose = vi.fn();
+    act(() => root.render(<Chooser onChoose={onChoose} />));
+    openMenu();
+    act(() => menuItem("KORI").click());
+    act(() => menuItem("pyxis").click());
+    expect(onChoose).toHaveBeenLastCalledWith(["group:kori", "project:pyxis"]);
+    expect(host.querySelector('[role="menu"]')).not.toBeNull();
+    expect(menuItem("All projects").getAttribute("aria-checked")).toBe("false");
+    expect(menuItem("pyxis").getAttribute("aria-checked")).toBe("true");
+    act(() => menuItem("KORI").click());
+    expect(onChoose).toHaveBeenLastCalledWith(["project:pyxis"]);
+    act(() => menuItem("All projects").click());
+    expect(onChoose).toHaveBeenLastCalledWith([]);
+  });
+
+  it("closes the menu on a press outside it, or on Escape with focus back on ⋯", () => {
+    drawFiltered([]);
+    openMenu();
+    act(() => menuItem("irori").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    expect(host.querySelector('[role="menu"]')).not.toBeNull();
+    act(() => list()!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+    expect(host.querySelector('[role="menu"]')).toBeNull();
+    openMenu();
+    menuItem("irori").focus();
+    act(() => { menuItem("irori").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("More session commands");
+  });
+
+  it("offers only the way to make a group when there is no group", () => {
+    drawFiltered([], {}, []);
     openMenu();
     expect(menuButtons().map((node) => node.textContent).slice(3)).toEqual(["Group projects…"]);
+    act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {} }}
+      filter={{ options: [IRORI], value: [], covered: 0, onChoose: vi.fn(), onManage: vi.fn() }} />));
+    expect(menuButtons().map((node) => node.textContent).slice(3)).toEqual(["All projects", "irori", "Group projects…"]);
   });
 
-  it("names the chosen group above the list and clears it in one press", () => {
-    const onChoose = vi.fn();
-    drawFiltered("kori", { onChoose, onManage: vi.fn() });
+  it("names one chosen group above the list with its size", () => {
+    drawFiltered(["group:kori"], { covered: 2 });
     expect(host.querySelector('[role="status"]')?.textContent).toBe("KORI2 projects");
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Show all projects"]')!.click());
-    expect(onChoose).toHaveBeenCalledWith("");
   });
 
-  it("keeps G switching the grouping while a group is chosen", () => {
+  it("names the first chosen entry above the list and counts the rest, with the projects they cover, and clears them in one press", () => {
+    const onChoose = vi.fn();
+    drawFiltered(["project:pyxis", "group:kori", "project:irori"], { onChoose, covered: 4 });
+    const chip = host.querySelector('[role="status"]')!;
+    expect(chip.querySelector(".filter-chip-label")?.textContent).toBe("KORI");
+    expect(chip.querySelector(".filter-chip-more")?.textContent).toBe("+2");
+    expect(chip.querySelector(".filter-chip-detail")?.textContent).toBe("4 projects");
+    // In the menu's order, not the order they were ticked.
+    expect(chip.querySelector(".filter-chip-label")?.getAttribute("title")).toBe("KORI, irori, pyxis");
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Show all projects"]')!.click());
+    expect(onChoose).toHaveBeenCalledWith([]);
+  });
+
+  it("keeps G switching the grouping while something is chosen", () => {
     const onPrefs = vi.fn();
     act(() => root.render(<Picker view={view([S("a")])} prefs={defaults} onPrefs={onPrefs} actions={{ onSelect: () => {}, onRetry: () => {} }}
-      filter={{ options: [{ value: "kori", label: "KORI", detail: "2 projects" }], value: "kori", onChoose: vi.fn(), onManage: vi.fn() }} />));
+      filter={{ options: [KORI], value: ["group:kori"], covered: 2, onChoose: vi.fn(), onManage: vi.fn() }} />));
     press("g");
     expect(onPrefs).toHaveBeenCalledWith(expect.objectContaining({ grouping: "project" }));
   });
