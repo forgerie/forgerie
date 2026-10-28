@@ -250,7 +250,11 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 .bar { container: bar / inline-size; position: relative; border: 1px solid var(--wall); border-radius: var(--radius-thread); background: var(--bar-surface); }
 .bar-text { min-block-size: 2.25rem; padding: var(--space-3) var(--space-4) var(--space-2); font-size: 1rem; line-height: 1.5rem; overflow-wrap: anywhere; }
 .bar-text[data-empty] { color: var(--muted-foreground); }
-.bar-actions { display: flex; align-items: center; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
+/* The gap comes from planBar(), so the plan and the drawing agree on every pixel. */
+.bar-actions { display: flex; align-items: center; gap: var(--bar-gap, var(--space-2)); padding: 0 var(--space-2) var(--space-2); }
+/* The measurer: every control drawn once at its natural width, off screen, for planBar() to read. */
+.bar-measure { position: fixed; inset-block-start: -200px; inset-inline-start: 0; inline-size: 2000px; visibility: hidden; pointer-events: none; }
+.bar-measure .bar-actions { justify-content: flex-start; }
 /* The ledge's handle: always in the bar, in the same place, so one press folds everything above the bar away and one
    press brings it back. Folded, the bar is its normal height and the handle is the only trace: the counts, and a live
    dot when something new arrived while folded. A new proposal never reopens the ledge on its own. */
@@ -263,12 +267,10 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 .handle-words b { font-weight: 600; color: var(--foreground); }
 .handle[data-new]::after { content: ""; position: absolute; inset-block-start: -2px; inset-inline-end: -2px; inline-size: 8px; block-size: 8px;
   border: 2px solid var(--bar-surface); border-radius: 50%; background: var(--live); }
-/* Narrow bar: one total. The split stays in the ledge, and in the handle's name for a screen reader. */
-.handle-total { display: none; }
-@container bar (width < 28rem) { .handle-words { display: none; } .handle-total { display: inline; } }
-/* The folded bar must stay one row: the model name is a readout, so it gives way before the bar grows. */
-@container bar (width < 22rem) { .bar-actions { gap: var(--space-1); } .model-trigger span:first-child { display: none; } .steer { padding-inline: var(--space-2); } }
-.model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 1 auto; min-inline-size: 0; overflow: hidden; block-size: 2rem; padding-inline: var(--space-2);
+/* Short form: one total. The split stays in the ledge, and in the handle's name for a screen reader. */
+.handle[data-form="total"] .handle-words, .handle:not([data-form="total"]) .handle-total { display: none; }
+/* Controls never squeeze. planBar() moves whole controls into More instead, so no label is ever cut to "Hig". */
+.model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; min-inline-size: 0; block-size: 2rem; padding-inline: var(--space-2);
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
 .model-trigger span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
 .model-trigger svg { inline-size: 0.875rem; block-size: 0.875rem; }
@@ -290,6 +292,10 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 .menu button:hover { background: var(--hover-surface); }
 .menu button svg { inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
 .menu [hidden] { display: none; }
+.menu button[disabled] { color: var(--muted-foreground); cursor: default; }
+.menu button[disabled]:hover { background: transparent; }
+.menu-value { margin-inline-start: auto; padding-inline-start: var(--space-4); color: var(--muted-foreground); white-space: nowrap; }
+.menu-note { margin-inline-start: auto; padding-inline-start: var(--space-4); font-size: var(--label-text); }
 .menu hr { margin: var(--space-1) var(--space-2); border: 0; border-block-start: 1px solid var(--line); }
 
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -297,6 +303,7 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 </head>
 <body>
 <main class="session-shell" id="shell"></main>
+<div class="bar-measure" id="measure" aria-hidden="true"></div>
 
 <script>
 const icon = {
@@ -353,6 +360,7 @@ const SCENES = {
   "both-open": { props: ["retry", "theme", "dock"], open: true, running: true, queue: ["steer", "follow"] },
   menu: { props: ["retry"], menu: 0 },
   "one-min": { props: ["retry"], min: true },
+  "bar-menu": { props: ["retry", "theme", "dock"], running: true, queue: ["steer", "follow"], min: true, barMenu: true },
   "both-min": { props: ["retry", "theme", "dock"], running: true, queue: ["steer", "follow"], min: true },
   "min-new": { props: ["retry", "theme", "dock", "picker"], min: true, arrived: true },
   states: { props: ["retry", "theme", "dock", "longword"], open: true,
@@ -362,7 +370,7 @@ const params = new URLSearchParams(location.search);
 const name = params.get("scene") ?? "many";
 const scene = structuredClone(SCENES[name] ?? SCENES.many);
 document.title = `Ledge: ${name}`;
-const state = { props: [...(scene.props ?? [])], open: !!scene.open, queue: [...(scene.queue ?? [])], expanded: new Set(), menu: scene.menu, min: !!scene.min, arrived: !!scene.arrived };
+const state = { props: [...(scene.props ?? [])], open: !!scene.open, queue: [...(scene.queue ?? [])], expanded: new Set(), menu: scene.menu, min: !!scene.min, arrived: !!scene.arrived, barMenu: !!scene.barMenu, plan: undefined };
 
 /* ---------- Rows ---------- */
 function actionsFor(id, index) {
@@ -443,24 +451,106 @@ function handle() {
   const parts = [p ? `${p} proposal${p === 1 ? "" : "s"}` : "", q ? `${q} queued` : ""].filter(Boolean).join(", ");
   const words = [p ? `<b>${p}</b> proposal${p === 1 ? "" : "s"}` : "", q ? `<b>${q}</b> queued` : ""].filter(Boolean).join(", ");
   const name = state.min ? `Show ${parts}` : `Fold ${parts} away`;
-  return `<button class="handle hit" data-min aria-expanded="${!state.min}" aria-label="${name}${state.arrived ? ", 1 new" : ""}" title="${name}"${state.arrived ? " data-new" : ""}>
+  const form = state.plan?.handle ?? "words";
+  return `<button class="handle hit" data-min data-form="${form}" aria-expanded="${!state.min}" aria-label="${name}${state.arrived ? ", 1 new" : ""}" title="${name}"${state.arrived ? " data-new" : ""}>
     <span class="handle-words">${words}</span><span class="handle-total">${p + q}</span>${state.min ? icon.chevUp : icon.chevDown}</button>`;
 }
 
+/* ---------- The bar's controls: the plan is the algorithm ----------
+   planBar() is a pure function of the room the controls have, their natural widths, and what the session is doing.
+   It walks the ladder below and returns the first step that fits. Every threshold is a measured width, not a
+   breakpoint, so the bar adapts the same way in a pane, on the Fold, and on a phone. */
+const BAR_GAP_MIN = 8, BAR_GAP_MAX = 16, BAR_GAP_SHARE = 0.04; // the gap: 4% of the bar, between 8 and 16 px
+// What leaves first. Send, Queue and Stop never leave: they are the bar's primary actions. The handle never leaves:
+// it is the one way to fold the ledge, so it only shortens to its total.
+const OVERFLOW_ORDER = ["model", "steer", "attach", "dictate"];
+// More ends the left group, so Send and Stop keep the corner the thumb finds.
+const BAR_ORDER = ["attach", "handle", "model", "dictate", "more", "spacer", "steer", "queue", "stop", "send"];
+
+function planBar(room, width, widths, present) {
+  const gap = Math.min(BAR_GAP_MAX, Math.max(BAR_GAP_MIN, Math.round(width * BAR_GAP_SHARE)));
+  const steps = [{ handle: "words", overflow: [] }, { handle: "total", overflow: [] }];
+  const movable = OVERFLOW_ORDER.filter((id) => present.has(id));
+  for (let n = 1; n <= movable.length; n++) steps.push({ handle: "total", overflow: movable.slice(0, n) });
+  for (const step of steps) {
+    const inline = BAR_ORDER.filter((id) => (present.has(id) && !step.overflow.includes(id)) || (id === "more" && step.overflow.length > 0));
+    const need = inline.reduce((sum, id) => sum + (id === "handle" ? widths[`handle-${step.handle}`] : widths[id] ?? 0), 0) + gap * (inline.length - 1);
+    if (need <= room) return { gap, handle: step.handle, overflow: step.overflow };
+  }
+  // Nothing fits: everything movable is in More already. The bar still keeps its primary actions on one row.
+  return { gap, ...steps[steps.length - 1] };
+}
+
+function barControls() {
+  const running = !!scene.running;
+  const present = new Set(["attach", "model", "dictate", "spacer", ...(running ? ["steer", "queue", "stop"] : ["send"])]);
+  if (state.props.length + state.queue.length > 0) present.add("handle");
+  return present;
+}
+
+const CONTROL = {
+  attach: () => `<button class="icon-button" data-c="attach" aria-label="Attach files">${icon.plus}</button>`,
+  handle: () => handle(),
+  model: () => `<button class="model-trigger" data-c="model"><span>Claude Opus 5.5</span><span>High</span>${icon.chevDown}</button>`,
+  dictate: () => `<button class="icon-button" data-c="dictate" aria-label="Dictate">${icon.mic}</button>`,
+  spacer: () => `<span class="spacer"></span>`,
+  steer: () => `<button class="steer" data-c="steer" disabled>Steer</button>`,
+  queue: () => `<button class="send" data-c="queue" data-outline data-disabled aria-label="Queue message">${icon.up}</button>`,
+  stop: () => `<button class="send" data-c="stop" aria-label="Stop">${icon.stop}</button>`,
+  send: () => `<button class="send" data-c="send" data-disabled aria-label="Send">${icon.up}</button>`,
+  more: () => `<button class="square hit" data-c="more" data-barmore aria-label="More input controls" aria-haspopup="menu" aria-expanded="${!!state.barMenu}">${icon.more}</button>`,
+};
+// The same controls as menu rows, in bar order. The model keeps its readout: the name and level show in the row.
+const MENU_ROW = {
+  attach: () => `<button role="menuitem">${icon.plus}Attach files</button>`,
+  model: () => `<button role="menuitem">${icon.cpu}Model<span class="menu-value">Claude Opus 5.5, High</span></button>`,
+  dictate: () => `<button role="menuitem">${icon.mic}Dictate</button>`,
+  steer: () => `<button role="menuitem" disabled>${icon.up}Steer<span class="menu-note">Type a message first</span></button>`,
+};
+
 function bar() {
   const running = scene.running;
-  const text = running ? "" : "";
+  const present = barControls();
+  const plan = state.plan ?? { gap: BAR_GAP_MIN, handle: "words", overflow: [] };
+  const inline = BAR_ORDER.filter((id) => (present.has(id) && !plan.overflow.includes(id)) || (id === "more" && plan.overflow.length > 0));
   return `<div class="bar">
     <div class="bar-text" data-empty>${running ? "Queue a message, or steer" : "Ask anything"}</div>
-    <div class="bar-actions">
-      <button class="icon-button" aria-label="Attach">${icon.plus}</button>
-      ${handle()}
-      <button class="model-trigger"><span>Claude Opus 5.5</span><span>High</span>${icon.chevDown}</button>
-      <button class="icon-button" aria-label="Dictate">${icon.mic}</button>
-      <span class="spacer"></span>
-      ${running ? `<button class="steer" disabled>Steer</button><button class="send" data-outline data-disabled aria-label="Queue message">${icon.up}</button>
-        <button class="send" aria-label="Stop">${icon.stop}</button>` : `<button class="send" data-disabled aria-label="Send">${icon.up}</button>`}
-    </div></div>`;
+    <div class="bar-actions" style="--bar-gap: ${plan.gap}px">${inline.map((id) => CONTROL[id]()).join("")}</div></div>`;
+}
+
+function barMenu() {
+  const overflow = state.plan?.overflow ?? [];
+  return `<div class="menu" role="menu" aria-label="More input controls">${BAR_ORDER.filter((id) => overflow.includes(id)).map((id) => MENU_ROW[id]()).join("")}</div>`;
+}
+
+// Reads the natural width of every control, in both handle forms, from the off-screen measurer.
+function measureControls() {
+  const keep = state.plan;
+  const box = document.getElementById("measure");
+  state.plan = { handle: "words", overflow: [] };
+  const words = handle();
+  state.plan = { handle: "total", overflow: [] };
+  const total = handle();
+  state.plan = keep;
+  box.innerHTML = `<div class="bar"><div class="bar-actions">${Object.keys(CONTROL).filter((id) => id !== "handle" && id !== "spacer").map((id) => CONTROL[id]()).join("")}
+    <span data-c="handle-words">${words}</span><span data-c="handle-total">${total}</span></div></div>`;
+  const widths = { spacer: 0 };
+  for (const el of box.querySelectorAll("[data-c]")) widths[el.dataset.c] = el.getBoundingClientRect().width;
+  return widths;
+}
+
+// Plans the bar for the room it has now. Returns true when the plan changed and the bar must draw again.
+function replan() {
+  const actions = document.querySelector(".bar-actions");
+  if (!actions) return false;
+  const bar = actions.parentElement;
+  const style = getComputedStyle(actions);
+  const room = actions.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd);
+  const next = planBar(room, bar.clientWidth, measureControls(), barControls());
+  if (JSON.stringify(next) === JSON.stringify(state.plan)) return false;
+  state.plan = next;
+  if (next.overflow.length === 0) state.barMenu = false;
+  return true;
 }
 
 /* ---------- The thread ---------- */
@@ -509,14 +599,16 @@ function render() {
     </header>
     ${thread()}
     <div class="dock">${scene.today ? (state.queue.length ? oldQueue() : "") : ledge()}${bar()}</div>
-    ${state.menu !== undefined && state.props[state.menu] !== undefined ? menu(state.menu) : ""}`;
+    ${state.menu !== undefined && state.props[state.menu] !== undefined ? menu(state.menu) : ""}
+    ${state.barMenu && (state.plan?.overflow.length ?? 0) > 0 ? barMenu() : ""}`;
+  if (replan()) { render(); return; }
   placeMenu();
 }
 
 // The menu opens above its button, at window level, kept inside the window.
 function placeMenu() {
   const m = document.querySelector(".menu");
-  const b = document.querySelector(`[data-more="${state.menu}"]`);
+  const b = state.barMenu ? document.querySelector("[data-barmore]") : document.querySelector(`[data-more="${state.menu}"]`);
   if (!m || !b) return;
   // File is in the menu only when the row had no room for it.
   const inlineFile = b.closest(".prop")?.querySelector(".wide-only");
@@ -530,7 +622,9 @@ function placeMenu() {
 
 document.addEventListener("click", (event) => {
   const t = event.target.closest("button");
-  if (!t) { if (state.menu !== undefined) { state.menu = undefined; render(); } return; }
+  if (!t) { if (state.menu !== undefined || state.barMenu) { state.menu = undefined; state.barMenu = false; render(); } return; }
+  if (t.hasAttribute("data-barmore")) { state.barMenu = !state.barMenu; state.menu = undefined; render(); return; }
+  if (state.barMenu && !t.closest(".menu")) { state.barMenu = false; render(); return; }
   if (t.hasAttribute("data-min")) { state.min = !state.min; state.arrived = false; state.menu = undefined; render(); return; }
   if (t.hasAttribute("data-toggle")) { state.open = !state.open; state.menu = undefined; render(); return; }
   if (t.dataset.more !== undefined) { const i = Number(t.dataset.more); state.menu = state.menu === i ? undefined : i; render(); return; }
@@ -538,7 +632,7 @@ document.addEventListener("click", (event) => {
   if (t.closest(".menu") && /Dismiss/.test(t.textContent)) { state.props.splice(state.menu, 1); state.menu = undefined; render(); return; }
   if (state.menu !== undefined && !t.closest(".menu")) { state.menu = undefined; render(); }
 });
-window.addEventListener("resize", placeMenu);
+window.addEventListener("resize", () => { if (replan()) render(); else placeMenu(); });
 document.fonts.ready.then(render);
 render();
 </script>

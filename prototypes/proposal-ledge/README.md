@@ -28,6 +28,7 @@ and `./sheet.sh light <scene>` joins one scene's four postures into one image.
 | `states` | Filing, failed with Retry, a workflow just started, a title with no break points. |
 | `one-min` | One proposal, the ledge folded away to the handle. |
 | `both-min` | Proposals and the queue, folded away. |
+| `bar-menu` | Folded away on a narrow bar, with the bar's More menu open. |
 | `min-new` | Folded away, and a new proposal arrived: a live dot on the handle. |
 
 ## The shape
@@ -87,9 +88,35 @@ is a guess until it is measured on the device.
 More opens at window level, above its button, so a scrolled list never clips
 it.
 
-Folded away, the bar never grows past one row of controls. Under 22rem wide,
-the model name gives way first (the level stays), because it is a readout and
-the handle is a control.
+## The bar's overflow
+
+The bar's controls never squeeze or cut their labels. `planBar()` in
+`index.html` decides which controls stay inline, from the room the controls
+have, their measured widths, and what the session is doing. It is a pure
+function, and it is meant to move to production as it is. It tries these steps
+in order and keeps the first one that fits:
+
+1. Everything inline, the handle in words ("3 proposals, 2 queued").
+2. The handle shortens to its total ("5"). It is a readout, so it yields first.
+3. The model picker moves into More.
+4. Then Steer, then Attach, then Dictate.
+
+Send, Queue and Stop never move: they are the bar's primary actions, and they
+keep the bottom-right corner. The handle never moves either, because it is the
+one way to fold the ledge. More appears only when something is in it, at the
+end of the left group. Its rows keep what the inline control said: the model
+row shows "Claude Opus 5.5, High". The gap between controls is 4% of the bar,
+between 8 and 16 px, and the plan uses the same number.
+
+`./render-ladder.sh` renders `both-min`, `one-min` and `bar-menu` at 704, 475,
+400, 360, 320 and 280 px wide. Today's result:
+
+| Bar at | Idle | Running |
+|---|---|---|
+| 704 | all inline | all inline |
+| 475 | handle total | model in More |
+| 400 | model in More | model and Steer in More |
+| 280 | model in More | model, Steer and Attach in More |
 
 ## Not in the mockup yet
 
