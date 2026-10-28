@@ -79,6 +79,8 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
   const [lists, setLists] = useState<Lists>();
   const [phase, setPhase] = useState<Phase>({ type: "idle" });
   const [query, setQuery] = useState("");
+  /** Counts reads of the lists, so a section can drop questions it asked against an older read. */
+  const [reads, setReads] = useState(0);
   // The save loop's own view: what the server holds, and what the page wants.
   const saved = useRef<ModelPrefs | undefined>(undefined);
   const wanted = useRef<Lists | undefined>(undefined);
@@ -92,6 +94,7 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
       saved.current = prefs;
       wanted.current = undefined;
       setLists(listsOf(prefs));
+      setReads((count) => count + 1);
       setLoad({ type: "ready", prefs, models });
       setPhase({ type: "idle" });
     } catch (error) {
@@ -166,7 +169,7 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
         <DefaultModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
         <TitleModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
       </div>
-      {chains?.({ chains: lists.modelChains ?? {}, problem: load.prefs.modelChainsProblem, models, agents, locked: phase.type === "failed",
+      {chains?.({ chains: lists.modelChains ?? {}, problem: load.prefs.modelChainsProblem, models, agents, locked: phase.type === "failed", generation: reads,
         where: tildify(load.prefs.configPath, home), onChange: (next) => change({ type: "chains", chains: next }) })}
       <div className="models-summary">
         <p>{lists.visible === null

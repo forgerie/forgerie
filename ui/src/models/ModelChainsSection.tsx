@@ -26,6 +26,8 @@ export interface ModelChainsSectionProps {
   agents: readonly { name: string; model?: string | undefined }[] | undefined;
   /** A save failed, and nothing changes until the page reads the lists again. */
   locked: boolean;
+  /** Counts the page's reads of the lists. A new read drops every question still open, so the reader asks again against the new lists. */
+  generation: number;
   /** Where the chains are saved, as the page names paths. */
   where: string;
   onChange: (chains: ModelChains) => void;
@@ -47,18 +49,21 @@ const plural = (count: number, one: string, many: string) => `${String(count)} $
 const rowKeys = (entries: readonly string[]) => entries.map((entry, index) => `${entry}#${String(entries.slice(0, index).filter((other) => other === entry).length)}`);
 
 type Slot = number | "add";
+/** Saved chains in the file's order, then new ones that wait for their first model. */
+const namesOf = (chains: ModelChains, pending: readonly string[]) => [...Object.keys(chains), ...pending.filter((name) => !Object.hasOwn(chains, name))];
 
 /**
  * Shape: Settings > Models > Model chains. Each chain is a row with its entries in order under it. Changes save at
  * once, as the rest of the page does; a new chain waits here until its first model is chosen, since a chain holds at
  * least one. Renaming or deleting a chain that agents name asks first, because those agents stop finding it.
  */
-export function ModelChainsSection({ chains, problem, models, agents, locked, where, onChange }: ModelChainsSectionProps) {
+export function ModelChainsSection({ chains, problem, models, agents, locked, generation, where, onChange }: ModelChainsSectionProps) {
   /** New chains with no model yet. They are not saved, and live as long as the page. */
   const [pending, setPending] = useState<string[]>([]);
   const [creating, setCreating] = useState<{ error?: string | undefined }>();
   const [renaming, setRenaming] = useState<{ name: string; error?: string | undefined }>();
-  const [deleting, setDeleting] = useState<string>();
+  /** A delete that waits for the reader, for the read of the lists it was asked about. */
+  const [deleting, setDeleting] = useState<{ name: string; generation: number }>();
   const [open, setOpen] = useState<{ chain: string; slot: Slot; at: PickerOpen }>();
   const anchors = useRef(new Map<string, RefObject<HTMLSpanElement | null>>());
   const anchor = (chain: string, slot: Slot) => {
@@ -68,7 +73,13 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, wh
     return ref;
   };
   const frozen = locked || problem !== null;
-  const names = [...Object.keys(chains), ...pending.filter((name) => !Object.hasOwn(chains, name))];
+  const names = namesOf(chains, pending);
+  /**
+   * The lists as they are now. A question the reader answers later, such as Rename anyway, acts on these and not on
+   * the lists it was asked about, which a failed save and a new read may have replaced.
+   */
+  const latest = useRef({ chains, pending, frozen });
+  latest.current = { chains, pending, frozen };
   const listModels = async () => [...models];
   const modelFor = (key: string): SessionModel => {
     const offered = models.find((model) => modelKey(model) === key);
@@ -80,18 +91,25 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, wh
 
   /** Saves a chain's entries. A new chain is saved with its first model. */
   const save = (name: string, entries: readonly string[]) => {
-    onChange(withChain(chains, name, entries));
+    onChange(withChain(latest.current.chains, name, entries));
     setPending((current) => current.filter((item) => item !== name));
   };
   const remove = (name: string) => {
     setDeleting(undefined);
     if (renaming?.name === name) setRenaming(undefined);
-    if (Object.hasOwn(chains, name)) onChange(withoutChain(chains, name));
+    const now = latest.current.chains;
+    if (Object.hasOwn(now, name)) onChange(withoutChain(now, name));
     setPending((current) => current.filter((item) => item !== name));
   };
+  /** Renames against the lists as they are now, checked again, since the reader may confirm long after asking. */
   const rename = (from: string, to: string) => {
-    if (Object.hasOwn(chains, from)) onChange(renameChain(chains, from, to));
-    setPending((current) => current.map((item) => item === from ? to : item));
+    const { chains: now, pending: waiting, frozen: stopped } = latest.current;
+    const current = namesOf(now, waiting);
+    const refused = stopped ? "The model lists cannot change until the page reads them again."
+      : current.includes(from) ? nameProblem(to, current.filter((name) => name !== from)) : `There is no chain named ${from} any more.`;
+    if (refused) { setRenaming({ name: from, error: refused }); throw new Error(refused); }
+    if (Object.hasOwn(now, from)) onChange(renameChain(now, from, to));
+    setPending((items) => items.map((item) => item === from ? to : item));
     setRenaming(undefined);
   };
   const pickerProps = (chain: string, slot: Slot) => ({
@@ -136,7 +154,7 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, wh
     setRenaming({ name: from, error: refused });
     if (refused) throw new Error(refused);
     const users = agents ? chainUsers(agents, from) : [];
-    if (users.length === 0 || !Object.hasOwn(chains, from)) { rename(from, value); return; }
+    if (users.length === 0 || !Object.hasOwn(chains, from)) { rename(from, value); return undefined; }
     const one = users.length === 1;
     return { message: `${listWords(users)} ${one ? "names" : "name"} ${from} as ${one ? "its" : "their"} model and will not find it under the new name. Choose the chain again in ${one ? "that agent" : "each agent"} after the rename.`,
       action: "Rename anyway", run: async () => { rename(from, value); } };
@@ -147,7 +165,7 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, wh
     <Consequence icon={<TriangleAlertIcon />} tone="warn"><p>Forgerie ignores every chain until the file is fixed. {problem} Fix <code>modelChains</code> in <code>{where}</code>, then reload this page.</p></Consequence>
   </>;
   const foot = creating
-    ? <TextSubmit label="New chain" hint={COPY.nameHint} action="Create" placeholder="worker" pending={false} error={creating.error} autoFocus
+    ? <TextSubmit label="New chain" hint={COPY.nameHint} action="Create" placeholder="worker" pending={frozen} error={creating.error} autoFocus
       cancel={{ label: "Cancel", onPress: () => setCreating(undefined) }} onSubmit={create} />
     : <TextButton label="New chain" icon={<PlusIcon aria-hidden />} disabled={frozen} onPress={() => setCreating({})} />;
 
@@ -155,15 +173,17 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, wh
     note={<>Saved in Forgerie's config, <code>{where}</code>, as <code>modelChains</code>.</>}>
     {names.map((name) => {
       const saved = Object.hasOwn(chains, name);
-      const entries = chains[name] ?? [];
+      // An own key only: a name such as "constructor" must not read the map's prototype.
+      const entries = saved ? chains[name] ?? [] : [];
       const users = agents ? chainUsers(agents, name) : undefined;
       const keys = rowKeys(entries);
       const one = users?.length === 1;
       const below = <>
-        {renaming?.name === name ? <TextSubmit label={`Rename ${name}`} hint={COPY.nameHint} action="Rename" placeholder={name} pending={false}
+        {/* Keyed by the read: a new read of the lists drops a Rename anyway that was asked against the old ones. */}
+        {renaming?.name === name ? <TextSubmit key={generation} label={`Rename ${name}`} hint={COPY.nameHint} action="Rename" placeholder={name} pending={frozen}
           initial={name} autoFocus error={renaming.error} cancel={{ label: "Cancel", onPress: () => setRenaming(undefined) }}
           onSubmit={(value) => submitRename(name, value)} /> : null}
-        {deleting === name && users && users.length > 0 ? <Consequence icon={<TriangleAlertIcon />} tone="warn"
+        {deleting?.name === name && deleting.generation === generation && users && users.length > 0 ? <Consequence icon={<TriangleAlertIcon />} tone="warn"
           actions={[{ label: "Delete anyway", onPress: () => remove(name) }, { label: "Keep chain", onPress: () => setDeleting(undefined) }]}>
           <p>{listWords(users)} {one ? "names" : "name"} this chain as {one ? "its" : "their"} model. Until you choose another model for {one ? "it" : "them"}, {one ? "its" : "their"} runs will not start.</p>
         </Consequence> : null}
@@ -187,7 +207,7 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, wh
           { label: "Rename chain", icon: <PencilIcon aria-hidden />, disabled: frozen, onSelect: () => { setDeleting(undefined); setRenaming({ name }); } },
           { label: "Delete chain", icon: <Trash2Icon aria-hidden />, tone: "danger", disabled: frozen,
             confirm: saved && !(users && users.length > 0) ? "Delete for good?" : undefined,
-            onSelect: () => { if (saved && users && users.length > 0) { setRenaming(undefined); setDeleting(name); } else remove(name); } },
+            onSelect: () => { if (saved && users && users.length > 0) { setRenaming(undefined); setDeleting({ name, generation }); } else remove(name); } },
         ]} />}
         below={below} />;
     })}

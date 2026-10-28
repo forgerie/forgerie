@@ -157,4 +157,43 @@ describe("Models settings", () => {
     expect(saves.at(-1)?.modelChains).toBeUndefined();
     expect(document.querySelector(".connection-status")?.textContent).toBe("Saved");
   });
+
+  it("applies a Rename anyway to the lists read after a refused save, and asks again after the read", async () => {
+    const opus = "proxy/claude-opus-5-5", flash = "proxy/gemini-3.8-flash", llama = "local/llama3:8b", haiku = "proxy/claude-3-5-haiku-20241022";
+    stored = { ...stored, modelChains: { worker: [opus, flash], fast: [llama] } };
+    act(() => root.unmount());
+    const host = document.createElement("div"); document.body.replaceChildren(host); root = createRoot(host);
+    await act(async () => root.render(<ModelPrefsContext.Provider value={source}>
+      <ModelsView onBack={() => {}} listModels={async () => models} chains={(props) => <ModelChainsSection {...props} />}
+        agents={[{ name: "Builder", model: "worker" }]} /></ModelPrefsContext.Provider>));
+    await settle();
+    const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text);
+    const renameTo = async (name: string) => {
+      const form = document.querySelector<HTMLFormElement>(".action-row form")!;
+      const input = form.querySelector("input")!;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, name); input.dispatchEvent(new Event("input", { bubbles: true })); });
+      await act(async () => { form.requestSubmit(); });
+      await settle();
+    };
+    // 1. Start renaming a chain an agent names: the page asks first.
+    await click(byLabel("More commands for worker"));
+    await click(button("Rename chain")!);
+    await renameTo("builder");
+    expect(button("Rename anyway")).toBeDefined();
+    // 2. Another change is refused, because someone else saved first.
+    refuse = true;
+    await click(byLabel("Move Gemini 3.8 Flash up"));
+    expect(document.querySelector("[role='alert']")?.textContent).toContain("changed since this page read them");
+    // 3. The page reads the newer lists.
+    refuse = false;
+    stored = { ...stored, revision: "r9", modelChains: { fast: [llama, haiku], worker: [flash, opus, haiku] } };
+    await click(button("Reload lists")!);
+    // The question asked against the old lists is gone; the reader asks again.
+    expect(button("Rename anyway")).toBeUndefined();
+    await renameTo("builder");
+    // 4. Confirming renames the chain in the lists read last, in their order, with their entries.
+    await click(button("Rename anyway")!);
+    expect(saves.at(-1)).toEqual({ revision: "r9", favorites: stored.favorites, visible: null,
+      modelChains: { fast: [llama, haiku], builder: [flash, opus, haiku] } });
+  });
 });

@@ -23,7 +23,7 @@ const submit = async (form: HTMLFormElement) => { await act(async () => { form.r
 
 function Page({ start, problem = null, agents = AGENTS }: { start: ModelChains; problem?: string | null; agents?: typeof AGENTS | undefined }) {
   const [chains, setChains] = useState(start);
-  return <ModelChainsSection chains={chains} problem={problem} models={MODELS} agents={agents} locked={false} where={WHERE}
+  return <ModelChainsSection chains={chains} problem={problem} models={MODELS} agents={agents} locked={false} generation={1} where={WHERE}
     onChange={(next) => { saves.push(next); setChains(next); }} />;
 }
 async function render(page: Parameters<typeof Page>[0]) {
@@ -169,4 +169,38 @@ describe("Model chains", () => {
     expect(button("New chain").disabled).toBe(true);
     expect(byLabel("Remove Claude Opus 5.5").disabled).toBe(true);
   });
+
+  it.each(["constructor"])("creates and fills a chain named %s, a key the map's prototype also has", async (name) => {
+    await render({ start: CHAINS });
+    await click(button("New chain"));
+    const form = document.querySelector<HTMLFormElement>("form")!;
+    await type(form.querySelector("input")!, name);
+    await submit(form);
+    expect(chainRow(name)?.textContent).toContain("Add a model to save this chain.");
+    await pick("GPT-5 mini");
+    expect(Object.hasOwn(saves.at(-1)!, name)).toBe(true);
+    expect(saves.at(-1)?.[name]).toEqual(["openai/gpt-5-mini"]);
+    expect(entries(name)).toEqual(["GPT-5 mini"]);
+  });
+
+  it.each(["__proto__", "toString"])("refuses %s as a name: the name rule allows no underscore or capital", async (name) => {
+    await render({ start: CHAINS });
+    await click(button("New chain"));
+    const form = document.querySelector<HTMLFormElement>("form")!;
+    await type(form.querySelector("input")!, name);
+    await submit(form);
+    expect(form.querySelector("[role='alert']")?.textContent).toBe("Use lower-case letters, digits and hyphens, and start with a letter or digit.");
+    expect(saves).toEqual([]);
+  });
+
+  it("keeps focus in the entry that is left when a chain goes from two models to one", async () => {
+    await render({ start: { worker: ["openai/gpt-5", "openai/gpt-5-mini"] } });
+    await click(byLabel("Remove GPT-5"));
+    expect(saves.at(-1)).toEqual({ worker: ["openai/gpt-5-mini"] });
+    // The last row's own Remove and moves are off, so focus goes to a control of that row that is on, never the page.
+    const focused = document.activeElement as HTMLButtonElement;
+    expect(focused.closest("li")?.textContent).toContain("GPT-5 mini");
+    expect(focused.disabled).toBe(false);
+  });
+
 });

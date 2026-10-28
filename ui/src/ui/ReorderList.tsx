@@ -12,6 +12,13 @@ export interface ReorderRow {
 }
 
 type Control = "handle" | "up" | "down" | "remove";
+/**
+ * Where focus goes after an action, first choice first: the same control, then its partner when a move to an end
+ * turned it off. A focus that does not take moves on to the next.
+ */
+const FOCUS_ORDER: Record<Control, readonly string[]> = {
+  up: ["up", "down", "handle"], down: ["down", "up", "handle"], handle: ["handle"], remove: ["remove"],
+};
 interface Drag { pointer: number; from: number; startY: number; centers: number[]; shift: number }
 
 /** Where `from` lands when its centre has moved to `center`: the number of other rows whose centre is above it. */
@@ -22,8 +29,9 @@ const dropIndex = (centers: readonly number[], from: number, center: number) =>
  * Molecule: a short list whose order means something, such as which choice is tried first. Each row shows its place,
  * a handle, its content, and Move up, Move down and Remove named for it. A row moves by its handle (mouse, pen or
  * touch: the rows between make room, and the row lands where it is let go; Escape puts it back), by the move buttons,
- * or by the arrow keys on its handle. Focus follows the moved row, and a live region says where it landed. Under
- * its least width the row's buttons wrap under its content as one group. With no rows the empty text takes their place.
+ * or by the arrow keys on its handle. Focus follows the moved row, and a live region says where it landed; after a
+ * removal it goes to the row that takes its place, else to the foot. Under its least width the row's buttons wrap
+ * under its content as one group. With no rows the empty text takes their place.
  */
 export function ReorderList({ label, rows, empty, foot, note, disabled = false, removeBlocked, onMove, onRemove }: {
   /** The list's accessible name. */
@@ -40,6 +48,7 @@ export function ReorderList({ label, rows, empty, foot, note, disabled = false, 
   onMove: (from: number, to: number) => void;
   onRemove: (index: number) => void;
 }) {
+  const root = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
   const drag = useRef<Drag | undefined>(undefined);
   const [dragging, setDragging] = useState<{ from: number; to: number; dy: number }>();
@@ -49,12 +58,18 @@ export function ReorderList({ label, rows, empty, foot, note, disabled = false, 
   useLayoutEffect(() => {
     const target = focusNext.current;
     focusNext.current = undefined;
-    if (!target || !list.current) return;
-    const row = target.key === undefined ? undefined : [...list.current.children].find((node) => node.getAttribute("data-key") === target.key);
-    // A move to an end turns its own button off, so focus goes to the other move button.
-    const order: Control[] = target.control === "up" ? ["up", "down", "handle"] : target.control === "down" ? ["down", "up", "handle"] : [target.control, "handle"];
-    const button = order.map((control) => row?.querySelector<HTMLButtonElement>(`[data-control="${control}"]:not(:disabled)`)).find(Boolean);
-    button?.focus();
+    if (!target || !root.current) return;
+    const row = target.key === undefined ? undefined : [...(list.current?.children ?? [])].find((node) => node.getAttribute("data-key") === target.key);
+    const candidates = [
+      ...FOCUS_ORDER[target.control].map((control) => row?.querySelector<HTMLElement>(`button[data-control="${control}"]:not(:disabled)`)),
+      // A row whose own buttons are all off, such as the last one left, still has its content.
+      ...row?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [],
+      ...root.current.querySelectorAll<HTMLElement>(".reorder-list-foot button:not(:disabled)"),
+    ];
+    for (const candidate of candidates) {
+      candidate?.focus();
+      if (candidate && document.activeElement === candidate) return;
+    }
   });
 
   const move = (from: number, to: number, control: Control) => {
@@ -116,7 +131,7 @@ export function ReorderList({ label, rows, empty, foot, note, disabled = false, 
     return 0;
   };
 
-  return <div className="reorder-list">
+  return <div className="reorder-list" ref={root}>
     {rows.length === 0 ? <p className="reorder-list-empty">{empty}</p>
       : <ol className="reorder-list-rows" ref={list} aria-label={label} data-dragging={dragging ? "" : undefined}>{rows.map((row, index) => {
         const offset = offsetOf(index);

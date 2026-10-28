@@ -80,6 +80,11 @@ describe("an agent's model chain", () => {
     expect(model.querySelector(".model-trigger")?.getAttribute("aria-describedby")).toContain(model.querySelector(".agent-field-problem")!.id);
   });
 
+  it("reads only the map's own chains: an agent that names constructor gets the missing-chain error", async () => {
+    await open("---\nname: helper\ndescription: Helps.\nmodel: constructor\n---\n\nHelp.\n");
+    expect(field("Model").querySelector(".agent-field-problem")?.textContent).toContain("No model chain is named constructor.");
+  });
+
   it("keeps a single model as it was, with no problem", async () => {
     await open("---\nname: helper\ndescription: Helps.\nmodel: openai/gpt-5\n---\n\nHelp.\n");
     const model = field("Model");

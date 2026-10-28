@@ -33,7 +33,7 @@ function Stateful({ start, agentsUnknown = false, problem = null, locked = false
   start: ModelChains; agentsUnknown?: boolean; problem?: string | null; locked?: boolean;
 }) {
   const [chains, setChains] = useState(start);
-  return <ModelChainsSection chains={chains} problem={problem} models={MODELS} agents={agentsUnknown ? undefined : AGENTS} locked={locked} where={WHERE} onChange={setChains} />;
+  return <ModelChainsSection chains={chains} problem={problem} models={MODELS} agents={agentsUnknown ? undefined : AGENTS} locked={locked} generation={1} where={WHERE} onChange={setChains} />;
 }
 export default function Chains() { return <Stateful start={CHAINS} />; }
 export function Empty() { return <Stateful start={{}} />; }
