@@ -39,3 +39,5 @@
 .recap-panel .recap-panel-entry + .recap-panel-entry { margin-block-start: 0.125rem; }
 .recap-panel-mark { inline-size: 1rem; block-size: 1rem; margin-block-start: 0.25rem; color: var(--muted-foreground); }
 .recap-panel-field[data-field="done"] .recap-panel-mark { color: var(--ink-good); }
+
+.recap-panel[data-spacing="flush"] { margin-block: 0; }

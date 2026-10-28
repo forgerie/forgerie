@@ -41,6 +41,7 @@ The inherited `PI_WEB_*` names remain supported. They do not enable upstream ins
 | `childToolsDeny` | Session tool names that Durable children must not share. Array of non-empty strings, default `[]`. For example `["web_search"]`. Missing and denied tools are reported to the child and parent. Does not remove child-native tools or sandbox their shell. Restart sessiond to apply. |
 | `extensionDialogsTimeoutMs` | Default extension-dialog timeout, in milliseconds. Defaults to `300000`; `0` waits without a deadline. An extension's shorter timeout still wins. |
 | `modelChains` | Named ordered model lists for Durable child agents, 1 to 16 entries each, for example `{"worker": ["anthropic/claude-opus-4", "openai/gpt-5:high"]}`. Edit them in Settings > Models > Model chains, or in the file. Read again at spawn and fallback, so a save needs no restart. See [model chains](child-agents.md#model-chains) for validation, precedence, cooldowns, and costs. |
+| `autoRecap` | Write catch-up recaps for unread completed sessions. Defaults to `true`. Set `false` to disable automatic and on-open recaps, but keep manual `/recap`. See [session recaps](#session-recaps). |
 | `sessionTitleModel` | The `provider/model-id` that writes a new session's title from its first prompt, for example a small fast model. Unset: each session's own model writes its title. Set it in **Settings → Models → Session titles**. The session daemon reads it for each title, so a change applies to the next new session without a restart. If no signed-in provider offers the model, the session's own model writes the title, and the daemon logs `title_model_unavailable`. |
 | `plugins` | Current browser-app plugin enablement and settings. See [plugins](plugins.md). |
 | `pathAccess.allowedPaths` | External filesystem roots that file APIs can expose outside a workspace. Workspace access remains subject to path validation. |
@@ -321,3 +322,14 @@ Dictation uses the Speech to text plugin. Forgerie runs no speech model: the web
 An unset address or a service that does not answer disables dictation, not the rest of Forgerie. Address changes need no restart. Restart only the web process after changing its service key or speech host policy. User-driven recording and transcription remain supported. Automatic Smart Turn execution and `/api/speech/check-turn` are retired. Speech status retains an inert `smartTurn: "unavailable"` field for older clients.
 
 The separate `prototypes/voice-content` experiment owns its own speech stack. The production cleanup does not change it.
+
+
+## Session recaps
+
+`autoRecap` defaults to `true`. Set it to `false` in Forgerie's `config.json`
+to disable automatic and on-open recaps. The daemon reads this setting for each
+request; no restart is needed. Manual `/recap` still works.
+
+Recaps use `sessionTitleModel` when that model is available with credentials,
+otherwise the session's model. Their token usage and cost count toward the
+session's usage. See [While you were away](plugins.md#while-you-were-away).

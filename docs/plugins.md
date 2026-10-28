@@ -79,3 +79,31 @@ gateway, speaches, OpenAI or Groq. See [Speech to text](speech-to-text.md).
 Decision hints is an off-by-default gateway connection for optional attention and
 risk information. See [Decision hints](decision-hints.md) for configuration,
 privacy and server-only key setup. The annotations are a later integration stage.
+
+
+## While you were away
+
+A session can add a **While you were away** panel after its last reply. It
+states the goal, completed work, unfinished work, and the next step. **Needs
+you** comes from current gated actions, open question forms, child questions,
+and workflow stops, not from the model. Resolving an obligation removes it
+from the panel, including panels kept in history.
+
+Forgerie checks unread completions after ten minutes. Automatic recaps require
+an idle, writable parent session with at least three completed user turns and,
+after its first recap, at least two new user turns. Opening an unread session
+can write its recap immediately under the same guards, without waiting for the
+ten-minute timer. Reading the completion or sending a message cancels its timer.
+Daemon restarts restore timers from the unread catalog.
+
+Type `/recap` in the composer to write one now. It ignores the delay and turn
+counts, but requires at least one exchange and an idle session. While writing,
+a quiet line replaces the pending panel. Manual and on-open failures show a
+short error; an automatic failure retries once after 30 seconds, then stops.
+
+Each recap uses up to eight recent visible exchanges, bounded to about 32 KB.
+Tools, thinking, skill blocks and file blocks are excluded. A source line names
+the model, the number of messages, and (except for manual recaps) how long the
+run had ended unread. Recaps stay where they were written when the chat
+continues. They are display-only Durable entries and do not enter model context.
+[Configure automatic recaps](config.md#session-recaps) with `autoRecap`.

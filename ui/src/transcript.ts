@@ -1,3 +1,5 @@
+import { recapOf, type RecapArtifact } from "./recap/recapModel";
+import type { RecapData } from "@shared/sessionRecap";
 import { RISK_LABEL_ENTRY_KIND, type RiskLabel } from "@shared/riskLabels";
 import { riskLabelEntryOf, messageRiskLabels, riskWords, type RiskWords } from "./riskLabelsModel";
 import type { CompleteAttachment, ThreadMessageLike } from "@assistant-ui/react";
@@ -56,6 +58,7 @@ export interface TranscriptMessage {
   actionRunNotice?: ActionRunNotice;
   /** A child agent asked, was answered, was steered, or reported back. */
   childEntry?: ChildEntry;
+  recap?: RecapData;
   /** A workflow started, waits at a stop, or passed on the reader's decision. */
   workflowEntry?: WorkflowEntry;
   /** A call Forgerie holds until the reader approves it. */
@@ -136,6 +139,8 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   const summary = asSummary(message, id);
   if (summary) return summary;
   const role = message.role;
+  const recap = recapOf(message);
+  if (recap !== undefined) return { id, role: "system", parts: [], recap, key: keyOf(message) };
   const oldIssueProposal = oldIssueProposalOf(message);
   if (oldIssueProposal) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], oldIssueProposal, key: keyOf(message) };
   if (isOldIssueOutcome(message)) return undefined;
@@ -588,6 +593,8 @@ export function threadMessageIdAt(messages: readonly TranscriptMessage[], positi
   return messages[index]!.id;
 }
 function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
+  if (message.recap) return { id: message.id, role: "system", content: [{ type: "text", text: "While you were away" }],
+    metadata: { custom: { recap: message.recap } satisfies RecapArtifact } };
   if (message.role === "shell") {
     const run = shellRunOf(message)!;
     return { id: message.id, role: "system", content: [{ type: "text", text: shellText(run) }],

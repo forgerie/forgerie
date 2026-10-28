@@ -39,7 +39,7 @@ export interface LedgeBinding {
 // `ask` puts the one composer into ask mode. `working` says what a draft can
 // do while the session works; `queue` is what already waits. The ledge above
 // the bar holds the queue and `ledge`, and the bar's handle folds it away.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, ledge, chatDraft, head, readOnly, inputContext, systemArtifact, toolArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, ledge, tail, chatDraft, head, readOnly, inputContext, systemArtifact, toolArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
   /**
    * Whether older messages exist above the first loaded one. The runtime's
    * `hasEarlier` and `onLoadEarlier` load them; this only describes the state.
@@ -73,6 +73,8 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   beforeComposer?: ReactNode;
   /** What waits at the input besides the queue, in the ledge that grows out of the bar. */
   ledge?: LedgeBinding | undefined;
+  /** Transient transcript output, after the last saved message and before the composer. */
+  tail?: ReactNode;
   /** Drawn before the first message, such as a worktree still being set up. */
   head?: ReactNode;
   /** Set when the conversation can no longer continue: drawn where the input bar would be, instead of it. */
@@ -150,6 +152,7 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
         </AuiIf>
         <div className="message-group">
           <ThreadPrimitive.Messages components={components} />
+          {tail}
         </div>
         <ThreadPrimitive.ViewportFooter className="composer-region">
           <ThreadPrimitive.ScrollToBottom className="jump icon-button" aria-label="Scroll to bottom" title="Scroll to bottom">

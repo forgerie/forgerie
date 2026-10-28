@@ -1,3 +1,5 @@
+import { recapResultSchema } from "@shared/sessionRecap";
+import type { RecapRequestState } from "./recap/recapModel";
 import type { EarlierHistory } from "./historyPaging";
 import { SessionWireDecoder } from "@shared/sessionWire";
 import { processesEventSchema, type ProcessesEvent } from "./processes/processSchemas";
@@ -43,6 +45,7 @@ export interface SessionState {
   commandResult?: CommandResult;
   status?: SessionStatus;
   compaction: CompactionState;
+  recap?: RecapRequestState;
   tree: TreeNavigator;
   /** The browser's side of the oldest open extension dialog. The dialogs themselves live in status. */
   dialogPhase: StoredDialogPhase;
@@ -172,7 +175,17 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let pendingReceipt: ReadReceipt | undefined;
   let activation = new AbortController();
   let selectedVisible = reads === undefined;
+  let openRecap: Promise<void> | undefined;
+  let attemptedRecapReceipt: string | undefined;
+  function maybeOpenRecap() {
+    if (!pendingReceipt || !selectedVisible || state.status?.readOnly || state.connection.type !== "ready") return;
+    const key = `${pendingReceipt.catalogId}:${pendingReceipt.throughCompletionOrder}`;
+    if (attemptedRecapReceipt === key || openRecap !== undefined) return;
+    attemptedRecapReceipt = key;
+    openRecap = requestRecap("open").finally(() => { openRecap = undefined; acknowledge(); });
+  }
   function acknowledge() {
+    if (openRecap !== undefined) return;
     if (!reads || !pendingReceipt || readRefreshRequested || !selectedVisible || !reads.isVisible()) return;
     const receipt = pendingReceipt;
     const signal = AbortSignal.any([activation.signal, lifetime.signal]);
@@ -257,7 +270,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     update({ ...state, commands: { type: "loading" } });
     try {
       const commands = await request(readPath("commands", session), commandCatalogSchema);
-      if (attempt === catalogAttempt) update({ ...state, commands: { type: "ready", commands } });
+      if (attempt === catalogAttempt) update({ ...state, commands: { type: "ready", commands: [{ name: "recap", source: "builtin", description: "Write a catch-up from recent messages" }, ...commands.filter(command => command.name !== "recap")] } });
     } catch (error) {
       if (attempt === catalogAttempt) update({ ...state, commands: { type: "failed", message: messageOf(error) } });
     }
@@ -516,6 +529,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       statusVersion++; retryDelay = initialDelay; attempts = 0;
       if (capturedCatalogVersion === catalogVersion) readRefreshRequested = false;
       update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });
+      maybeOpenRecap();
       acknowledge();
       void loadCommands();
       scheduleReadRefresh();
@@ -590,6 +604,21 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
         throw new NotSentError(`${messageOf(error)} Your message is back in the message box.`, { cause: error });
       });
     } finally { update({ ...state, sending: false, waitingToSend: false }); }
+  }
+  async function requestRecap(trigger: "open" | "manual") {
+    const session = state.session;
+    if (!session || state.recap?.kind === "writing" || state.status?.readOnly) return;
+    update({ ...state, recap: { kind: "writing" } });
+    try {
+      const result = await request(`${root}/recap`, recapResultSchema, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd, trigger }),
+      }, lifetime.signal, 60_000);
+      update({ ...state, recap: result.kind === "failed" ? { kind: "failed", message: result.message } : { kind: "idle" } });
+      // The native publisher already sends the committed entry. Classic readers need a new cut.
+      if (result.kind === "written" && join?.readPath !== "native") reload();
+    } catch {
+      update({ ...state, recap: { kind: "failed", message: "Could not write a recap. Try /recap again." } });
+    }
   }
   async function runSlash(endpoint: "commands/run" | "commands/respond", body: { text: string } | { requestId: string; value: string }): Promise<CommandResult> {
     const session = state.session;
@@ -666,7 +695,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new NotSentError("The session is not connected.");
     const streamingBehavior = endpoint === "prompt" ? deliveryOf(attachments, steer) : undefined;
-    update({ ...state, sending: true, commandError: undefined });
+    update({ ...state, sending: true, commandError: undefined, ...(endpoint === "prompt" ? { recap: { kind: "idle" as const } } : {}) });
     try {
       const body = { cwd: session.cwd, ...(text === undefined ? {} : { text }), ...(attachments?.length ? { attachments } : {}),
         ...(streamingBehavior ? { streamingBehavior } : {}), ...(diffAnnotations?.length ? { diffAnnotations } : {}) };
@@ -878,7 +907,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     },
     setVisible: (visible: boolean) => {
       activation.abort(); activation = new AbortController(); selectedVisible = visible;
-      if (visible) { acknowledge(); scheduleReadRefresh(); }
+      if (visible) { maybeOpenRecap(); acknowledge(); scheduleReadRefresh(); }
     },
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -888,6 +917,11 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
      * ignores them; see `carriesNotes`. With notes, the text may be empty.
      */
     send: async (text: string, attachments?: PromptAttachment[], options: { steer?: boolean; diffAnnotations?: PromptDiffAnnotation[] | undefined } = {}) => {
+      if (/^\/recap\s*$/u.test(text)) {
+        if (attachments?.length) throw new NotSentError("Remove attachments before writing a recap.");
+        await untilConnected();
+        return requestRecap("manual");
+      }
       const shell = shellDraftOf(text);
       if (shell.type !== "chat") {
         if (attachments?.length) throw new NotSentError("Remove attachments before running a shell command.");

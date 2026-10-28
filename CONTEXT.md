@@ -93,3 +93,12 @@ A workflow file in a project's `.pi/prompts` folder. Only that project has it.
 
 **Global workflow**:
 A workflow file in Forgerie's agent `prompts` folder. Every project has it. A project workflow with the same name replaces it in that project.
+
+
+## Recaps
+
+**Recap**:
+A saved, display-only catch-up in a session's transcript, titled **While you were
+away**. It summarizes recent visible exchanges. Its **Needs you** row reads live
+session obligations; it is not part of the saved summary or the model context.
+_Avoid_: Reply, compaction summary

@@ -1,3 +1,6 @@
+import { RecapEntry } from "./recap/RecapEntry";
+import { RecapRequest } from "./recap/RecapRequest";
+import { recapNeeds, type RecapArtifact } from "./recap/recapModel";
 import { TerminalIcon } from "lucide-react";
 import { BadgeButton } from "./ui/BadgeButton";
 import { createSessionEntry, type SessionEntry } from "./sessionRegistry";
@@ -401,7 +404,10 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     : <WorkflowEntryView key={item.id} entry={item.entry} run={runs.find((run) => run.id === item.entry.runId)} deciding={deciding === `${item.entry.runId}/${item.entry.stage}`}
       onDecide={(decision, note) => workflows.decide(item.entry.runId, item.entry.stage, decision, note)}
       onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows, proposalView, gatedView]);
+  const needsForRecap = recapNeeds({ ask: state.ask, waiting, records, children: children.children, runs });
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
+    const recap = (custom as Partial<RecapArtifact> | undefined)?.recap;
+    if (recap !== undefined) return <RecapEntry data={recap} needs={needsForRecap} />;
     const flow = (custom as Partial<WorkflowEntryArtifact> | undefined)?.workflowEntry;
     // A proposal held in the ledge keeps one line here, which opens to its overview; Show in chat brings it into view.
     if (flow?.kind === "proposal") return ledgeKeys.has(`p:${flow.proposalId}`)
@@ -436,7 +442,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, ledgeKeys, proposalView, gatedView]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, ledgeKeys, proposalView, gatedView, needsForRecap]);
   // Backlog suggestions: cards in the thread and the header's list read the server's records, never the transcript alone.
   const look = suggestionLinks?.look ?? NO_LOOK;
   const openSuggestionSession = suggestionLinks?.openSession;
@@ -637,7 +643,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           : visible ? <SessionMenu info={worktree && worktrees && worktree.state.kind === "active" ? worktree : undefined} busy={busy} onCommand={setWorktreeCommand} commands={sessionCommands} /> : null}
       </>}>
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
-      <Thread earlier={state.earlier} followTail={!state.transcript.isRunning && state.connection.type !== "loading"} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact} toolArtifact={toolArtifact}
+      <Thread tail={<RecapRequest state={state.recap ?? { kind: "idle" }} />} earlier={state.earlier} followTail={!state.transcript.isRunning && state.connection.type !== "loading"} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact} toolArtifact={toolArtifact}
         reveal={reveal}
         ledge={readOnly ? undefined : { count: ledgeProposals.length, noun: proposalNoun(ledgeProposals.length), keys: ledgeProposals.map((proposal) => proposal.key),
           content: ledgeProposals.length === 0 ? null : <ProposalLedge proposals={ledgeProposals} actions={{

@@ -7,6 +7,8 @@ import { useThreadMessages } from "../useThreadMessages";
 import { HeaderButton } from "./HeaderButton";
 import { SessionFrame } from "./SessionFrame";
 import { Thread } from "./Thread";
+import type { SystemArtifactView } from "./Messages";
+import type { ReactNode } from "react";
 
 export const name = "Thread";
 export const note = "The conversation with earlier history paged in above it: available, loading, failed with retry, and the start of the chat";
@@ -72,7 +74,9 @@ function streamedReply(id: string, paragraphs: number): TranscriptMessage {
  * identity, older pages arrive above them, and `onLoadEarlier` settles only
  * after the prepend is drawn. Sending a message streams a reply.
  */
-function Scenario({ title, first, earlier: start, older, hits }: {
+function Scenario({ title, first, earlier: start, older, hits, systemArtifact, tail }: {
+  systemArtifact?: SystemArtifactView;
+  tail?: ReactNode;
   title: string;
   /** Message ids a search would step through; the header's action reveals the next one, as a search does. */
   hits?: readonly string[] | undefined;
@@ -118,7 +122,7 @@ function Scenario({ title, first, earlier: start, older, hits }: {
   const reveal = hits && hit !== undefined ? { messageId: hits[hit % hits.length]!, key: String(hit) } : undefined;
   return <AssistantRuntimeProvider runtime={runtime}>
     <SessionFrame name={title} actions={hits && <HeaderButton label="Next search hit" onPress={() => setHit((current) => (current ?? -1) + 1)} />}>
-      <Thread earlier={earlier} reveal={reveal} />
+      <Thread systemArtifact={systemArtifact} tail={tail} earlier={earlier} reveal={reveal} />
     </SessionFrame>
   </AssistantRuntimeProvider>;
 }
@@ -154,4 +158,9 @@ export function NoPaging() {
 export function Paging() {
   return <Scenario title="Huge fixture" first={fixturePage(FIXTURE_TURNS)} earlier={{ type: "available" }} older={fixtureOlder}
     hits={["user-1499", "user-1484", "user-1490"]} />;
+}
+
+/** Shared production-thread fixture for feature parts; no live stores or network. */
+export function threadScenario(props: { title: string; first: readonly TranscriptMessage[]; systemArtifact?: SystemArtifactView; tail?: ReactNode }) {
+  return <Scenario {...props} />;
 }

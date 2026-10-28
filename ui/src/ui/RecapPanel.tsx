@@ -1,6 +1,6 @@
 import { CheckIcon, CircleIcon, HandIcon } from "lucide-react";
 import { MarkdownFragment } from "./MarkdownFragment";
-import { parseRecap } from "./markdown/richBlockSyntax";
+import { parseRecap, type Recap } from "./markdown/richBlockSyntax";
 import "./RecapPanel.css";
 
 type Labels = { title: string; needs: string; goal: string; done: string; left: string; next: string; nothingNeeded: string };
@@ -12,12 +12,13 @@ const LABELS: Labels = { title: "Where we are", needs: "Needs you", goal: "Goal"
  * whichever line the writer put it on. With nothing waiting, that row is
  * gone and the header says so in muted text.
  */
-export function RecapPanel({ code, labels = LABELS }: { code: string; labels?: Labels }) {
-  const { goal, done, left, needs, next } = parseRecap(code);
+export function RecapPanel({ code, recap, labels: overrides, spacing }: { labels?: Partial<Labels>; spacing?: "flush" } & ({ code: string; recap?: never } | { recap: Recap; code?: never })) {
+  const labels = { ...LABELS, ...overrides };
+  const { goal, done, left, needs, next } = recap ?? parseRecap(code);
   if (goal === "" && done.length === 0 && left.length === 0 && needs === "" && next === "") return null;
   const summary = [done.length > 0 ? `${done.length} ${labels.done.toLowerCase()}` : "", left.length > 0 ? `${left.length} ${labels.left.toLowerCase()}` : "",
     needs === "" ? labels.nothingNeeded : ""].filter((part) => part !== "").join(", ");
-  return <section className="recap-panel" aria-label={labels.title}>
+  return <section className="recap-panel" data-spacing={spacing} aria-label={labels.title}>
     <header className="recap-panel-head"><div className="recap-panel-title">{labels.title}</div><div className="recap-panel-summary">{summary}</div></header>
     {needs !== "" && <div className="recap-panel-needs" role="note">
       <span className="recap-panel-needs-label"><HandIcon className="recap-panel-needs-icon" aria-hidden="true" />{labels.needs}</span>
