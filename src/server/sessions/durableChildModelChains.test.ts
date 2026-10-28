@@ -132,7 +132,7 @@ it("keeps the 30 second / 2 minute / 5 minute transient schedule for a chain of 
 });
 
 it("uses the old retry budget on the earliest cooling model, then reports its real error", async () => {
-  const run = await fixture({ b: ["billing exhausted", "billing exhausted", "billing exhausted: final error"] });
+  const run = await fixture({ b: ["billing limit exhausted", "billing limit exhausted", "billing limit exhausted: final error"] });
   await run.cooldowns().mark("faux/a", 9_000_000, "quota A"); await run.cooldowns().mark("faux/b", 8_000_000, "quota B");
   await run.spawn(); let at = 1_000_000;
   for (const [index, delay] of [30_000, 120_000, 300_000].entries()) {
@@ -141,7 +141,7 @@ it("uses the old retry budget on the earliest cooling model, then reports its re
     expect(run.calls).toHaveLength(index);
     await run.restart(at);
   }
-  await vi.waitFor(() => { expect(run.reports[0]).toContain("billing exhausted: final error"); });
+  await vi.waitFor(() => { expect(run.reports[0]).toContain("billing limit exhausted: final error"); });
   expect(run.calls.map((call) => call.model)).toEqual(["b", "b", "b"]);
   expect(run.calls[0]?.content).toContain("Original task");
   expect(run.warnings).toEqual([]);
@@ -174,14 +174,14 @@ it("rereads edited chain entries before a switch", async () => {
 });
 
 it("exhausts all failed models with the old finite budget and reports the last real failure", async () => {
-  const run = await fixture({ a: ["quota exceeded"], b: ["billing exhausted", "billing exhausted", "billing exhausted", "billing exhausted: final error"] });
+  const run = await fixture({ a: ["quota exceeded"], b: ["billing limit exhausted", "billing limit exhausted", "billing limit exhausted", "billing limit exhausted: final error"] });
   await run.spawn(); let at = 1_000_000;
   for (const [index, delay] of [30_000, 120_000, 300_000].entries()) {
     at += delay;
     await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: index + 1, until: at }); });
     await run.restart(at);
   }
-  await vi.waitFor(() => { expect(run.reports[0]).toContain("billing exhausted: final error"); });
+  await vi.waitFor(() => { expect(run.reports[0]).toContain("billing limit exhausted: final error"); });
   expect(run.calls.map((call) => call.model)).toEqual(["a", "b", "b", "b", "b"]);
   expect(run.reports).toHaveLength(1); expect(run.warnings).toEqual([]);
 });

@@ -3,7 +3,7 @@ import { childModelCooldown, childModelResetTime, classifyChildModelError, planC
 
 describe("child model failures", () => {
   it.each([
-    "insufficient_quota 503", "quota exceeded 429", "billing exhausted", "out of credits", "enforced_spend_limit_reached", "usage limit reached",
+    "insufficient_quota 503", "quota exceeded 429", "billing limit exhausted", "out of credits", "enforced_spend_limit_reached", "usage limit reached",
     "You have hit your ChatGPT usage limit (plus plan).", "usage_limit_reached", "You have hit your ChatGPT usage limit. Try again in ~17 min.", "Server requested 120s retry delay (max: 60s)",
     "Model old/gone is not available", "model not found", "model_not_found", "The model does not exist", "unknown model: old", "Invalid API key", "Invalid credentials", "Incorrect API key provided",
   ])("switches now for %s", (text) => { expect(classifyChildModelError(text)).toBe("switch-now"); });
@@ -17,7 +17,7 @@ describe("child model failures", () => {
     expect(childModelResetTime("Retry-After: Wed, 21 Oct 2015 07:28:00 GMT", 1000)).toBe(Date.parse("2015-10-21T07:28:00Z"));
     expect(childModelResetTime("Retry-After: nonsense", 1000)).toBeUndefined();
     expect(childModelCooldown("429", 1000)).toBe(301000);
-    expect(childModelCooldown("billing", 1000)).toBe(3601000);
+    expect(childModelCooldown("billing error", 1000)).toBe(3601000);
     expect(childModelCooldown("too many tokens", 1000)).toBeUndefined();
   });
   it("reads the missing model from Durable's terminal task error", () => {
@@ -48,7 +48,7 @@ describe("single-model legacy compatibility", () => {
   it.each([
     "HTTP 429. Try again in ~17 min.", "overloaded; Server requested 120s retry delay (max: 60s)",
     "HTTP 503 unavailable", "WebSocket closed", "auth_unavailable", "insufficient_quota 503", "quota exceeded 429",
-    "billing exhausted 503", "Invalid API key 429", "Context window limit overloaded", "too many tokens 429",
+    "billing limit exhausted 503", "Invalid API key 429", "Context window limit overloaded", "too many tokens 429",
     "unexpected response", "Try again in ~17 min.", "Server requested 120s retry delay (max: 60s)",
     "Invalid request: expected at least 500 tokens", "Invalid request: file /models/500/config.json",
     "Invalid request: tool rebilling_report is not defined", "enforced_spend_limit_reached 429",
@@ -79,7 +79,7 @@ describe("multi-model error wording", () => {
     // Provider/SDK messages: Anthropic credit error, OpenAI codes, and pi-ai Codex/retry messages.
     "Your credit balance is too low to access the Anthropic API",
     '{"error":{"type":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}',
-    "billing_hard_limit", "enforced_spend_limit_reached", "quota exceeded",
+    "billing_hard_limit_reached", "enforced_spend_limit_reached", "quota exceeded",
     "You have hit your ChatGPT usage limit (plus plan). Try again in ~17 min.",
     "Server requested 120s retry delay (max: 60s). HTTP 429 Too Many Requests",
   ])("switches for real quota/billing/reset wording: %s", (error) => { expect(classifyChildModelError(error)).toBe("switch-now"); });
@@ -88,4 +88,9 @@ describe("multi-model error wording", () => {
     "HTTP 529", "rate_limit_exceeded", "HTTP 500", "status 503", "status code: 502", '"status": 503',
     "500 Internal Server Error", "error 429", "429 Too Many Requests", "request failed (429)", "HTTP/1.1 503 Service Unavailable",
   ])("waits for provider overload or status wording: %s", (error) => { expect(classifyChildModelError(error)).toBe("wait-then-switch"); });
+});
+
+describe("billing failure context", () => {
+  it.each(["tool billing is not defined", "file /billing/schema.json not found"])("does not treat an ordinary identifier as billing failure: %s", (error) => { expect(classifyChildModelError(error)).toBe("fatal"); });
+  it.each(["billing_hard_limit_reached", "billing issue", "billing error", "billing problem", "billing details", "billing limit", "check your billing", "check your plan and billing", "credit balance is too low", "insufficient_quota", "enforced_spend_limit_reached", "quota exceeded", "usage limit", "payment required", "HTTP 402", "status 402", "error 402", "(402)", "402 Payment Required"])("switches for a billing failure phrase/code: %s", (error) => { expect(classifyChildModelError(error)).toBe("switch-now"); });
 });
