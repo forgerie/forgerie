@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 /**
  * System hook: a menu under a header button. A press outside it or Escape closes it.
  * A menu drawn elsewhere, such as at window level, passes its element so a press on it counts as inside.
+ * Escape pressed with focus in the menu or on its button gives focus back to the button (the anchor's
+ * `aria-haspopup` element), since the closing menu would take focus with it. A press outside leaves focus where it landed.
  */
 export function useMenu(detached?: RefObject<HTMLElement | null>) {
   const [open, setOpen] = useState(false);
@@ -12,7 +14,13 @@ export function useMenu(detached?: RefObject<HTMLElement | null>) {
     const onDown = (event: Event) => {
       if (event.target instanceof Node && !anchor.current?.contains(event.target) && !detached?.current?.contains(event.target)) setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const focused = document.activeElement;
+      const inside = focused instanceof Node && (anchor.current?.contains(focused) === true || detached?.current?.contains(focused) === true);
+      setOpen(false);
+      if (inside) anchor.current?.querySelector<HTMLElement>("[aria-haspopup]")?.focus({ preventScroll: true });
+    };
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };

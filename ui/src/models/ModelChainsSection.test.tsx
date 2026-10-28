@@ -212,4 +212,16 @@ describe("Model chains", () => {
     const remove = [...document.querySelectorAll<HTMLButtonElement>("[role='menuitem']")].find((node) => node.textContent === "Remove")!;
     expect(remove.disabled).toBe(true);
   });
+
+  it("gives focus back to an entry's menu button when Escape closes the menu", async () => {
+    await render({ start: CHAINS });
+    const trigger = byLabel("Move or remove GPT-5");
+    await click(trigger);
+    const item = document.querySelector<HTMLButtonElement>("[role='menuitem']:not(:disabled)")!;
+    expect(document.activeElement).toBe(item);
+    await act(async () => { item.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    await settle();
+    expect(document.querySelector("[role='menu']")).toBeNull();
+    expect(document.activeElement).toBe(byLabel("Move or remove GPT-5"));
+  });
 });

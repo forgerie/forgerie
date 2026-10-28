@@ -59,3 +59,28 @@ it("stays 4px inside the window's start", async () => {
 it("stays 4px inside the window's end", async () => {
   expect((await open(rect(330, 40, 32, 32), { width: 208, height: 180 }, { width: 352, height: 783 }, "start")).left).toBe(352 - 208 - 4);
 });
+
+it.each(["window", "inline"] as const)("gives focus back to its button when Escape closes a %s menu", async (layer) => {
+  await act(async () => root.render(<MenuButton label="Commands" layer={layer} commands={[{ label: "Run now…", onSelect: () => undefined }]} />));
+  const trigger = host.querySelector<HTMLButtonElement>("button")!;
+  await act(async () => trigger.click());
+  const item = document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+  expect(document.activeElement).toBe(item);
+  await act(async () => { item.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+});
+
+it("leaves focus where a press outside put it", async () => {
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  await act(async () => root.render(<MenuButton label="Commands" layer="window" commands={[{ label: "Run now…", onSelect: () => undefined }]} />));
+  await act(async () => host.querySelector<HTMLButtonElement>("button")!.click());
+  await act(async () => { outside.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); outside.focus(); });
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(outside);
+  // Escape with focus outside a closed menu moves nothing.
+  await act(async () => { outside.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect(document.activeElement).toBe(outside);
+  outside.remove();
+});
