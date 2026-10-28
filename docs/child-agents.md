@@ -96,6 +96,33 @@ Forgerie's reviewer reads committed ranges, runs read-only commands and requeste
 
 Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an optional `:thinking` suffix), `thinking`, `tools`, `skills`, `skillPath`, `inheritSkills`, `inheritProjectContext`, and `disabled`. A file that lists `fallbackModels` is skipped. Other keys are ignored.
 
+### Model chains
+
+Define ordered lists once in the active [Forgerie config](config.md), not in each agent file:
+
+```json
+{
+  "modelChains": {
+    "worker": ["anthropic/claude-opus-4:high", "openai/gpt-5", "openai/gpt-5-mini:low"]
+  }
+}
+```
+
+An agent file can then select the chain:
+
+```markdown
+---
+name: worker
+model: worker:medium
+tools: read, write, edit, bash
+---
+Complete the assigned task.
+```
+
+`model` in an agent file, the spawn argument, and workflow worker declarations each accept a chain name or `provider/model-id[:thinking]`. A single model is a chain of one. Precedence stays **workflow declaration > spawn argument > agent file > session model**. A workflow's explicit `null` restores the agent-file default and ignores the spawn argument. A chain-reference suffix applies only to entries that have no thinking level of their own. In this example, `openai/gpt-5` gets `medium`; the other two entries keep `high` and `low`.
+
+Names must match `[a-z0-9][a-z0-9-]*`. Every chain needs at least one valid model spec. An invalid map logs a warning and disables all chains, without stopping the daemon. Unknown chain names refuse the spawn and list the known names. Forgerie reads the config again at each spawn or switch. Config edits do not change a model that is still running. This phase has no Settings editor for chains. The old `fallbackModels` agent-file key stays unsupported: files that contain it are skipped.
+
 Agent files use the pi-subagents format, and older files name pi-subagents tools. `src/server/sessions/durableChildRuntime.ts` translates each one, in one place, and never drops a capability silently:
 
 | Agent file names | A Durable child gets |
@@ -112,17 +139,32 @@ Without `tools`, a child gets every child-native tool, not the parent's extensio
 
 Tools registered after the session opens become available to new spawns and parent sends without a reload. Shared tools resolve from the parent's current registry by name at call time, including after `/reload`. Each child call has its own ID. Shared calls are replay-unsafe: an interrupted call is reported, not rerun automatically. A tool removed or excluded after spawn returns an explicit unavailable error.
 
-Each `send` from the parent reads the child's agent file again and applies the current tools, skills, and instructions before the message arrives. A child spawned under an older Forgerie, or before its file changed, catches up on its next task. The model stays as it was spawned, because a workflow or the parent may have chosen it. If the agent file is gone, the child keeps its spawn-time tools and the send result says so. A message the user types into a child does not refresh it.
+Each `send` from the parent reads the child's agent file again and applies the current tools, skills, and instructions before the message arrives. A child spawned under an older Forgerie, or before its file changed, catches up on its next task. The model stays as last used, unless a workflow declares another model for the next turn. A busy turn keeps its model. If the agent file is gone, the child keeps its spawn-time tools and the send result says so. A message the user types into a child does not refresh it.
 
 ## Provider failures
 
-After Durable's own generation retries end, Forgerie retries transient child `model_error` failures at most three more times: after 30 seconds, 2 minutes, and 5 minutes. Transient errors include overloaded providers, 5xx, `auth_unavailable`, closed WebSockets, disconnected streams, rate limits, and transport failures. Invalid credentials, quota or billing limits, and context limits are not retried. Other failures reach the parent at once.
+After the provider SDK and Durable's own generation retries end, Forgerie classifies each child `model_error`. A model missing from Durable's catalog settles as `no_model` instead; Forgerie reads its generation error receipt and applies the same immediate fallback policy:
+
+| Failure | Chain with two or more entries | Single model / chain of one |
+| --- | --- | --- |
+| Rate limit, 429, overloaded, 529, 5xx, `auth_unavailable`, closed WebSocket, disconnected stream, or transport error | Wait once for 60 seconds and retry the same model. A second failure switches to the next available entry. | Retry after 30 seconds, 2 minutes, and 5 minutes, then report. |
+| Quota, billing, insufficient credits, `insufficient_quota`, spend limit, usage limit, ChatGPT “Try again in ~N min”, requested retry delay above 60 seconds, model missing, unknown model, invalid key or credentials | Switch at once. | Report at once. |
+| Context window, too many tokens, or any other error | Report at once. | Report at once. |
+| All remaining entries are cooling or have failed | Use the 30-second / 2-minute / 5-minute budget on the entry whose cooldown ends first, then report the actual error. | Keep the existing transient-only policy above. |
+
+A running child moves forward through the chain; it does not switch back when an earlier model recovers. To keep that rule, exhaustion considers the current and later entries only. A new spawn can start at the beginning again. If every entry is cooling at spawn, it selects the earliest reset and waits for the first 30-second budget deadline before sending the original task. The budget probes that selected model even if its cooldown has not ended; it is a finite recovery budget, not a promise to wait until billing or quota resets.
+
+Cooldowns are shared by all sessions in the daemon and saved in `$PI_WEB_DATA_DIR/model-cooldowns.json`. Keys are `provider/model`, without thinking levels. Forgerie reads reset times from ChatGPT's minutes, “Server requested Ns retry delay”, and numeric or HTTP-date `Retry-After` text. Without a reset time, rate/transport failures cool for 5 minutes; immediate-switch failures cool for 60 minutes. Repeated failures can extend a cooldown; a shorter reset does not shorten an existing cooldown. New spawns and switches skip cooling entries. Fatal errors do not cool models. An unreadable registry logs a warning and starts without cooldowns. A cooldown write failure is reported in daemon diagnostics but does not replace the child's actual provider outcome.
 
 Spawn and send inputs can belong to the same child run. That failed run has one durable retry owner, claimed in the parent's Children document. Other reporters wait for that owner, keep the same final outcome, and suppress their duplicate report. A steer that joins a retry keeps its existing owner and remaining budget. Stop cancels the owner and its observers. If the owner reporter faults while its input is still queued or placed, observers keep waiting for that input to settle. Both records keep the child's actual final outcome, not the earlier provider error.
 
-Each retry submits “Continue where you stopped; the last request failed with: <detail>” with its own durable request ID. The reporter saves `{phase: "retry", attempt, error, until}` and sleeps with Durable's clock. Restart keeps the original deadline and does not repeat an admitted retry. `/children` exposes the pending retry as `{attempt, max: 3, error, until}`. The child remains busy during backoff. Stop cancels the pending retry too. When the retry budget ends, the parent report includes the actual error text, not just `model_error`. A failed input is not a dead child: when the child still runs other work, such as a later message, the report adds that the child is still running and that the parent must not start a replacement for the same files. The shared-writer refusal also says that a worktree does not protect files outside it.
+Each retry or switch submits “Continue where you stopped; the last request failed with: <detail>” with a new durable request ID. The reporter checkpoints its progress and absolute deadline and sleeps with Durable's clock. The model change, fallback record, and delivery checkpoint commit together. Restart keeps the deadline and does not repeat an admitted switch or retry. A switch waits for any already-running turn before changing its model. `/children` exposes the latest switch as `fallback: {from, to, reason}` and a pending wait as `retry: {attempt, max: 3, error, until}`. During a chain's one-minute wait, `attempt` is 1; during exhaustion, it counts the three budget waits. The child remains busy during backoff, and Stop cancels it.
 
-A retry is a new child run in run history, not another turn of the failed run. Each retry can also incur Durable's normal generation retries and model costs. The schedule is reporter backoff, not an upper bound on total elapsed time.
+Run history stores `fallbacks` on the resumed run. The final parent report names the fallback, for example `(ran on openai/gpt-5 after anthropic/claude-opus-4: usage limit)`. When the budget ends, it includes the actual error text, not just `model_error`. A failed input is not a dead child: if it still runs other work, the report warns the parent not to start a replacement for the same files.
+
+**Costs and limits:** models can have different context windows. A fallback may reject a transcript that fit the first model; that context error is fatal. Switching can lose the provider's prompt cache, increase token costs, change tool behavior, and change answer quality. Error classification and reset parsing depend on provider error text and can break when that text changes. A shared model cooldown also applies to sessions with a different credential for the same provider/model. No provider health check proves that the next entry can run.
+
+A retry is a new child run in run history, not another turn of the failed run. Each request can also incur Durable's normal generation retries and model costs. The pi-ai SDK can wait for Retry-After delays up to 60 seconds, and Durable normally retries three times from a 2-second base before Forgerie sees an error. The table is reporter cadence, not an upper bound on elapsed time.
 
 ## Restarts
 
@@ -192,6 +234,7 @@ interface DurableChildSummary {
   costUsd: number | null; // Cumulative committed estimate for this conversation; null means unavailable.
   lastTool: { name: string; at: number | null } | null; // Bounded name only; at is Unix milliseconds.
   retry?: {attempt: number; max: 3; error: string; until: number}; // Pending backoff; until is Unix milliseconds.
+  fallback?: {from: string; to: string; reason: string}; // Latest committed model switch.
   createdAt: number; // Unix milliseconds.
   questions: {questionId: string; question: string; askedAt: number}[];
   worktree?: {
@@ -307,6 +350,7 @@ interface ChildRun {
     agentFile?: {path: string; sha256: string};
   };
   model: {provider: string; modelId: string} | null;
+  fallbacks?: {from: string; to: string; reason: string}[]; // Switches used before this resumed run.
   startedAt: number; // Unix milliseconds, from initial input placement.
   state:
     | {kind: "running"}
@@ -349,7 +393,7 @@ Server slices record `gated`, `auto-stop`, and `issue` through `logDecision(tx, 
 
 `parentAnswers.test.ts` checks parent answers, all four escalation kinds, busy-parent follow-ups, waiting and flagged counts, restart receipts, and one correction to live children or their parents. `PARENT_ANSWERS_REAL=1 ./scripts/parent-answers-real.ts` uses real parent and child models in an isolated temporary profile. It checks that the parent answers from its task, the child finishes, one decision is recorded, and no user action is needed. It removes its temporary workspace and copied credentials on exit. Model calls incur costs.
 
-`durableChildAutonomy.test.ts` uses real Git worktrees and Durable journals. It checks missing-tool refusal and override, isolation defaults, shared-writer refusal, retry deadlines through journal reopen, exhausted and non-transient errors, Stop during backoff, duplicate/aborted delivery, and old record parsing. `CHILD_RETRY_REAL=1 ./scripts/child-retry-real.ts` uses real parent and child models with a configured provider that fails once with “overloaded”. It verifies the 30-second reporter wait, `/children` retry state, and the final parent report. Its temporary profile disables Durable's inner retries so that one provider failure exercises the reporter. It removes copied model credentials on exit and does not open the live daemon.
+`durableChildModelChains.test.ts` uses the production reporter, a faux provider, a persistent cooldown registry, run records, and journal reopens with Durable's clock. It checks quota fallback, one 60-second rate-limit wait, single-model and exhausted-chain budgets, config rereads, and final fallback reports. `modelChains.test.ts`, `childModelFailures.test.ts`, and `modelCooldownRegistry.test.ts` cover validation, resolution, classification, reset parsing, and persistence. `durableChildAutonomy.test.ts` uses real Git worktrees and Durable journals. It checks missing-tool refusal and override, isolation defaults, shared-writer refusal, retry deadlines through journal reopen, exhausted and non-transient errors, Stop during backoff, duplicate/aborted delivery, and old record parsing. `CHILD_RETRY_REAL=1 ./scripts/child-retry-real.ts` uses real parent and child models with a configured provider that fails once with “overloaded”. It verifies the 30-second reporter wait, `/children` retry state, and the final parent report. Its temporary profile disables Durable's inner retries so that one provider failure exercises the reporter. It removes copied model credentials on exit and does not open the live daemon.
 
 `durableChildSessionTools.test.ts` uses the production Durable session with registered extension tools. It checks named-tool selection, exclusions, missing-tool reports, validation, extension hooks, separate call IDs, late registration, and replacement registries after reload.
 
