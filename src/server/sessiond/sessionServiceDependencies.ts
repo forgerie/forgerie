@@ -53,6 +53,7 @@ export interface SessionServiceDependencyInput {
   extensionDialogsTimeoutMs: number;
   /** Reads the `provider/model-id` that writes session titles; `undefined` uses each session's model. */
   sessionTitleModel?: () => string | undefined;
+  autoRecap?: () => boolean;
 }
 
 /**
@@ -68,6 +69,7 @@ export interface SessionServiceDependencyInput {
 export function sessionServiceDependencies(input: SessionServiceDependencyInput): PiSessionServiceDependencies {
   return {
     modelRuntime: input.modelRuntime,
+    ...(input.autoRecap === undefined ? {} : { autoRecap: input.autoRecap }),
     durableReader: input.durableReader,
     agentDir: input.agentDir,
     worktreeBackupDirectory: input.worktreeBackupDirectory,

@@ -1,3 +1,7 @@
+import { RECAP_DELAY_MS, type RecapResult, type RecapTrigger } from "../../shared/sessionRecap.js";
+import { SessionRecapScheduler, canWriteRecap } from "./sessionRecapScheduler.js";
+import { buildRecapPrompt, generateSessionRecap } from "./sessionRecapGenerator.js";
+import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
 import { DurableDecisionWriter, issueDecision } from "./durableDecisionWriter.js";
 import { durableSessionPaths } from "./durableSessionJournal.js";
 import { readDurableSessionLocator } from "./durableSessionLocator.js";
@@ -1092,6 +1096,7 @@ export interface PiSessionServiceDependencies {
   notificationStore?: SessionNotificationStore;
   /** Durable daemon-owned unread state; defaults to an in-memory store in tests. */
   unreadStore?: SessionUnreadStore;
+  autoRecap?: () => boolean;
   /** Initial retry delay for durable unread publication failures. */
   unreadPublicationRetryDelayMs?: number;
   /** Maximum wait for Pi to accept or reject a prompt before delivery becomes ambiguous. */
@@ -1202,6 +1207,8 @@ export class PiSessionService implements SessionRouteService {
   private readonly notificationStore: SessionNotificationStore;
   private readonly notificationGenerationBySession = new WeakMap<PiAgentSession, SessionNotificationGeneration>();
   private readonly unreadStore: SessionUnreadStore;
+  private readonly recaps: SessionRecapScheduler;
+  private readonly autoRecap: () => boolean;
   private readonly sessionAsks: SessionAsks;
   private readonly attentionHints: AttentionHints;
   private readonly attentionSessions = new WeakMap<PiAgentSession, AttentionSession>();
@@ -1257,6 +1264,12 @@ export class PiSessionService implements SessionRouteService {
     this.now = deps.now ?? (() => new Date());
     this.notificationStore = deps.notificationStore ?? new SessionNotificationStore();
     this.unreadStore = deps.unreadStore ?? new SessionUnreadStore();
+    this.autoRecap = deps.autoRecap ?? (() => true);
+    this.recaps = new SessionRecapScheduler((ref, trigger, signal) => this.writeRecap(ref, trigger, signal).catch(() => {
+      this.logger.info({ sessionId: ref.id, failureKind: "exception" }, "session recap request failed");
+      return { kind: "failed", message: "Could not write a recap. Try /recap again." };
+    }), () => this.now().getTime());
+    this.recaps.rearm(this.unreadStore.catalogSnapshot().sessions);
     this.sessionAsks = deps.sessionAsks ?? new SessionAsks({
       readResponse: (id) => {
         const session = this.active.get(id)?.runtime.session ?? this.startupSessions.get(id);
@@ -1390,6 +1403,57 @@ export class PiSessionService implements SessionRouteService {
     return this.unreadStore.durableCatalogSnapshot();
   }
 
+  private recapUnread(ref: PiSessionRef) {
+    return this.unreadStore.catalogSnapshot().sessions.find(item => item.sessionId === ref.id && item.cwd === ref.cwd);
+  }
+
+  private recapStopped(signal: AbortSignal): boolean { return this.stopping || signal.aborted; }
+
+  recap(ref: PiSessionRef, trigger: "open" | "manual"): Promise<RecapResult> {
+    return this.recaps.request({ id: ref.id, cwd: canonicalizeStoredCwd(ref.cwd) }, trigger);
+  }
+
+  private async writeRecap(ref: PiSessionRef, trigger: RecapTrigger, signal: AbortSignal): Promise<RecapResult> {
+    if (this.stopping || signal.aborted) return { kind: "skipped" };
+    const unread = this.recapUnread(ref);
+    if (trigger !== "manual" && (!this.autoRecap() || unread === undefined)) return { kind: "skipped" };
+    if (trigger === "automatic" && unread !== undefined && this.now().getTime() < Date.parse(unread.completedAt) + RECAP_DELAY_MS) return { kind: "skipped" };
+    if (await this.archiveStore.isArchived(ref.id) || await this.sessionWorktrees?.store.readOnly(ref) !== undefined) return { kind: "skipped" };
+    const session = await this.getOrOpen(ref);
+    if (!(session instanceof DurableAgentSession)) return { kind: "skipped" };
+    const handle = session.journal.handle;
+    const trackedChild = await verifiedTrackedSubsessionLink(this.sessionManager, {
+      sessionId: session.sessionId, sessionFile: session.sessionFile, sessionManager: session.sessionManager, cwd: ref.cwd,
+    });
+    const history = await readRecapHistory(handle);
+    if (trigger !== "manual" && this.recapUnread(ref)?.completionOrder !== unread?.completionOrder) return { kind: "skipped" };
+    if (trigger === "manual" && !history.hasExchange) return { kind: "failed", message: "A recap needs at least one exchange." };
+    if (trigger === "manual" && this.hasActiveWork(session)) return { kind: "failed", message: "Wait for this run to finish, then try /recap again." };
+    if (!canWriteRecap({ enabled: this.autoRecap(), unread: unread !== undefined, idle: !this.hasActiveWork(session), writable: true,
+      child: trackedChild !== undefined || history.child, completedTurns: history.completedTurns, newTurns: history.newTurns,
+      hasRecap: history.lastRecap !== undefined, covered: history.lastRecap?.coversThroughEntryId === history.newestEntryId,
+      hasExchange: history.hasExchange }, trigger)) return { kind: "skipped" };
+    const input = buildRecapPrompt(history.messages), model = this.titleModelFor(session);
+    if (input === undefined || this.recapStopped(signal)) return { kind: "skipped" };
+    if (model === undefined) return { kind: "failed", message: "Choose a model before writing a recap." };
+    const result = await generateSessionRecap(session.agent.streamFunction, model, input.prompt, signal, failureKind => {
+      this.logger.info({ sessionId: ref.id, failureKind }, "session recap generation failed");
+    });
+    const fresh = (trigger === "manual" || this.autoRecap() && this.recapUnread(ref)?.completionOrder === unread?.completionOrder)
+      && !this.recapStopped(signal) && this.activeForRef(ref)?.runtime.session === session
+      && !this.hasActiveWork(session) && !await this.archiveStore.isArchived(ref.id)
+      && await this.sessionWorktrees?.store.readOnly(ref) === undefined;
+    const data = result.content === undefined || !fresh ? undefined : { ...result.content, trigger, model: `${model.provider}/${model.id}`,
+      messageCount: input.messageCount, coversThroughEntryId: history.newestEntryId,
+      runEndedAt: unread?.completedAt ?? this.now().toISOString(), generatedAt: this.now().toISOString() };
+    const written = await commitSessionRecap(handle, history.leafId, data, result.usage, `${model.provider}/${model.id}`);
+    await session.journal.project();
+    this.publishStatus(session);
+    if (!fresh) return { kind: "skipped" };
+    if (result.content === undefined) return { kind: "failed", message: "Could not write a recap. Try /recap again." };
+    return { kind: written ? "written" : "skipped" };
+  }
+
   notificationInbox(ref: PiSessionRef): SessionNotificationInboxSnapshot {
     return this.notificationStore.inboxSnapshot(ref.id, canonicalizeStoredCwd(ref.cwd));
   }
@@ -1472,6 +1536,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async dispose(): Promise<void> {
+    this.recaps.dispose();
     this.attentionHints.dispose();
     this.stopping = true;
     await this.durableReader?.close();
@@ -3309,6 +3374,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async prompt(ref: PiSessionRef, text: unknown, streamingBehavior?: unknown, attachments?: unknown, options?: PromptRequestOptions & { echoUserMessage?: boolean; handoffContinuation?: boolean }): Promise<void> {
+    this.recaps.cancel({ id: ref.id, cwd: canonicalizeStoredCwd(ref.cwd) }, true);
     const { requestId } = promptRequestOptionsSchema.parse(options ?? {});
     const promptText = requirePromptText(text);
     // Command-forwarded prompts (e.g. /skill:*) are expanded by the agent, which
@@ -4981,6 +5047,10 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishUnreadMutations(mutations: readonly SessionUnreadMutation[]): Promise<void> {
+    for (const { event } of mutations) {
+      if (event.unread === null) this.recaps.cancel({ id: event.sessionId, cwd: event.cwd });
+      else this.recaps.schedule(event.unread);
+    }
     this.enqueueUnreadMutations(mutations);
     this.unreadPublicationFlushRequested = true;
     if (this.unreadPublication === undefined && this.unreadPublicationRetryTimer !== undefined) {

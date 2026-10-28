@@ -1,3 +1,4 @@
+import { recapRequestSchema } from "../../shared/sessionRecap.js";
 import { sessionEarlierQuerySchema, sessionOpenQuerySchema } from "../../shared/sessionOpen.js";
 import { SessionOpenError } from "./sessionOpen.js";
 import { respondToConnectionChecks } from "../realtime/connectionHealth.js";
@@ -161,6 +162,17 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
       return await sessions.acknowledgeUnread(sessionId, acknowledgement);
     } catch (error) {
       return reply.code(503).send({ error: errorMessage(error) });
+    }
+  });
+
+  app.post<{ Params: { sessionId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/recap`, async (request, reply) => {
+    const parsed = recapRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Invalid recap request" });
+    if (sessions.recap === undefined) return reply.code(501).send({ error: "Recaps are unavailable" });
+    try {
+      return await sessions.recap({ id: request.params.sessionId, cwd: normalizeRequestCwd(parsed.data.cwd) }, parsed.data.trigger);
+    } catch {
+      return reply.code(503).send({ error: "Could not write a recap. Try /recap again." });
     }
   });
 

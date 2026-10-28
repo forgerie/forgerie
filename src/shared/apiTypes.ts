@@ -92,6 +92,8 @@ export interface PiWebConfigValues {
    * not available with credentials, the session's own model is used.
    */
   sessionTitleModel?: string;
+  /** Write catch-up recaps for unread completed sessions. Defaults to true. */
+  autoRecap?: boolean;
   /** Ordered model lists for Durable child agents. Read fresh at spawn and fallback. */
   modelChains?: ModelChains;
   /** Desired Pi-compatible agent profile and companion CLI (Pi by default). */

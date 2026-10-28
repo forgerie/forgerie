@@ -18,8 +18,9 @@ export interface LoadedPiWebConfig {
   config: PiWebConfig;
 }
 
-export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "askUser" | "codemode" | "durableChildren" | "childToolsDeny" | "agent" | "extensionDialogsTimeoutMs"> {
+export interface EffectivePiWebConfig extends Omit<PiWebConfig, "uploads" | "spawnSessions" | "askUser" | "codemode" | "durableChildren" | "childToolsDeny" | "agent" | "extensionDialogsTimeoutMs" | "autoRecap"> {
   uploads: NonNullable<PiWebConfig["uploads"]>;
+  autoRecap: boolean;
   spawnSessions: boolean;
   askUser: boolean;
   codemode: boolean;
@@ -165,6 +166,7 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
       ...(port !== undefined && port !== "" ? { port: parsePort(port, "PI_WEB_PORT") } : {}),
       ...(maxUpload !== undefined && maxUpload !== "" ? { maxUploadBytes: parseMaxUploadBytes(maxUpload, "PI_WEB_MAX_UPLOAD_BYTES") } : {}),
       uploads: effectiveUploadsConfig(loaded.config),
+      autoRecap: loaded.config.autoRecap ?? true,
       // Always resolved (on by default) so the effective config is the single
       // source of truth for the runtime state and the settings UI toggle.
       spawnSessions: spawnSessionsEnabled(env, loaded.config),
@@ -218,6 +220,7 @@ function readExistingConfigObject(path: string): Record<string, unknown> {
 
 function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
   return {
+    ...(config.autoRecap !== undefined ? { autoRecap: config.autoRecap } : {}),
     ...(config.modelChains !== undefined ? { modelChains: config.modelChains } : {}),
     ...(config.azureDevops !== undefined ? { azureDevops: config.azureDevops } : {}),
     ...(config.host !== undefined ? { host: config.host } : {}),
@@ -240,6 +243,7 @@ function parsePiWebConfig(value: Record<string, unknown>, path: string, onWarnin
   const validChains = chains !== undefined && Check(ModelChainsSchema, chains);
   if (chains !== undefined && !validChains) (onWarning ?? ((message) => { process.emitWarning(message, { code: "FORGERIE_MODEL_CHAINS" }); }))(`Invalid Forgerie config modelChains in ${path}; ignoring all model chains. Names must match [a-z0-9][a-z0-9-]* and each list must contain provider/model-id[:thinking] entries.`);
   return {
+    ...(value["autoRecap"] !== undefined ? { autoRecap: parseAutoRecap(value["autoRecap"], path) } : {}),
     ...(validChains ? { modelChains: chains } : {}),
     ...(value["azureDevops"] !== undefined ? { azureDevops: parseAzureDevopsConfig(value["azureDevops"], path) } : {}),
     ...(value["host"] !== undefined ? { host: parseString(value["host"], "host", path) } : {}),
@@ -544,3 +548,8 @@ function isNonEmptyStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string" && item !== "");
 }
 
+
+function parseAutoRecap(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`Forgerie config autoRecap must be a boolean: ${path}`);
+  return value;
+}

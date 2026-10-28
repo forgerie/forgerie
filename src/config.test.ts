@@ -415,3 +415,22 @@ describe("model chains config", () => {
     expect(warnings).toHaveLength(1); expect(warnings[0]).toContain("ignoring all model chains");
   });
 });
+
+
+describe("automatic session recaps", () => {
+  it("defaults on, persists boolean overrides, and preserves the setting during other saves", () => {
+    expect(effectivePiWebConfig(testOptions()).config.autoRecap).toBe(true);
+    savePiWebConfig({ autoRecap: false }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.autoRecap).toBe(false);
+    savePiWebConfig({ port: 9001 }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.autoRecap).toBe(false);
+    savePiWebConfig({ autoRecap: true }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.autoRecap).toBe(true);
+  });
+  it("rejects non-boolean autoRecap values", async () => {
+    for (const autoRecap of ["false", 0, null, {}]) {
+      await writeFile(configPath, JSON.stringify({ autoRecap }));
+      expect(() => loadPiWebConfig(testOptions())).toThrow("autoRecap must be a boolean");
+    }
+  });
+});

@@ -1098,3 +1098,46 @@ it("combines native state with the host compaction boundary and following prompt
     releaseReply(); releaseCompaction(); await prompting; await service.dispose();
   }
 });
+
+it("writes a recap through the real HTTP service, charges usage, and never inserts it into the model conversation", async () => {
+  const { session, provider, manager, services, directory } = await fixture();
+  let autoRecap = false;
+  const hub = new SessionEventHub();
+  const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(), autoRecap: () => autoRecap,
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This fixture keeps its facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  const app = Fastify(); await app.register(websocket); registerSessionRoutes(app, service, hub);
+  try {
+    await service.start(directory);
+    provider.setResponses([fauxAssistantMessage("Implemented, not deployed")]);
+    await session.prompt("Fix the browser path");
+    await session.journal.conversation.waitForIdle(context);
+    const ref = { id: session.sessionId, cwd: directory };
+    expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
+    const before = await session.journal.conversation.context(context);
+    const calls = provider.state.callCount;
+    const recap = { goal: "Fix the browser path", done: ["Implemented"], left: ["Not deployed"], next: null };
+    const recapReply = fauxAssistantMessage(JSON.stringify(recap));
+    recapReply.usage = { ...recapReply.usage, input: 30, output: 20, totalTokens: 50 };
+    const tokensBefore = session.journal.usage.models["faux/faux-1"]?.totalTokens ?? 0;
+    provider.setResponses([recapReply]);
+    const response = await app.inject({ method: "POST", url: `/sessions/${session.sessionId}/recap`, payload: { cwd: directory, trigger: "manual" } });
+    expect(response.statusCode).toBe(200); expect(response.json()).toEqual({ kind: "written" });
+    expect(provider.state.callCount).toBe(calls + 1);
+    expect((await session.journal.conversation.context(context)).messages).toEqual(before.messages);
+    const history = await service.messages(ref);
+    expect(history.messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { ...recap, trigger: "manual", model: "faux/faux-1", messageCount: 2 } });
+    expect(session.journal.usage.models["faux/faux-1"]?.totalTokens).toBeGreaterThan(tokensBefore);
+    autoRecap = true;
+    expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
+    for (const text of ["Validate it", "Check deployment"]) {
+      provider.setResponses([fauxAssistantMessage("Tested, not deployed")]);
+      await session.prompt(text); await session.journal.conversation.waitForIdle(context);
+    }
+    await vi.waitFor(async () => { expect((await service.unreadCatalog()).sessions).toHaveLength(1); });
+    provider.setResponses([fauxAssistantMessage(JSON.stringify({ ...recap, done: ["Implemented", "Tested"] }))]);
+    expect(await service.recap(ref, "open")).toEqual({ kind: "written" });
+    expect((await service.messages(ref)).messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { trigger: "open", done: ["Implemented", "Tested"] } });
+    expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
+  } finally { await app.close(); await service.dispose(); }
+});

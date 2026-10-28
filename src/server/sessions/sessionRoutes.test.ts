@@ -81,6 +81,16 @@ describe("session connection health", () => {
 });
 
 describe("session routes", () => {
+  it("validates recap requests and maps provider failures without exposing raw errors", async () => {
+    const calls: unknown[] = [];
+    service.recap = (ref, trigger) => { calls.push({ ref, trigger }); return Promise.resolve({ kind: "written" }); };
+    expect((await app.inject({ method: "POST", url: "/sessions/test/recap", payload: { cwd: "/workspace", trigger: "manual" } })).json()).toEqual({ kind: "written" });
+    expect(calls).toEqual([{ ref: { id: "test", cwd: resolve("/workspace") }, trigger: "manual" }]);
+    expect((await app.inject({ method: "POST", url: "/sessions/test/recap", payload: { cwd: "/workspace", trigger: "automatic" } })).statusCode).toBe(400);
+    service.recap = () => Promise.reject(new Error("secret provider response"));
+    const failed = await app.inject({ method: "POST", url: "/sessions/test/recap", payload: { cwd: "/workspace", trigger: "open" } });
+    expect(failed.statusCode).toBe(503); expect(failed.body).not.toContain("secret");
+  });
   it("serves machine listing and asks catalogs through static routes before session-id routes", async () => {
     const routeApp = Fastify({ logger: false });
     await routeApp.register(fastifyWebsocket);

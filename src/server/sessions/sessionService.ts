@@ -1,3 +1,4 @@
+import type { RecapResult } from "../../shared/sessionRecap.js";
 import type { SessionOpenHistoryPage, SessionOpenResult } from "./sessionOpen.js";
 import type { SessionOpenRequest } from "../../shared/sessionOpen.js";
 import type { StackLatencyContext } from "../../shared/stackLatency.js";
@@ -54,6 +55,7 @@ export type SessionRouteRef = ClientSessionRef;
  * handling and daemon shutdown stay on the concrete service.
  */
 export interface SessionRouteService {
+  recap?(ref: SessionRouteRef, trigger: "open" | "manual"): Promise<RecapResult>;
   list(cwd: string): Promise<ClientSession[]>;
   machineListing(): Promise<MachineSessionListingSnapshot>;
   asksCatalog(): SessionAskCatalogSnapshot | Promise<SessionAskCatalogSnapshot>;

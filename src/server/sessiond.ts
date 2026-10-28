@@ -334,6 +334,7 @@ async function createSessionDaemonRuntime() {
     pullRequestWatches: { isWatching: (id) => pullStore.isWatching(id), stop: (id, reason) => pulls.stop(id, reason) },
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     // Settings > Models writes this key while the daemon runs, so read it for each title.
+    autoRecap: () => loadPiWebConfig({ env: daemonEnvironment }).config.autoRecap ?? true,
     sessionTitleModel: () => loadPiWebConfig({ env: daemonEnvironment }).config.sessionTitleModel,
     notificationStore,
     unreadStore,
