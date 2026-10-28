@@ -39,10 +39,11 @@ export const modelPrefsSchema = z.object({
   titleModel: z.string().nullable(),
   /**
    * Forgerie's `modelChains`, in the file's order. A map the daemon would refuse is still read here, as far as it is a
-   * map of text lists, so the page can show it; `modelChainsProblem` then says why every chain is ignored.
+   * map of text lists, so the page can show it; `modelChainsProblem` then says why every chain is ignored. A server
+   * from before chains sends neither, which reads as no chains.
    */
-  modelChains: z.record(z.string(), z.array(z.string())),
-  modelChainsProblem: z.string().nullable(),
+  modelChains: z.record(z.string(), z.array(z.string())).default({}),
+  modelChainsProblem: z.string().nullable().default(null),
   /** Where the lists live, for the settings page to name. */
   favoritesPath: z.string(),
   visiblePath: z.string(),

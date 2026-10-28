@@ -1,0 +1,41 @@
+/* An ordered list inside a hairline frame. Each row: its place, a handle, the content, then its move and remove
+   buttons as one group. The group keeps its size and wraps under the content, whole, when the row is narrow; the
+   content gives way first. Nothing keys off the viewport. */
+.reorder-list { display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
+.reorder-list-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none;
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-control); }
+.reorder-list-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-1);
+  min-block-size: var(--control-size); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  background: var(--background); translate: 0 var(--reorder-offset, 0); transition: translate 150ms ease-out; }
+.reorder-list-row:first-child { border-start-start-radius: var(--radius-control); border-start-end-radius: var(--radius-control); }
+.reorder-list-row:last-child { border-end-start-radius: var(--radius-control); border-end-end-radius: var(--radius-control); }
+.reorder-list-row + .reorder-list-row { border-block-start: var(--hairline) solid var(--line); }
+/* The place is the order's whole point: tabular, in the code face, and quiet. */
+.reorder-list-place { flex: none; min-inline-size: 1.25rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text);
+  font-variant-numeric: tabular-nums; text-align: end; }
+.reorder-list-content { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); flex: 1 1 9rem; min-inline-size: 0; }
+.reorder-list-actions { display: flex; flex: none; margin-inline-start: auto; }
+/* Every button is drawn at the control size, so neighbouring targets never overlap. */
+.reorder-list-handle, .reorder-list-button { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground);
+  transition: color 150ms, background-color 150ms; }
+.reorder-list-handle { inline-size: calc(var(--control-size) * 0.75); cursor: grab; touch-action: none; }
+.reorder-list-handle svg, .reorder-list-button svg { inline-size: 1rem; block-size: 1rem; }
+.reorder-list-handle:not(:disabled):hover, .reorder-list-button:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+.reorder-list-handle:not(:disabled):active, .reorder-list-button:not(:disabled):active { background: var(--active-surface); }
+.reorder-list-button:disabled, .reorder-list-handle:disabled { opacity: 0.35; cursor: default; }
+.reorder-list-button[data-control="remove"]:not(:disabled):hover { background: var(--destructive-wash); color: var(--destructive); }
+/* While a row is dragged it rides above the others, on the menu's surface, and follows the pointer at once. */
+.reorder-list-rows[data-dragging] { cursor: grabbing; user-select: none; }
+.reorder-list-row[data-lifted] { z-index: 1; border-radius: var(--radius-control); background: var(--popover); transition: none;
+  box-shadow: 0 0.5rem 1rem -0.25rem var(--scrim-shadow), 0 0 0 var(--hairline) var(--line-focus); }
+.reorder-list-note { flex: 1 1 100%; margin: 0; padding: 0 0 var(--space-1) calc(1.25rem + var(--control-size) * 0.75 + 2 * var(--space-1));
+  color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; overflow-wrap: anywhere; }
+.reorder-list-note[data-tone="warn"] { color: var(--ink-warn); }
+.reorder-list-note[data-tone="danger"] { color: var(--destructive); }
+.reorder-list-empty { display: flex; align-items: center; min-block-size: var(--control-size); margin: 0; padding-inline: var(--space-3);
+  border: var(--hairline) dashed var(--line); border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.45; }
+.reorder-list-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-inline-size: 0; }
+.reorder-list-limit { margin: 0; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
+.reorder-list-said { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .reorder-list-row, .reorder-list-handle, .reorder-list-button { transition: none; } }

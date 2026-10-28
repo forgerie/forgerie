@@ -438,6 +438,8 @@ button:disabled { cursor: default; opacity: 0.4; }
    keep their width. The full name stays in the panel. */
 .model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1 1 0; min-inline-size: min(6rem, 100%); max-inline-size: max-content; block-size: 2rem; padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; transition: color 150ms, background-color 150ms; }
 .model-trigger:not(:disabled):hover, .model-trigger[aria-expanded="true"] { background: var(--hover-surface); color: var(--foreground); }
+/* A trigger that is a row's value, such as one entry of a list: the value reads in the text colour. */
+.model-trigger[data-look="value"] { color: var(--foreground); }
 .model-trigger[data-look="word"] { flex: none; min-inline-size: 0; block-size: auto; min-block-size: 1.5rem; padding-inline: var(--space-1); color: var(--foreground); vertical-align: baseline; }
 .model-trigger-name { min-inline-size: 0; max-inline-size: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-trigger-level { flex: none; color: var(--muted-foreground); font-weight: 400; }

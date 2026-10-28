@@ -8,7 +8,7 @@ import { AgentEditor } from "./AgentEditor";
 import { SettingsFrame } from "./SettingsFrame";
 import { SettingsRow } from "./SettingsRow";
 import { PluginsView } from "./PluginsView";
-import { ModelsView } from "./ModelsView";
+import { ModelsView, type ModelChainsRenderer } from "./ModelsView";
 import type { PluginCatalog } from "@shared/pluginsContract";
 import "./settings.css";
 
@@ -63,7 +63,7 @@ function AgentRow({ agent, replacedBy, onOpen }: { agent: AgentSummary; replaced
  * from the session list; each page keeps its place in the URL, so Back, a
  * reload, a fold, and a rotation return to the same page.
  */
-export function SettingsView({ place, onPlace, onClose, onPluginCatalog, projects, resources, backlog }: {
+export function SettingsView({ place, onPlace, onClose, onPluginCatalog, projects, resources, backlog, modelChains }: {
   place: SettingsPlace;
   /** Go to another settings page. `replace` swaps this history entry instead of adding one. */
   onPlace: (place: SettingsPlace, replace?: boolean) => void;
@@ -75,6 +75,8 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
   /** Settings → Skills and prompts. Without it, the page is not offered. */
   resources?: SettingsPageRenderer | undefined;
   backlog?: SettingsPageRenderer | undefined;
+  /** Settings → Models → Model chains. Without it, the Models page has no chains section. */
+  modelChains?: ModelChainsRenderer | undefined;
 }) {
   const { load, refresh } = useAgentList();
   const close = onClose ? <button type="button" className="picker-icon" aria-label="Close settings" title="Close settings" onClick={onClose}><XIcon aria-hidden size={16} /></button> : null;
@@ -100,7 +102,8 @@ export function SettingsView({ place, onPlace, onClose, onPluginCatalog, project
   if (place.section === "plugins") return <PluginsView selected={place.plugin}
     onOpen={(plugin) => onPlace({ section: "plugins", plugin })} onBack={() => onPlace({ section: "root" })} onClose={onClose} onCatalog={onPluginCatalog} />;
 
-  if (place.section === "models") return <ModelsView onBack={() => onPlace({ section: "root" })} onClose={onClose} />;
+  if (place.section === "models") return <ModelsView onBack={() => onPlace({ section: "root" })} onClose={onClose}
+    chains={modelChains} agents={load.type === "ready" ? load.value.agents : undefined} />;
 
   if (place.section === "agents" && place.agent) {
     return <AgentEditor key={JSON.stringify(place.agent)} target={place.agent} home={load.type === "ready" ? load.value.home : undefined}

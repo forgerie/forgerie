@@ -89,6 +89,14 @@ export function parseModelSpec(spec: string | undefined): ModelSpec | undefined 
   const slash = base.indexOf("/");
   return slash > 0 ? { provider: base.slice(0, slash), id: base.slice(slash + 1), level } : { id: base, level };
 }
+/**
+ * The model chain a `model` value names, such as `worker` in `worker:high`. Forgerie reads a value without a provider
+ * as a chain's name, never as a bare model id.
+ */
+export function chainNameOf(spec: string | undefined): string | undefined {
+  const parsed = parseModelSpec(spec);
+  return parsed && parsed.provider === undefined ? parsed.id : undefined;
+}
 export function modelSpecText(spec: ModelSpec): string {
   return spec.provider ? `${spec.provider}/${spec.id}` : spec.id;
 }

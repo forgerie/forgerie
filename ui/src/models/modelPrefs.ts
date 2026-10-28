@@ -1,3 +1,4 @@
+import type { ModelChains } from "@shared/modelChains";
 import { THINKING_LEVELS, type ModelPrefs } from "@shared/modelPrefsContract";
 
 interface ModelId { provider?: string | undefined; id?: string | undefined }
@@ -71,6 +72,7 @@ export function cycleTarget(favorites: readonly ResolvedFavorite[], currentKey: 
  * `defaultProvider`/`defaultModel` and `defaultThinkingLevel`: what a new
  * session starts on. The title model is Forgerie's `sessionTitleModel`: what
  * writes a new session's title, or `null` for each session's own model.
+ * Model chains are Forgerie's `modelChains`, sent whole.
  * Absent: this change leaves them alone.
  */
 export interface Lists {
@@ -79,6 +81,7 @@ export interface Lists {
   defaultModel?: string | null | undefined;
   defaultThinkingLevel?: string | null | undefined;
   titleModel?: string | null | undefined;
+  modelChains?: ModelChains | undefined;
 }
 
 /**
@@ -100,7 +103,9 @@ export type PrefsChange =
   | { type: "default"; key: string }
   | { type: "defaultLevel"; level: string }
   /** The title model is not on the lists: hiding or unstarring a model leaves it alone. */
-  | { type: "titleModel"; key: string | null };
+  | { type: "titleModel"; key: string | null }
+  /** Chains name models of their own: hiding or unstarring a model leaves them alone. */
+  | { type: "chains"; chains: ModelChains };
 
 export function applyChange(prefs: Lists, change: PrefsChange, models: readonly ModelId[]): Lists {
   const favoriteKeysOf = (favorites: readonly string[]) => new Set(resolveFavorites(favorites, models).map((favorite) => favorite.key));
@@ -109,9 +114,10 @@ export function applyChange(prefs: Lists, change: PrefsChange, models: readonly 
     return !models.some((model) => keys.has(keyOf(model)) && favoriteMatches(entry, model));
   });
   const shownWith = (visible: string[] | null, key: string) => visible === null || visible.includes(key) ? visible : [...visible, key];
-  const kept = { defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel, titleModel: prefs.titleModel };
+  const kept = { defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel, titleModel: prefs.titleModel, modelChains: prefs.modelChains };
   if (change.type === "defaultLevel") return { ...prefs, favorites: [...prefs.favorites], defaultThinkingLevel: change.level };
   if (change.type === "titleModel") return { ...prefs, favorites: [...prefs.favorites], titleModel: change.key };
+  if (change.type === "chains") return { ...prefs, favorites: [...prefs.favorites], modelChains: change.chains };
   if (change.type === "default") {
     const favorites = prefs.favorites.length === 0 || favoriteKeysOf(prefs.favorites).has(change.key) ? [...prefs.favorites] : [...prefs.favorites, change.key];
     return { ...kept, favorites, visible: shownWith(prefs.visible, change.key), defaultModel: change.key };

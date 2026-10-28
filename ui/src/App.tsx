@@ -5,6 +5,7 @@ import { Activity, lazy, Suspense, type ReactNode, useCallback, useEffect, useId
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
 import type { SettingsPageRenderer } from "./ui/settings/SettingsView";
+import type { ModelChainsRenderer } from "./ui/settings/ModelsView";
 import { ForgerieSession } from "./ForgerieSession";
 import { usePicker, type StartingSession } from "./usePicker";
 import type { Row } from "./picker/board";
@@ -115,7 +116,7 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `search` is session search, held by the binding above this app so its query and hits outlive every layout.
  * `triggers` is the triggers screen and its entry at the foot of the session list, held by the binding above this app.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings, newSessions, pendingSession }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings, modelChains, newSessions, pendingSession }: {
   /** The launch's read-only transcript, supplied by the app binding, never a server session transport. */
   pendingSession?: ((launch: Launch<LaunchDraft>) => ReactNode) | undefined;
   /** Production and fixture launches use the same app-owned lifecycle. */
@@ -123,6 +124,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   search?: SessionSearch | undefined; triggers?: TriggersSlot | undefined;
   shelves?: ReactNode; projectCatalog?: readonly Project[] | undefined; projectScope?: readonly string[] | undefined;
   backlogSettings?: SettingsPageRenderer | undefined;
+  /** Settings → Models → Model chains. */
+  modelChains?: ModelChainsRenderer | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
 } = {}) {
@@ -595,7 +598,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     </Activity>;
   });
   const thread = settings ? <Suspense fallback={<SessionFrame name="Settings" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
-    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} backlog={backlogSettings} /></Suspense>
+    <SettingsView place={settings} onPlace={placeSettings} onClose={() => placeSettings(undefined)} onPluginCatalog={appPluginStore.apply} projects={projectSettings} resources={resourceSettings} backlog={backlogSettings} modelChains={modelChains} /></Suspense>
     : backlog ? <Suspense fallback={<SessionFrame name="Backlog" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
       <BacklogView place={backlog} binding={{ scope: backlogScope, onScope: setBacklogScope, load: backlogList.load, onRefresh: refreshBacklog, api: backlogApi, look: picker.look,
         projects: projectCatalog ?? backlogProjects,

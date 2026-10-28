@@ -21,10 +21,16 @@ export interface TextSubmitFollowUp {
  * stays in the field so the reader can fix it. When `onSubmit` returns a
  * follow-up, it waits under the field until the reader confirms it, cancels
  * it, or edits the value it was for. A refusal given as `error` shows under
- * the field until the next submit.
+ * the field until the next submit. A form that edits a value starts with it in the field (`initial`); a form that
+ * opens on request takes focus (`autoFocus`) and can be closed again (`cancel`, a quiet button after the action).
  */
-export function TextSubmit({ label, hint, action, placeholder, pending, error, suggestions, onSubmit }: {
+export function TextSubmit({ label, hint, action, placeholder, pending, error, suggestions, initial = "", autoFocus, cancel, onSubmit }: {
   label: string; hint?: string | undefined; action: string; placeholder: string; pending: boolean;
+  /** The value the field starts with, such as the name being changed. */
+  initial?: string | undefined;
+  autoFocus?: boolean | undefined;
+  /** A quiet button after the action that closes the form, and its words. Escape in the field presses it too. */
+  cancel?: { label: string; onPress: () => void } | undefined;
   /** Why the last value was refused, in the server's words. */
   error?: string | undefined;
   /** A path-only value uses the same popup as file discovery, without a mention marker. */
@@ -32,14 +38,14 @@ export function TextSubmit({ label, hint, action, placeholder, pending, error, s
   onSubmit: (value: string) => Promise<TextSubmitFollowUp | void>;
 }) {
   const id = useId();
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initial);
   const [followUp, setFollowUp] = useState<TextSubmitFollowUp>();
   const offer = useRef<HTMLDivElement>(null);
   // The field often sits at the foot of a scrolling page, so the offer would open out of sight.
   useEffect(() => { if (followUp) offer.current?.scrollIntoView?.({ block: "nearest" }); }, [followUp]);
   const done = () => { setFollowUp(undefined); setValue(""); };
   const change = (next: string) => { setValue(next); setFollowUp(undefined); };
-  const field = { id, placeholder, value, disabled: pending, "aria-describedby": hint ? `${id}-hint` : undefined };
+  const field = { id, placeholder, value, disabled: pending, "aria-describedby": hint ? `${id}-hint` : undefined, ...(autoFocus ? { autoFocus } : {}) };
   return <form className="text-submit" onSubmit={(event) => {
     event.preventDefault(); setFollowUp(undefined);
     void onSubmit(value.trim()).then((next) => { if (next) setFollowUp(next); else done(); }).catch(() => undefined);
@@ -48,8 +54,10 @@ export function TextSubmit({ label, hint, action, placeholder, pending, error, s
     {hint ? <p className="text-submit-hint" id={`${id}-hint`}>{hint}</p> : null}
     <div className="text-submit-row">
       {suggestions ? <PathField {...field} suggestions={suggestions} onChange={change} />
-        : <TextField {...field} autoComplete="off" autoCapitalize="off" spellCheck={false} onChange={(event) => change(event.target.value)} />}
+        : <TextField {...field} autoComplete="off" autoCapitalize="off" spellCheck={false} onChange={(event) => change(event.target.value)}
+          onKeyDown={cancel ? (event) => { if (event.key === "Escape") { event.preventDefault(); cancel.onPress(); } } : undefined} />}
       <button className="text-submit-button" type="submit" disabled={pending || !value.trim()}>{action}</button>
+      {cancel ? <button className="text-submit-button" type="button" data-emphasis="quiet" disabled={pending} onClick={cancel.onPress}>{cancel.label}</button> : null}
     </div>
     {error ? <p className="text-submit-error" role="alert">{error}</p> : null}
     <div className="text-submit-follow-up" aria-live="polite" ref={offer}>

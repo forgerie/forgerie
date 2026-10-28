@@ -6,7 +6,8 @@
 
 /* The summary continues the lede, so it sits closer to it than the lede sits to the list. */
 .settings-lede:has(+ .models-summary) { margin-block-end: var(--space-3); }
-.models-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: 0 0 var(--space-5);
+/* The model lists start a part of their own after the chains, so the page's largest gap sits above them. */
+.models-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); margin: var(--space-8) 0 var(--space-5);
   color: var(--muted-foreground); font-size: var(--small-text); line-height: var(--line-height); }
 .models-summary p { flex: 1 1 18rem; margin: 0; }
 .models-search { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); margin-block-end: var(--space-6);

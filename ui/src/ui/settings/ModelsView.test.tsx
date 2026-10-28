@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelPrefs, ModelPrefsSave } from "@shared/modelPrefsContract";
 import { ModelPrefsContext, PrefsConflict, type ModelPrefsSource } from "../../models/modelPrefsApi";
+import { ModelChainsSection } from "../../models/ModelChainsSection";
 import { ModelsView, startModel } from "./ModelsView";
 
 const models = [
@@ -137,5 +138,23 @@ describe("Models settings", () => {
     refuse = false;
     await click([...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === "Reload lists")!);
     expect(byLabel("Add Llama 3 8B to favorites").disabled).toBe(false);
+  });
+
+  it("draws the chains section from the page's lists and saves a chain change through the same save loop", async () => {
+    stored = { ...stored, modelChains: { worker: ["proxy/claude-opus-5-5:high", "local/llama3:8b"] } };
+    act(() => root.unmount());
+    const host = document.createElement("div"); document.body.replaceChildren(host); root = createRoot(host);
+    await act(async () => root.render(<ModelPrefsContext.Provider value={source}>
+      <ModelsView onBack={() => {}} listModels={async () => models} chains={(props) => <ModelChainsSection {...props} />}
+        agents={[{ name: "Builder", model: "worker" }]} /></ModelPrefsContext.Provider>));
+    await settle();
+    expect(document.body.textContent).toContain("Used by Builder.");
+    expect(document.body.textContent).toContain("~/.config/forgerie/config.json");
+    await click(byLabel("Move Llama 3 8B up"));
+    expect(saves.at(-1)).toEqual({ revision: "r0", favorites: stored.favorites, visible: null, modelChains: { worker: ["local/llama3:8b", "proxy/claude-opus-5-5:high"] } });
+    // A later change elsewhere on the page leaves the chains out of its save.
+    await click(byLabel("Add Gemini 3.8 Flash to favorites"));
+    expect(saves.at(-1)?.modelChains).toBeUndefined();
+    expect(document.querySelector(".connection-status")?.textContent).toBe("Saved");
   });
 });

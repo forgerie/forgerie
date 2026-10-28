@@ -1,9 +1,10 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { modelsResponseSchema, type SessionModel } from "../../contracts";
 import { compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
 import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, TITLE_MODEL_COPY, titleModelState, type Lists, type PrefsChange } from "../../models/modelPrefs";
 import { THINKING_LEVELS, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
+import type { ModelChainsSectionProps } from "../../models/ModelChainsSection";
 import { thinkingLevelsFor } from "../../newSession";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "../ModelPicker";
 import { SettingsField } from "./SettingsField";
@@ -18,17 +19,21 @@ type Model = SessionModel & { provider: string; id: string };
 type Load = { type: "loading" } | { type: "failed"; message: string } | { type: "ready"; prefs: ModelPrefs; models: Model[] };
 type Phase = { type: "idle" } | { type: "saving" } | { type: "saved" } | { type: "failed"; message: string; conflict: boolean };
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
-const listsOf = (prefs: ModelPrefs): Lists => ({ favorites: prefs.favorites, visible: prefs.visible, defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel, titleModel: prefs.titleModel });
-const sameLists = (a: Lists, b: Lists) => JSON.stringify([a.favorites, a.visible, a.defaultModel ?? null, a.defaultThinkingLevel ?? null, a.titleModel ?? null])
-  === JSON.stringify([b.favorites, b.visible, b.defaultModel ?? null, b.defaultThinkingLevel ?? null, b.titleModel ?? null]);
+const listsOf = (prefs: ModelPrefs): Lists => ({ favorites: prefs.favorites, visible: prefs.visible, defaultModel: prefs.defaultModel, defaultThinkingLevel: prefs.defaultThinkingLevel, titleModel: prefs.titleModel, modelChains: prefs.modelChains });
+const sameLists = (a: Lists, b: Lists) => JSON.stringify([a.favorites, a.visible, a.defaultModel ?? null, a.defaultThinkingLevel ?? null, a.titleModel ?? null, a.modelChains ?? {}])
+  === JSON.stringify([b.favorites, b.visible, b.defaultModel ?? null, b.defaultThinkingLevel ?? null, b.titleModel ?? null, b.modelChains ?? {}]);
 const isLevel = (level: string | null | undefined): level is ModelPrefsSave["defaultThinkingLevel"] & string => (THINKING_LEVELS as readonly unknown[]).includes(level);
 /** A save sends the defaults only when they changed, so a value Pi wrote that this page does not know survives. */
 function saveOf(revision: string, want: Lists, held: ModelPrefs): ModelPrefsSave {
   return { revision, favorites: want.favorites, visible: want.visible,
     ...(want.defaultModel && want.defaultModel !== held.defaultModel ? { defaultModel: want.defaultModel } : {}),
     ...(isLevel(want.defaultThinkingLevel) && want.defaultThinkingLevel !== held.defaultThinkingLevel ? { defaultThinkingLevel: want.defaultThinkingLevel } : {}),
-    ...(want.titleModel !== undefined && want.titleModel !== held.titleModel ? { titleModel: want.titleModel } : {}) };
+    ...(want.titleModel !== undefined && want.titleModel !== held.titleModel ? { titleModel: want.titleModel } : {}),
+    ...(want.modelChains !== undefined && JSON.stringify(want.modelChains) !== JSON.stringify(held.modelChains) ? { modelChains: want.modelChains } : {}) };
 }
+
+/** Draws the Model chains section from what the page holds. Another feature owns it; the page passes it the lists and a way to change them. */
+export type ModelChainsRenderer = (props: ModelChainsSectionProps) => ReactNode;
 
 /**
  * Where a new session starts, by the server's rule: Pi's default when a
@@ -61,9 +66,13 @@ function matches(model: Model, needle: string) {
  * Taps made while a save runs are kept and saved next, so a burst of changes
  * is never lost and never sent out of order.
  */
-export function ModelsView({ onBack, onClose, listModels = availableModels }: {
+export function ModelsView({ onBack, onClose, listModels = availableModels, chains, agents }: {
   onBack: () => void; onClose?: (() => void) | undefined;
   listModels?: (home: string, signal?: AbortSignal) => Promise<Model[]>;
+  /** Draws Model chains. Without it the page has no chains section. */
+  chains?: ModelChainsRenderer | undefined;
+  /** The agents Settings has read, for the chains section. Undefined while unknown. */
+  agents?: ModelChainsSectionProps["agents"];
 }) {
   const source = useContext(ModelPrefsContext) ?? liveModelPrefs;
   const [load, setLoad] = useState<Load>({ type: "loading" });
@@ -157,6 +166,8 @@ export function ModelsView({ onBack, onClose, listModels = availableModels }: {
         <DefaultModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
         <TitleModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
       </div>
+      {chains?.({ chains: lists.modelChains ?? {}, problem: load.prefs.modelChainsProblem, models, agents, locked: phase.type === "failed",
+        where: tildify(load.prefs.configPath, home), onChange: (next) => change({ type: "chains", chains: next }) })}
       <div className="models-summary">
         <p>{lists.visible === null
           ? <>Every model is shown. Hide one, and from then on the menu offers only the models you show. Models a provider adds later stay hidden too.</>

@@ -10,6 +10,8 @@ import { RelatedWorkspaces } from "../projectGroups/RelatedWorkspaces.binding";
 import { createProjectGroupApi } from "../projectGroups/projectGroupApi";
 import type { RelatedWorkRenderer } from "../projectGroups/relatedWork";
 import type { SettingsPageRenderer } from "../ui/settings/SettingsView";
+import type { ModelChainsRenderer } from "../ui/settings/ModelsView";
+import { ModelChainsSection } from "../models/ModelChainsSection";
 import { ResourceLens, ResourceSettings } from "../resources/ResourceLibrary.binding";
 import { createResourceApi } from "../resources/resourceApi";
 import type { ResourceLensRenderer } from "../resources/resourceLens";
@@ -34,6 +36,7 @@ const resourceApi = createResourceApi(request);
 // Session search reads through the catalog's own transport and base.
 const searchApi = createSearchApi(browserTransport.request);
 const resourceSettings: SettingsPageRenderer = ({ back, close, item, onOpen }) => <ResourceSettings api={resourceApi} item={item} onOpen={onOpen} back={back} close={close} />;
+const modelChains: ModelChainsRenderer = (props) => <ModelChainsSection {...props} />;
 const triggersApi = createTriggersApi(request);
 const directory = createNewSessionApi(request);
 /** Trigger drafts and pending runs, for the app's life: they outlive the screen while a session is open. */
@@ -64,6 +67,6 @@ export function AppBinding({ shelves }: { shelves?: ReactNode }) {
     render: (args) => <Suspense fallback={<SessionFrame name="Triggers" status={<StatusChip label="Opening…" tone="neutral" />}><div className="thread-empty" /></SessionFrame>}>
       <TriggersScreen args={args} list={triggerList} api={triggersApi} directory={directory} memory={triggerMemory} /></Suspense>,
   }), [triggerList]);
-  return <App pendingSession={pendingSession} triggers={triggers} shelves={shelves} backlogSettings={backlogSettings} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
+  return <App pendingSession={pendingSession} triggers={triggers} shelves={shelves} backlogSettings={backlogSettings} modelChains={modelChains} projectScope={groups.scope} projectCatalog={groups.loaded ? groups.catalog.projects : undefined}
     projectFilter={groups.filter} projectSettings={settings} search={search} relatedWork={related} resourceSettings={resourceSettings} resourceLens={resourceLens} />;
 }
