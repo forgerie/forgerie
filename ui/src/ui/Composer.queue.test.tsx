@@ -251,41 +251,83 @@ describe("queueing attachments while the agent works", () => {
   });
 });
 
-describe("the queue above the composer", () => {
+describe("the queue in the ledge above the composer", () => {
+  const band = () => document.querySelector("section[aria-label='Queued messages']");
   it("lists Pi's queue in delivery order, names each item, and clears it whole", async () => {
     const onClear = vi.fn();
     const items: QueuedMessage[] = [{ kind: "steer", text: "use the helper" }, { kind: "followUp", text: "add tests" },
       { kind: "followUp", text: "/compact keep the release plan" }];
     await render({ items, onClear, compaction: { type: "queued", text: "/compact keep the release plan" } });
-    const region = document.querySelector("section.queue")!;
-    expect(region.getAttribute("aria-label")).toBe("Queued messages");
-    expect(region.querySelector(".queue-head span")?.textContent).toBe("3 queued");
+    const region = band()!;
+    expect(region.closest("section.ledge")?.hasAttribute("data-open")).toBe(true);
+    expect(region.querySelector(".ledge-lines-head span")?.textContent).toBe("3 queued, sent in this order");
     expect(document.querySelector(".queue-announcer")?.textContent).toBe("3 queued");
-    expect([...region.querySelectorAll("li")].map((row) => [row.querySelector(".queue-kind")?.textContent, row.querySelector(".queue-text")?.textContent]))
+    expect([...region.querySelectorAll("li")].map((row) => [row.querySelector(".ledge-lines-kind")?.textContent, row.querySelector(".ledge-lines-text")?.textContent]))
       .toEqual([["Steer", "use the helper"], ["Follow-up", "add tests"], ["Compaction", "/compact keep the release plan"]]);
+    // A steer reads first in full ink; a compaction is a command, in the code face.
+    expect([...region.querySelectorAll("li")].map((row) => [row.getAttribute("data-tone"), row.getAttribute("data-face")]))
+      .toEqual([["strong", null], [null, null], [null, "code"]]);
     // The queued compaction is one of these rows, so the compaction notice does not repeat it.
     expect(document.querySelector(".compaction-notice")).toBeNull();
     // A separator keeps the kind and the text apart for screen readers.
     expect(region.querySelector("li")!.textContent).toBe("Steer: use the helper");
     expect(region.querySelector("ol")!.tabIndex).toBe(0);
+    expect(region.querySelector("ol")!.getAttribute("aria-label")).toBe("Queue, in delivery order");
+    // A press shows the whole text, and a second press cuts it to one line again.
+    const line = region.querySelector<HTMLButtonElement>("li button")!;
+    await click(line);
+    expect(line.getAttribute("aria-expanded")).toBe("true");
+    expect(region.querySelector("li")!.hasAttribute("data-open")).toBe(true);
+    await click(line);
+    expect(region.querySelector("li")!.hasAttribute("data-open")).toBe(false);
     await type("unfinished thought");
-    await click(button("Clear entire queue (3)"));
+    expect(button("Clear all")?.title).toBe("Removes every queued message, including ones from other windows. The current run continues.");
+    await click(button("Clear all"));
     expect(onClear).toHaveBeenCalledOnce();
     expect(input().value).toBe("unfinished thought");
     expect(document.activeElement).toBe(input());
   });
 
+  it("shows one queued item as its line beside Clear, with no head", async () => {
+    const onClear = vi.fn();
+    await render({ items: [{ kind: "followUp", text: "add tests" }], onClear });
+    expect(band()?.querySelector(".ledge-lines-head")).toBeNull();
+    expect(band()?.textContent).toBe("Follow-up: add testsClear");
+    await click(button("Clear"));
+    expect(onClear).toHaveBeenCalledOnce();
+  });
+
   it("disables clearing offline and disappears when the queue is empty", async () => {
     const onClear = vi.fn();
     await render({ items: [{ kind: "followUp", text: "add tests" }], offline: true, onClear });
-    expect(button("Clear entire queue")?.disabled).toBe(true);
-    await click(button("Clear entire queue")); expect(onClear).not.toHaveBeenCalled();
+    expect(button("Clear")?.disabled).toBe(true);
+    await click(button("Clear")); expect(onClear).not.toHaveBeenCalled();
     await render({ items: [] });
-    expect(document.querySelector("section.queue")).toBeNull();
+    expect(band()).toBeNull();
+    expect(document.querySelector("section.ledge")?.hasAttribute("data-open")).toBe(false);
     // The live region stays mounted, so the first queued item and an empty queue are announced.
     expect(document.querySelector(".queue-announcer")?.getAttribute("role")).toBe("status");
     expect(document.querySelector(".queue-announcer")?.textContent).toBe("Queue empty");
     await render({ items: [{ kind: "followUp", text: "add tests" }] });
     expect(document.querySelector(".queue-announcer")?.textContent).toBe("1 queued");
+  });
+
+  it("folds away with the handle and stays folded, and the announcer still speaks", async () => {
+    const items: QueuedMessage[] = [{ kind: "steer", text: "use the helper" }, { kind: "followUp", text: "add tests" }];
+    await render({ items });
+    const handle = button("Fold 2 queued away")!;
+    expect(handle.getAttribute("aria-expanded")).toBe("true");
+    expect(handle.textContent).toBe("2 queued");
+    await click(handle);
+    expect(document.querySelector("section.ledge")?.hasAttribute("data-open")).toBe(false);
+    expect(button("Show 2 queued")?.getAttribute("aria-expanded")).toBe("false");
+    // A queued item is not a proposal: it never marks the handle as new.
+    await render({ items: [...items, { kind: "followUp", text: "then run the shots" }] });
+    expect(button("Show 3 queued")?.hasAttribute("data-fresh")).toBe(false);
+    expect(document.querySelector("section.ledge")?.hasAttribute("data-open")).toBe(false);
+    expect(document.querySelector(".queue-announcer")?.textContent).toBe("3 queued");
+    await click(button("Show 3 queued"));
+    expect(document.querySelector("section.ledge")?.hasAttribute("data-open")).toBe(true);
+    expect(button("Fold 3 queued away")).toBeDefined();
   });
 });

@@ -48,10 +48,12 @@ const foldPostures = [
 ];
 /** A desktop window, for sheets that change layout above the Fold's widths. The millimetres assume a 24" 1920 x 1080 monitor. */
 const desktop = { id: "desktop-1440", name: "Desktop, 1440 x 900", cssWidth: 1440, cssHeight: 900, widthMm: 398.3, heightMm: 248.9 };
+/** The smallest phone the app keeps working on, for the input bar's overflow. The millimetres assume a 4" 640 x 1136 panel. */
+const smallPhone = { id: "phone-320", name: "Small phone, 320 x 568", cssWidth: 320, cssHeight: 568, widthMm: 50, heightMm: 88.6 };
 
 export default defineConfig({
   // Caliper is a dev-server tool. Vitest also starts a serve-mode server, which must not announce itself to the Caliper app.
-  plugins: [react(), buildManifest(), ...(process.env.VITEST ? [] : [caliper({ devices: [...foldPostures, desktop] })])],
+  plugins: [react(), buildManifest(), ...(process.env.VITEST ? [] : [caliper({ devices: [...foldPostures, desktop, smallPhone] })])],
   // Relative asset URLs: Forgerie can be served below a path prefix.
   base: "./",
   resolve: {

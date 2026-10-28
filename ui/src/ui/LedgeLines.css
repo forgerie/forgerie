@@ -1,0 +1,30 @@
+/* What waits to be sent: quiet lines with no box of their own, nearest the input. */
+.ledge-lines { min-inline-size: 0; }
+.ledge-lines-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: 2.25rem;
+  padding-inline: var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); }
+.ledge-lines-head strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ledge-lines-items { margin: 0; padding: 0 0 var(--space-1); list-style: none; max-block-size: var(--ledge-lines-share, min(22cqb, 9rem)); overflow-y: auto; overscroll-behavior: contain; }
+.ledge-lines-items:focus-visible { outline-offset: calc(-1 * var(--hairline) * 2); }
+.ledge-lines-line { min-inline-size: 0; padding-inline: var(--space-3) var(--space-1); }
+/* The line is one press: it shows the whole text. */
+.ledge-lines-press { display: flex; align-items: baseline; gap: var(--space-2); inline-size: 100%; min-inline-size: 0; min-block-size: 2rem;
+  padding: 0.4375rem 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; }
+.ledge-lines-kind { flex: none; min-inline-size: 3.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text);
+  font-variant-ligatures: none; }
+.ledge-lines-line[data-tone="strong"] .ledge-lines-kind { color: var(--foreground); }
+/* Kept apart for a screen reader, unseen. */
+.ledge-lines-gap { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ledge-lines-text { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--quiet-foreground); line-height: 1.45; }
+.ledge-lines-press:hover .ledge-lines-text { color: var(--foreground); }
+.ledge-lines-line[data-face="code"] .ledge-lines-text { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
+.ledge-lines-line[data-open] .ledge-lines-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The shared action, drawn small and pressed large, as quiet words. */
+.ledge-lines-action { position: relative; flex: none; display: inline-flex; align-items: center; block-size: 2rem; padding-inline: var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; }
+.ledge-lines-action::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+.ledge-lines-action:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
+/* One line alone: the line and its action share a row. */
+.ledge-lines[data-single] { display: flex; align-items: center; gap: var(--space-2); padding-block: var(--space-1); padding-inline-end: var(--space-1); }
+.ledge-lines[data-single] .ledge-lines-items { flex: 1; min-inline-size: 0; padding: 0; }
+.ledge-lines[data-single] .ledge-lines-line { padding-inline-end: 0; }

@@ -1,9 +1,9 @@
 // Adapted from assistant-ui's homepage demo. See THIRD_PARTY_NOTICES.md.
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { AuiIf, ComposerPrimitive, useAui, useAuiState, unstable_useTriggerPopoverRootContext } from "@assistant-ui/react";
 import type { MentionSource } from "../mentionSource";
 import { MentionPopover, type MentionInputSnapshot } from "./MentionPopover";
-import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, InfoIcon, PuzzleIcon, SquareIcon, TerminalIcon } from "lucide-react";
+import { ArrowUpIcon, ChevronLeftIcon, CornerDownLeftIcon, CpuIcon, InfoIcon, MicIcon, PlusIcon, PuzzleIcon, SquareIcon, TerminalIcon } from "lucide-react";
 import { OTHER_TEXT_MAX_LENGTH } from "../askDraft";
 import { useDictation } from "../DictationProvider";
 import { ComposerDictation } from "./ComposerDictation";
@@ -19,11 +19,14 @@ import { shellDraftOf, type ShellAvailability } from "../shellDraft";
 import { isCommand } from "../commands";
 import type { WorkingSend } from "../queue";
 import { ModelPicker, type ModelBinding, type PickerOpen } from "./ModelPicker";
-import { modelCommandQuery } from "../modelChoice";
+import { modelCommandQuery, modelLabel, thinkingLabel } from "../modelChoice";
 import { DialogLayer, useDialogMode, type DialogBinding } from "./DialogLayer";
 import { NoteTray, type NotesBinding } from "./NoteTray";
 import { useComposerKeyboard, type ComposerSessionKeys } from "./useComposerKeyboard";
 import { ComposerEditor, type ComposerInputElement } from "./ComposerEditor";
+import { FoldHandle, type FoldCount } from "./FoldHandle";
+import { MenuButton, type MenuCommand } from "./MenuButton";
+import { BAR_GAP, inlineSlots, planBar, samePlan, type BarPlan, type BarSlot, type BarWidths, type MovableSlot } from "./composerOverflow";
 
 /**
  * A file (`@path`, `@"a path"`, `!@path`), a model (`#id`), or a leading
@@ -36,6 +39,16 @@ const LEADING_COMMAND = /^\/[^\s/]\S*/u;
 
 /** `!` commands. The binding owns the server rules; the bar adds its own blockers. */
 export interface ShellBinding { availability: ShellAvailability; onRun: (text: string) => Promise<void> }
+/** The ledge's handle on the bar: what the ledge holds, and the one press that folds it away and back. */
+export interface ComposerHandle {
+  counts: readonly FoldCount[];
+  folded: boolean;
+  /** Something new arrived while folded. */
+  fresh: boolean;
+  /** The handle's accessible name, which says the whole state. */
+  label: string;
+  onToggle: () => void;
+}
 
 const sendsNow: WorkingSend = { queue: false, steer: false };
 
@@ -63,6 +76,8 @@ type ComposerProps = { ask?: AskBinding; mentions?: MentionSource | undefined; c
   notes?: NotesBinding | undefined;
   /** A readout at the start of the action row, such as the session's branch. It gives way before any button. */
   context?: ReactNode;
+  /** The ledge's handle, after the attach button, while the ledge holds anything. */
+  handle?: ComposerHandle | undefined;
   chatDraft?: ChatDraft | undefined };
 export function Composer(props: ComposerProps) {
   const aui = useAui();
@@ -71,7 +86,7 @@ export function Composer(props: ComposerProps) {
   const [localDraft] = useState(() => createChatDraft(() => latest.current.composer));
   return <ComposerPrimitive.Unstable_TriggerPopoverRoot><ComposerBar {...props} chatDraft={props.chatDraft ?? localDraft} /></ComposerPrimitive.Unstable_TriggerPopoverRoot>;
 }
-function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, working = sendsNow, queued = false, model, dialog, attachments = true, notes, context, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
+function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, working = sendsNow, queued = false, model, dialog, attachments = true, notes, context, handle, chatDraft }: ComposerProps & { chatDraft: ChatDraft }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
@@ -204,6 +219,30 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
     }
   }
   const scopeKey = `${mentions?.key}:${control?.ask.askId ?? "chat"}:${control?.question.id ?? ""}`;
+  // The action row: controls never squeeze. The row measures them, planBar() decides which stay inline, and the rest
+  // move into More in the row's order. The handle and the sends never move.
+  const steering = workingDraft && working.steer;
+  const present = new Set<BarSlot>(["dictate", "send"]);
+  if (context) present.add("context");
+  if (attachments) present.add("attach");
+  if (handle) present.add("handle");
+  if (model) present.add("model");
+  if (steering) present.add("steer");
+  const plan = useBarPlan(anchor, [...present].join(" "), dictating);
+  const shown = new Set(inlineSlots(plan, present));
+  const slot = (name: BarSlot, children: ReactNode) => <span className="composer-slot" data-slot={name}
+    data-overflow={shown.has(name) ? undefined : true} aria-hidden={shown.has(name) ? undefined : true}>{children}</span>;
+  const attachBlocked = disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS;
+  const press = (name: BarSlot, selector: string) => anchor.current?.querySelector<HTMLElement>(`[data-slot="${name}"] ${selector}`)?.click();
+  const focusMore = useCallback(() => anchor.current?.querySelector<HTMLElement>('[data-slot="more"] [aria-haspopup]')?.focus({ preventScroll: true }), []);
+  const modelWords = model ? `${modelLabel(model.model)}${model.thinkingLevel && model.model ? `, ${thinkingLabel(model.thinkingLevel)}` : ""}` : "";
+  const moved: Record<MovableSlot, MenuCommand> = {
+    attach: { label: "Attach files", icon: <PlusIcon aria-hidden />, disabled: attachBlocked, onSelect: () => press("attach", 'input[type="file"]') },
+    model: { label: "Model", icon: <CpuIcon aria-hidden />, value: modelWords, disabled: model?.disabled, onSelect: () => setPicker({ query: "" }) },
+    dictate: { label: "Dictate", icon: <MicIcon aria-hidden />, disabled: disabled || preparing || !!control?.sending,
+      onSelect: () => press("dictate", '[aria-label="Voice input"]') },
+    steer: { label: "Steer", icon: <ArrowUpIcon aria-hidden />, disabled: queueBlocked, onSelect: () => sendWhileWorking(true) },
+  };
   return <ComposerPrimitive.Root className="composer">
     {/* Always mounted, so each new dialog is announced. The countdown stays silent. */}
     <span className="sr-only" role="status">{dialogControl ? `An extension asks: ${dialogControl.dialog.title}`
@@ -252,13 +291,20 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
         onKeyUp={keyboard.onKeyUp} onBlur={keyboard.onBlur} onCompositionStart={keyboard.onCompositionStart} onCompositionEnd={keyboard.onCompositionEnd}
         onEdit={keyboard.onChange} onSelectionChange={rememberInput}
         disabled={control?.sending} />
-      <div className="composer-actions">
-        {context}
-        {attachments && <AttachButton compact disabled={disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS}
-          offerSetting={!dialogInput} settingDisabled={disabled || preparing || !!control?.sending} />}
-        {model && <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker} />}
-        <ComposerDictation disabled={disabled || preparing || !!control?.sending} />
-        {preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
+      <div className="composer-actions" style={{ "--bar-gap": `${String(plan.gap)}px` }}>
+        {context && slot("context", context)}
+        {attachments && slot("attach", <AttachButton compact disabled={attachBlocked}
+          offerSetting={!dialogInput} settingDisabled={disabled || preparing || !!control?.sending} />)}
+        {handle && slot("handle", <FoldHandle counts={handle.counts} form={plan.handle} folded={handle.folded} fresh={handle.fresh}
+          label={handle.label} onToggle={handle.onToggle} />)}
+        {model && slot("model", <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker}
+          returnFocus={shown.has("model") ? undefined : focusMore} />)}
+        {slot("dictate", <ComposerDictation disabled={disabled || preparing || !!control?.sending} />)}
+        {slot("more", <MenuButton label="More input controls" layer="window" commands={plan.overflow.map((name) => moved[name])} />)}
+        {steering && slot("steer", <button type="button" className="steer-send" disabled={queueBlocked} onClick={() => sendWhileWorking(true)}
+          aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
+          title="Send now. The agent reads it after its current step. Ctrl or Cmd+Shift+Enter">Steer</button>)}
+        {slot("send", preparing ? <ComposerPrimitive.Cancel className="primary icon-button" aria-label="Cancel attachment preparation" title="Cancel attachment preparation">
           <SquareIcon aria-hidden size={12} fill="currentColor" />
         </ComposerPrimitive.Cancel> : control ? <AskActions control={{ ...control, blocked: control.blocked || tooMany }}
           chatLabel={shellDraftOf(text).type === "shell" ? "Run command" : "Send message"} />
@@ -276,22 +322,22 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
           </button> : <ComposerPrimitive.Send disabled={disabled || dictating || tooMany} className="primary icon-button" aria-label="Send message" title="Send message">
             <ArrowUpIcon aria-hidden size={16} />
           </ComposerPrimitive.Send>}
-          {workingDraft && <>
-            {working.steer && <button type="button" className="steer-send" disabled={queueBlocked} onClick={() => sendWhileWorking(true)}
-              aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
-              title="Send now. The agent reads it after its current step. Ctrl or Cmd+Shift+Enter">Steer</button>}
-            <button type="button" className="icon-button queue-send" aria-label="Queue message" disabled={queueBlocked} aria-keyshortcuts="Enter"
-              onClick={() => sendWhileWorking(false)} title="Send when the current work finishes. Enter">
-              <ArrowUpIcon aria-hidden size={16} />
-            </button>
-          </>}
+          {workingDraft && <button type="button" className="icon-button queue-send" aria-label="Queue message" disabled={queueBlocked} aria-keyshortcuts="Enter"
+            onClick={() => sendWhileWorking(false)} title="Send when the current work finishes. Enter">
+            <ArrowUpIcon aria-hidden size={16} />
+          </button>}
           <AuiIf condition={(s) => s.thread.isRunning}>
             <ComposerPrimitive.Cancel disabled={disabled} className="primary icon-button" aria-label={compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"}
               title={queued ? "Stop and return queued messages to the draft" : compaction?.state.type === "running" ? "Stop compaction" : "Stop generating"}>
               <SquareIcon aria-hidden size={12} fill="currentColor" />
             </ComposerPrimitive.Cancel>
           </AuiIf>
-        </>}
+        </>)}
+        {/* The handle in both forms, unseen, so the plan knows each one's width. */}
+        {handle && <span className="composer-measure" aria-hidden="true">
+          <span data-measure="words"><FoldHandle measure counts={handle.counts} form="words" folded={handle.folded} label={handle.label} onToggle={handle.onToggle} /></span>
+          <span data-measure="total"><FoldHandle measure counts={handle.counts} form="total" folded={handle.folded} label={handle.label} onToggle={handle.onToggle} /></span>
+        </span>}
       </div>
     </ComposerPrimitive.AttachmentDropzone>
     {commands && !dialogInput && <SlashCommands binding={commands} anchor={anchor} />}
@@ -299,6 +345,43 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
       source={mentions} char={char} input={input} snapshot={snapshot} enabled={!disabled && !control?.sending && !shellMode} />)}
   </ComposerPrimitive.Root>;
 
+}
+
+/**
+ * Measures the action row and plans it. Each control is a slot: one moved into More stays mounted out of the row's
+ * flow and unseen, so its natural width is always known and it can still act for its menu row. A width of zero means
+ * the row is not laid out, such as in a test without layout, and keeps everything inline.
+ */
+function useBarPlan(shell: RefObject<HTMLElement | null>, presentKey: string, dictating: boolean): BarPlan {
+  const [plan, setPlan] = useState<BarPlan>({ gap: BAR_GAP.min, handle: "words", overflow: [] });
+  useLayoutEffect(() => {
+    const bar = shell.current;
+    const row = bar?.querySelector<HTMLElement>(".composer-actions");
+    if (!bar || !row) return;
+    const measure = () => {
+      if (row.clientWidth === 0) return;
+      const style = getComputedStyle(row);
+      const room = row.clientWidth - (parseFloat(style.paddingInlineStart) || 0) - (parseFloat(style.paddingInlineEnd) || 0);
+      const width = (selector: string) => row.querySelector<HTMLElement>(selector)?.getBoundingClientRect().width;
+      const context = row.querySelector<HTMLElement>('[data-slot="context"]');
+      const widths: BarWidths = {
+        context: context ? parseFloat(getComputedStyle(context).minInlineSize) || 0 : undefined,
+        attach: width('[data-slot="attach"]'), model: width('[data-slot="model"]'), dictate: width('[data-slot="dictate"]'),
+        more: width('[data-slot="more"]'), steer: width('[data-slot="steer"]'), send: width('[data-slot="send"]'),
+        handleWords: width('[data-measure="words"]'), handleTotal: width('[data-measure="total"]'),
+      };
+      const present = new Set(presentKey.split(" ") as BarSlot[]);
+      const next = planBar({ room, barWidth: bar.clientWidth, widths, present, pinned: dictating ? new Set(["dictate"]) : undefined });
+      setPlan((current) => samePlan(current, next) ? current : next);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    for (const element of row.querySelectorAll("[data-slot], [data-measure]")) observer.observe(element);
+    return () => observer.disconnect();
+  }, [shell, presentKey, dictating]);
+  return plan;
 }
 
 /** The question layer: step row, question, and options. It scrolls inside a height budget. */

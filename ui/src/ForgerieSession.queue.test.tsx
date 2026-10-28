@@ -76,7 +76,7 @@ async function respondingSession() {
   await until(() => button("Stop generating")?.disabled === false);
   return { prompts, request };
 }
-const rows = () => [...document.querySelectorAll("section.queue .queue-item")].map((row) => row.textContent);
+const rows = () => [...document.querySelectorAll("section[aria-label='Queued messages'] li")].map((row) => row.textContent);
 
 it("queues and steers through Pi, shows Pi's queue, and Stop returns it to the draft in delivery order", async () => {
   const api = await respondingSession();

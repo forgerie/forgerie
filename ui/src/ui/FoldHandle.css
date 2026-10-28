@@ -1,0 +1,15 @@
+/* A pill in the input's row, drawn small and pressed large. It never squeezes: the row moves other controls away or asks
+   for the total, so its words are never cut. */
+.fold-handle { position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.3125rem; block-size: 2rem;
+  padding: 0 var(--space-2) 0 0.625rem; border: var(--hairline) solid var(--line); border-radius: var(--radius-pill);
+  background: var(--background); color: var(--foreground); font-size: var(--label-text); font-weight: 600; font-variant-numeric: tabular-nums;
+  white-space: nowrap; transition: border-color 150ms; }
+.fold-handle::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+.fold-handle:hover { border-color: var(--line-focus); }
+.fold-handle svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+.fold-handle-words { font-weight: 500; color: var(--muted-foreground); }
+.fold-handle-words b { font-weight: 600; color: var(--foreground); }
+/* Something new arrived while folded: a live dot on the pill's corner, ringed in the bar's surface so it reads on the edge. */
+.fold-handle[data-fresh]::after { content: ""; position: absolute; inset-block-start: calc(-1 * var(--hairline) * 2); inset-inline-end: calc(-1 * var(--hairline) * 2);
+  inline-size: 0.5rem; block-size: 0.5rem; border: calc(var(--hairline) * 2) solid var(--bar-surface); border-radius: 50%; background: var(--live); }

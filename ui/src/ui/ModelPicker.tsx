@@ -121,8 +121,12 @@ function useFavoriteCycle(binding: ModelBinding, panelOpen: boolean, change: Cha
  * opens at window level so the transcript cannot clip it. Nothing changes in
  * the browser until Pi answers, and a change is never retried.
  */
-export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, word, wordIcon, look }: {
+export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, word, wordIcon, look, returnFocus, bare = false }: {
   binding: ModelBinding; anchor: RefObject<HTMLElement | null>;
+  /** Takes focus back when the panel closes, for a trigger its host has hidden, such as one moved into a More menu. */
+  returnFocus?: (() => void) | undefined;
+  /** Only the panel, for a host that opens it from elsewhere, such as a menu row. `returnFocus` takes focus back. */
+  bare?: boolean;
   /** Draw the trigger as this one word, such as Change, inside a sentence that already names the model. */
   word?: string | undefined;
   /** A mark before the word, such as a plus on an action that adds a model. */
@@ -143,15 +147,17 @@ export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, 
   const chosen = binding.model === undefined ? binding.choices?.current : undefined;
   const label = binding.model ? modelLabel(binding.model) : chosen ?? binding.emptyLabel ?? modelLabel(undefined);
   const level = binding.model || chosen ? binding.thinkingLevel : undefined;
-  const close = useCallback((returnFocus: boolean) => {
+  const close = useCallback((giveBack: boolean) => {
     setChange((current) => current.type === "failed" ? { type: "idle" } : current);
     onOpenChange(undefined);
-    if (returnFocus) trigger.current?.focus({ preventScroll: true });
-  }, [onOpenChange]);
+    if (!giveBack) return;
+    if (returnFocus) returnFocus();
+    else trigger.current?.focus({ preventScroll: true });
+  }, [onOpenChange, returnFocus]);
   const cycled = useFavoriteCycle(binding, open !== undefined, change, setChange, onOpenChange);
   return <>
     {binding.cycle && <span className="sr-only" role="status">{cycled}</span>}
-    <button ref={trigger} type="button" className="model-trigger" disabled={binding.disabled}
+    {!bare && <button ref={trigger} type="button" className="model-trigger" disabled={binding.disabled}
       aria-haspopup="dialog" aria-expanded={open !== undefined} aria-controls={open ? panelId : undefined}
       aria-label={`${label}${level ? ` ${thinkingLabel(level)}` : ""}, change model and thinking level`}
       title="Model and thinking level" data-look={word === undefined ? look : "word"} onClick={() => { if (!changing) onOpenChange(open ? undefined : { query: "" }); }}>
@@ -160,7 +166,7 @@ export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, 
         {level && <span className="model-trigger-level">{thinkingLabel(level)}</span>}
         <ChevronDownIcon aria-hidden size={14} />
       </> : <>{wordIcon}<span className="model-trigger-name">{word}</span></>}
-    </button>
+    </button>}
     {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger} minWidthRem={minWidthRem}
       initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, layer)}
   </>;

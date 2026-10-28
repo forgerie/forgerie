@@ -149,7 +149,7 @@
   "\"settings-lede\" in ui/settings/ModelsView.tsx, ui/settings/PluginsView.tsx, ui/settings/SettingsView.tsx",
   "\"settings-menu-anchor\" in ui/backlog/BacklogView.tsx, ui/settings/AgentEditor.tsx, ui/settings/PluginsView.tsx",
   "\"settings-primary\" in ui/backlog/BacklogView.tsx, ui/settings/AgentEditor.tsx, ui/settings/PluginsView.tsx, ui/settings/SettingsView.tsx",
-  "\"sr-only\" in ui/Composer.tsx, ui/DiffEditor.tsx, ui/ModelPicker.tsx, ui/Picker.tsx, ui/PullRequestReview.tsx, ui/QueuedMessages.tsx, ui/SessionTreeNavigator.tsx, ui/WorktreeChip.tsx, ui/WorktreeSetupCard.tsx, ui/backlog/BacklogView.tsx, ui/markdown/RichBlocks.tsx",
+  "\"sr-only\" in ui/Composer.tsx, ui/DiffEditor.tsx, ui/ModelPicker.tsx, ui/Picker.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/WorktreeChip.tsx, ui/WorktreeSetupCard.tsx, ui/backlog/BacklogView.tsx, ui/markdown/RichBlocks.tsx",
   "\"trace-empty\" in ui/SkillInvocation.tsx, ui/Trace.tsx",
   "\"trace-marker\" in ui/Messages.tsx, ui/Trace.tsx",
   "\"trace-pre\" in ui/SkillInvocation.tsx, ui/Trace.tsx",
@@ -254,7 +254,6 @@
   "ui/Attachments.tsx",
   "ui/ChangesReview.tsx",
   "ui/CompactionNotice.tsx",
-  "ui/Composer.tsx",
   "ui/ComposerDictation.tsx",
   "ui/ComposerEditor.tsx",
   "ui/ConfirmDialog.tsx",
@@ -334,7 +333,7 @@
   "ui/settings/SettingsView.tsx: AgentRow, SettingsView"
  ],
  "inline style beyond custom properties": [
-  "ui/Composer.tsx:372",
+  "ui/Composer.tsx:455",
   "ui/ImageGallery.tsx:47",
   "ui/ImageViewer.tsx:158"
  ],

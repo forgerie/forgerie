@@ -1,0 +1,29 @@
+.ledge-stack { min-inline-size: 0; }
+.ledge-stack-rows { margin: 0; padding: 0; list-style: none; }
+/* The edges of the offers behind the front one: thin lips above the ledge, two at most, one in a short container. */
+.ledge-stack-edges { position: absolute; inset-inline: 0; inset-block-end: 100%; block-size: 0.5rem; pointer-events: none; }
+.ledge-stack-edge { position: absolute; inset-block-end: 0; inset-inline: calc(var(--radius-thread) - var(--hairline)); block-size: 0.3125rem;
+  border: var(--hairline) solid var(--ledge-wall, var(--line)); border-block-end: 0; border-radius: 0.4375rem 0.4375rem 0 0; background: var(--bar-surface); }
+.ledge-stack-edge + .ledge-stack-edge { inset-inline: calc(2 * var(--radius-thread) - var(--hairline)); inset-block-end: 0.3125rem; block-size: 0.25rem; }
+@container (height < 30rem) { .ledge-stack-edge + .ledge-stack-edge { display: none; } }
+/* The count at the front row's start: a press opens the list. */
+.ledge-stack-count { position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.125rem; block-size: 1.75rem;
+  margin-inline-start: calc(-1 * var(--space-1)); padding: 0 0.3125rem 0 0.4375rem; border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-control); background: var(--background); color: var(--foreground); font-size: var(--label-text); font-weight: 650;
+  font-variant-numeric: tabular-nums; transition: border-color 150ms; }
+.ledge-stack-count::before, .ledge-stack-fold::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: var(--control-size); translate: -50% -50%; }
+.ledge-stack-count:hover { border-color: var(--line-focus); }
+.ledge-stack-count svg, .ledge-stack-fold svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+/* The open list: a head that counts, then the rows inside a share of the container's height. */
+.ledge-stack-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: 2.25rem;
+  padding-inline: var(--space-3) var(--space-1); border-block-end: var(--hairline) solid var(--line); color: var(--muted-foreground); font-size: var(--label-text); }
+.ledge-stack-head strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ledge-stack-fold { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 2rem; padding-inline: var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; }
+.ledge-stack-fold:hover { background: var(--hover-surface); color: var(--foreground); }
+/* The share comes from the ledge, which knows whether another band shares the height. */
+.ledge-stack[data-open] .ledge-stack-rows { max-block-size: var(--ledge-list-share, min(40cqb, 20rem)); overflow-y: auto; overscroll-behavior: contain; }
+/* A cut row and a fade say there is more below. */
+.ledge-stack-rows[data-cut] { mask-image: linear-gradient(to bottom, var(--foreground) calc(100% - 1.75rem), transparent); }
+@media (prefers-reduced-motion: reduce) { .ledge-stack-count { transition: none; } }

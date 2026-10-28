@@ -3,7 +3,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Reac
 import { AuiIf, ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import { createLatest } from "./latest";
-import { Composer, type ShellBinding } from "./Composer";
+import { Composer, type ComposerHandle, type ShellBinding } from "./Composer";
+import { Ledge } from "./Ledge";
 import type { AskBinding } from "./useAskMode";
 import type { MentionSource } from "../mentionSource";
 import { AssistantMessage, SystemMessage, UserMessage, type SystemArtifactView, type ToolArtifactView } from "./Messages";
@@ -23,10 +24,22 @@ import type { ComposerSessionKeys } from "./useComposerKeyboard";
 import type { EarlierHistory } from "../historyPaging";
 import { useReaderAnchor } from "./useReaderAnchor";
 
+/** What the ledge above the input bar holds besides the queue, such as the agent's proposals. */
+export interface LedgeBinding {
+  /** The band above the queue. */
+  content: ReactNode;
+  /** How many things the band holds, and the word for them, such as 3 and "proposals". */
+  count: number;
+  noun: string;
+  /** One key per thing. A key that arrives while the ledge is folded away puts a live dot on the handle. */
+  keys: readonly string[];
+}
+
 // System organism: assistant-ui owns message, composer, and scroll state.
 // `ask` puts the one composer into ask mode. `working` says what a draft can
-// do while the session works; `queue` is what already waits.
-export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, chatDraft, head, readOnly, inputContext, systemArtifact, toolArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
+// do while the session works; `queue` is what already waits. The ledge above
+// the bar holds the queue and `ledge`, and the bar's handle folds it away.
+export function Thread({ ask, mentions, commands, commandResult, compaction, shell, sessionKeys, queue, working, model, dialog, attachments, notes, beforeComposer, ledge, chatDraft, head, readOnly, inputContext, systemArtifact, toolArtifact, fileLinks, linkBase, linkError, onOpenFile, reveal, earlier, followTail }: {
   /**
    * Whether older messages exist above the first loaded one. The runtime's
    * `hasEarlier` and `onLoadEarlier` load them; this only describes the state.
@@ -58,6 +71,8 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   fileLinks?: FileLinks | undefined; ask?: AskBinding; dialog?: DialogBinding; attachments?: boolean; notes?: NotesBinding | undefined;
   /** A line above the input bar that belongs to this thread, such as a new session's destination. */
   beforeComposer?: ReactNode;
+  /** What waits at the input besides the queue, in the ledge that grows out of the bar. */
+  ledge?: LedgeBinding | undefined;
   /** Drawn before the first message, such as a worktree still being set up. */
   head?: ReactNode;
   /** Set when the conversation can no longer continue: drawn where the input bar would be, instead of it. */
@@ -78,6 +93,19 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
   const linkScope = useMemo(() => linkBase === undefined ? undefined : { base: linkBase, error: linkError, openFile: onOpenFile }, [linkBase, linkError, onOpenFile]);
   const column = useRef<HTMLDivElement>(null);
   useReaderAnchor(column);
+  // The ledge folds away with one press of the handle and stays folded: what arrives later marks the handle, never
+  // reopens the ledge. The keys seen at the fold tell what is new. Held per thread, in memory.
+  const [foldedAt, setFoldedAt] = useState<ReadonlySet<string> | null>(null);
+  const queued = queue?.items.length ?? 0;
+  const held = (ledge?.count ?? 0) + queued;
+  const fresh = foldedAt === null ? 0 : (ledge?.keys ?? []).filter((key) => !foldedAt.has(key)).length;
+  const counts = [{ count: ledge?.count ?? 0, noun: ledge?.noun ?? "" }, { count: queued, noun: "queued" }].filter((part) => part.count > 0);
+  const words = counts.map((part) => `${String(part.count)} ${part.noun}`).join(", ");
+  const handle: ComposerHandle | undefined = held > 0 && !readOnly ? {
+    counts, folded: foldedAt !== null, fresh: fresh > 0,
+    label: foldedAt !== null ? `Show ${words}${fresh > 0 ? `, ${String(fresh)} new` : ""}` : `Fold ${words} away`,
+    onToggle: () => setFoldedAt((current) => current === null ? new Set(ledge?.keys ?? []) : null),
+  } : undefined;
   const earlierError = useId();
   // The first reveal lands as the thread opens; a later key is a step from one marked message to the next.
   const revealed = useRef<string | undefined>(undefined);
@@ -129,10 +157,15 @@ export function Thread({ ask, mentions, commands, commandResult, compaction, she
           </ThreadPrimitive.ScrollToBottom>
           {commandResult && <CommandResultPanel {...commandResult} />}
           {compaction && <CompactionNotice {...compaction} />}
-          {queue && <QueuedMessages {...queue} />}
           {beforeComposer}
-          {readOnly ?? <Composer ask={ask} mentions={mentions} commands={commands} compaction={compaction} shell={shell} sessionKeys={sessionKeys} working={working}
-            queued={queue ? queue.items.length > 0 : false} model={model} dialog={dialog} attachments={attachments} notes={notes} context={inputContext} chatDraft={chatDraft} />}
+          <div className="composer-dock">
+            {!readOnly && (queue || ledge) && <Ledge label="Waiting at the input" open={held > 0 && foldedAt === null}>
+              {ledge?.content}
+              {queue && <QueuedMessages {...queue} />}
+            </Ledge>}
+            {readOnly ?? <Composer ask={ask} mentions={mentions} commands={commands} compaction={compaction} shell={shell} sessionKeys={sessionKeys} working={working}
+              queued={queued > 0} model={model} dialog={dialog} attachments={attachments} notes={notes} context={inputContext} handle={handle} chatDraft={chatDraft} />}
+          </div>
         </ThreadPrimitive.ViewportFooter>
       </div>
     </ThreadPrimitive.Viewport>

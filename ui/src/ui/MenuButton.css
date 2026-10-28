@@ -11,6 +11,7 @@
 .menu-button-item { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding-inline: var(--space-2);
   border: 0; border-radius: var(--radius-document); background: transparent; color: inherit; text-align: start; }
 .menu-button-item svg { flex: none; inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+.menu-button-value { margin-inline-start: auto; padding-inline-start: var(--space-4); color: var(--muted-foreground); white-space: nowrap; }
 .menu-button-item:not(:disabled):hover, .menu-button-item:focus-visible { background: var(--hover-surface); outline: none; }
 .menu-button-item:disabled { color: var(--muted-foreground); opacity: 0.6; }
 .menu-button-item[data-tone="danger"], .menu-button-item[data-tone="danger"] svg { color: var(--destructive); }

@@ -26,6 +26,8 @@
   --active-surface: color-mix(in oklab, var(--foreground) 6%, transparent);
   /* Text with less to it, and text off its usual list. */
   --quiet-foreground: color-mix(in oklab, var(--foreground) 70%, transparent);
+  /* The input bar's surface (assistant-ui composer.tsx: bg-muted/30). The ledge above the bar is made of it too. */
+  --bar-surface: color-mix(in oklab, var(--muted) 30%, var(--background));
   --faint-foreground: color-mix(in oklab, var(--foreground) 62%, transparent);
   --body-font: "Public Sans Variable", sans-serif;
   --display-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -296,8 +298,15 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer { inline-size: 100%; position: relative; }
 /* Composer from composer.tsx: border-foreground/10, bg-muted/30,
    focus-within border-foreground/25, rounded-thread. */
-.composer-shell { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-thread); background: color-mix(in oklab, var(--muted) 30%, var(--background)); transition: border-color 150ms; }
+.composer-shell { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-thread); background: var(--bar-surface); transition: border-color 150ms; }
 .composer-shell:focus-within { border-color: var(--line-focus); }
+/* The ledge (Ledge.tsx) grows out of the bar's top edge. While it shows, the bar's top corners move up to it and
+   its top edge is the faint line between the two, so they read as one rounded shape. Focus anywhere in either
+   darkens the outer edge of both; the line between them stays faint. */
+.composer-dock { display: flex; flex-direction: column; min-inline-size: 0; --ledge-wall: var(--line); }
+.composer-dock:focus-within { --ledge-wall: var(--line-focus); }
+.composer-dock:has(> [data-ledge][data-open]) .composer-shell { border-color: var(--ledge-wall); border-block-start-color: var(--line);
+  border-start-start-radius: 0; border-start-end-radius: 0; }
 /* Context used: a 2px bar over the top border, between the rounded corners. The track is the border itself.
    The last fifth of the window draws in the full text color. */
 .context-bar { position: absolute; z-index: 1; inset-block-start: -1px; inset-inline: var(--radius-thread); block-size: 2px; border-radius: 1px; pointer-events: none; }
@@ -371,27 +380,34 @@ button:disabled { cursor: default; opacity: 0.4; }
 /* A leading command reads as the chip the slash list showed. It is still text. */
 [data-composer-input] .cm-leading-chip { border: 1px solid var(--line); border-radius: var(--radius-document); background: var(--muted); padding: 0 0.3em 0.05em;
   font-family: var(--code-font); font-size: 0.875em; font-variant-ligatures: none; }
-.composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
+/* The action row. Its gap comes from the plan (composerOverflow.ts), so the plan and the drawing agree on every pixel.
+   Each control sits in a slot at its natural width and never squeezes; a control the plan moved into More stays
+   mounted, out of the flow and unseen, so the row can still measure it. The sends keep the end corner. */
+.composer-actions { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--bar-gap, var(--space-2)); padding: 0 var(--space-2) var(--space-2); }
+.composer-slot { flex: none; display: flex; align-items: center; min-inline-size: 0; }
+.composer-slot[data-overflow] { position: absolute; inset-block-start: 0; inset-inline-start: 0; visibility: hidden; pointer-events: none; }
+/* A live region inside a moved control, such as the model picker's, still speaks. */
+.composer-slot[data-overflow] .sr-only { visibility: visible; }
+.composer-slot[data-slot="send"] { gap: var(--bar-gap, var(--space-2)); margin-inline-start: auto; }
+.composer-slot[data-slot="steer"]:not([data-overflow]) { margin-inline-start: auto; }
+.composer-slot[data-slot="steer"]:not([data-overflow]) ~ .composer-slot[data-slot="send"] { margin-inline-start: 0; }
+/* A readout: it shrinks to its least width before any control moves. */
+.composer-slot[data-slot="context"] { flex: 0 1 auto; min-inline-size: 1.75rem; }
+.composer-slot[data-slot="context"] > .worktree-chip { flex: 0 1 auto; margin-inline-end: 0; }
+.composer-slot > .composer-dictation { flex: none; margin-inline-end: 0; }
+/* The model picker keeps its whole name and level: the plan moves it into More rather than cut it. */
+.composer-slot > .model-trigger { flex: none; min-inline-size: 0; max-inline-size: none; }
+.composer-slot .model-trigger-name { max-inline-size: none; }
+.composer-slot .model-trigger-level { display: inline; }
+/* The handle in both forms, unseen, for the plan to measure. */
+.composer-measure { position: absolute; inset-block-start: 0; inset-inline-start: 0; display: flex; visibility: hidden; pointer-events: none; }
+.composer-measure > span { flex: none; display: flex; }
 .compact-send { min-block-size: var(--control-size); padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); }
 /* While the agent works, Stop keeps Send's slot. Queue sits beside it, outlined
    so the filled Stop stays the one primary shape, and Steer is a quiet word. */
 .queue-send { border: 1px solid var(--line-focus); color: var(--foreground); }
 .queue-send:not(:disabled):hover, .steer-send:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
 .steer-send { block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; transition: color 150ms; }
-/* Pi's queue, after assistant-ui's message-queue element: pending sends sit on
-   the composer's own surface, above it, in delivery order. Rows wrap so every
-   word stays readable; the list scrolls inside a height budget so the input
-   never leaves the screen. A tag moves above its text when a row is narrow. */
-.queue { display: flex; flex-direction: column; gap: var(--space-1); min-inline-size: 0; font-size: var(--small-text); }
-.queue-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 var(--space-2); padding-inline-start: var(--space-1); color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-numeric: tabular-nums; }
-.queue-head button { min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--small-text); }
-.queue-head button:not(:disabled):hover { background: var(--hover-surface); color: var(--foreground); }
-.queue-items { position: relative; display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; max-block-size: min(9rem, 22cqb); overflow-y: auto; overscroll-behavior: contain; }
-.queue-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-surface); background: color-mix(in oklab, var(--muted) 30%, var(--background)); }
-.queue-kind { flex: none; min-inline-size: 4.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
-.queue-item[data-kind="steer"] .queue-kind { color: var(--foreground); }
-.queue-text { flex: 1 1 12rem; min-inline-size: 0; color: color-mix(in oklab, var(--foreground) 75%, transparent); line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
-.queue-item[data-kind="compaction"] .queue-text { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
 /* Operational feedback uses the homepage's trace text and menu controls, not a second input or a progress estimate. */
 .compaction-notice { color: var(--muted-foreground); font-size: var(--small-text); min-inline-size: 0; }
 .compaction-notice[data-phase="running"] { color: var(--live); }
@@ -665,7 +681,6 @@ button:disabled { cursor: default; opacity: 0.4; }
 .composer-hint[data-blocked] svg { color: var(--muted-foreground); }
 .ask-error { color: var(--destructive); }
 /* Text buttons from EditComposer: h-8 px-3 13px, primary bg-primary medium. */
-.composer-shell[data-mode="ask"] .composer-actions { gap: var(--space-4); }
 .ask-skip { block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); transition: color 150ms; }
 .ask-skip:not(:disabled):hover { color: var(--foreground); }
 .ask-primary { display: inline-flex; align-items: center; gap: 0.375rem; block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
@@ -1253,7 +1268,6 @@ summary.trace-line:hover { color: var(--foreground); }
 /* Basis 0, so it never wraps the bar's controls onto a new line. The model picker
    grows a thousand times faster, so it reaches its own width first; the chip
    takes what is left, up to its own width, and ellipsizes the branch below that. */
-.composer-actions:has(> .worktree-chip) .model-trigger { flex-grow: 1000; }
 .worktree-chip { flex: 1 1 0; min-inline-size: 1.75rem; max-inline-size: max-content; display: inline-flex; align-items: center; gap: var(--space-1); margin-inline-end: auto; padding-inline: var(--space-2); overflow: hidden;
   color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; white-space: nowrap; }
 .worktree-chip > svg { flex: none; }

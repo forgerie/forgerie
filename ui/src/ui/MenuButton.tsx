@@ -12,6 +12,8 @@ export interface MenuCommand {
   disabled?: boolean | undefined;
   /** Words for a second press. The first press shows them and runs nothing. */
   confirm?: string | undefined;
+  /** A readout at the row's end, such as the value the command changes. */
+  value?: string | undefined;
   onSelect: () => void;
 }
 
@@ -86,10 +88,13 @@ export function MenuButton({ label, commands, align = "end", layer = "inline" }:
     {open ? portal(<div className="menu-button-menu" data-align={align} data-layer={layer} role="menu" aria-label={label} ref={list} onKeyDown={move}>
       {commands.map((command, index) => command === "separator" ? <div key={`separator-${String(index)}`} className="menu-button-separator" role="separator" />
         : <button key={command.label} type="button" role="menuitem" className="menu-button-item" data-tone={command.tone} disabled={command.disabled}
+          // A readout joins the name with a pause, so a screen reader does not run the two together.
+          aria-label={command.value === undefined ? undefined : `${asking === command.label ? command.confirm ?? command.label : command.label}, ${command.value}`}
           onClick={() => {
             if (command.confirm && asking !== command.label) { setAsking(command.label); return; }
             setOpen(false); command.onSelect();
-          }}>{command.icon}{asking === command.label ? command.confirm : command.label}</button>)}
+          }}>{command.icon}{asking === command.label ? command.confirm : command.label}
+          {command.value !== undefined ? <span className="menu-button-value">{command.value}</span> : null}</button>)}
     </div>) : null}
   </div>;
 }

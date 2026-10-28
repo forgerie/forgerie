@@ -1,0 +1,22 @@
+/* The input bar grown taller: its width, its surface, its edge. The bar's own top corners meet it (theme.css,
+   .composer-dock), so the two read as one shape. The edge darkens with the bar's when either holds focus. */
+.ledge { container: ledge / inline-size; position: relative; min-inline-size: 0; padding-block-start: var(--space-1);
+  border: var(--hairline) solid var(--ledge-wall, var(--line)); border-block-end: 0; border-radius: var(--radius-thread) var(--radius-thread) 0 0;
+  background: var(--bar-surface); font-size: var(--small-text); transition: border-color 150ms; }
+/* Closed: no box at all. The bands stay mounted, hidden, so a live region inside one keeps speaking. */
+.ledge:not([data-open]) { padding: 0; border: 0; background: none; }
+.ledge:not([data-open]) [data-ledge-band] { display: none; }
+/* A folded stack's edges stand above the ledge in their own room, so they never cover the thread's last line. */
+.ledge[data-open]:has([data-ledge-edges]) { margin-block-start: 0.5625rem; }
+/* Bands sit one under another, split by the faint line. */
+.ledge [data-ledge-band] ~ [data-ledge-band] { border-block-start: var(--hairline) solid var(--line); }
+/* Each band scrolls inside its share of the window's height, so the bar under the ledge keeps its room. Two bands
+   share the window: each takes less, so an open list and a queue together never push the ledge's head out of view
+   (measured at 711 x 374 and 932 x 553, where the single-band shares added up to more than the room). */
+.ledge { --ledge-list-share: min(40cqb, 20rem); --ledge-lines-share: min(22cqb, 9rem); }
+.ledge:has([data-ledge-band] ~ [data-ledge-band]) { --ledge-list-share: min(32cqb, 20rem); --ledge-lines-share: min(16cqb, 9rem); }
+@container (height < 30rem) {
+  .ledge { --ledge-list-share: 34cqb; }
+  .ledge:has([data-ledge-band] ~ [data-ledge-band]) { --ledge-list-share: 22cqb; --ledge-lines-share: 16cqb; }
+}
+@media (prefers-reduced-motion: reduce) { .ledge { transition: none; } }

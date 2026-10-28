@@ -82,11 +82,11 @@ describe("compaction in the one composer", () => {
     const state: CompactionState = { type: "queued", text: "/compact retain the release plan" };
     await render({ state, running: true, queueCount: 3, offline: true, onClear });
     expect(document.querySelector(".compaction-notice")).toBeNull();
-    expect([...document.querySelectorAll("section.queue .queue-item")].at(-1)?.textContent).toBe("Compaction: /compact retain the release plan");
-    expect(button("Clear entire queue (3)")?.disabled).toBe(true);
-    await click(button("Clear entire queue (3)")); expect(onClear).not.toHaveBeenCalled();
+    expect([...document.querySelectorAll("section[aria-label='Queued messages'] li")].at(-1)?.textContent).toBe("Compaction: /compact retain the release plan");
+    expect(button("Clear all")?.disabled).toBe(true);
+    await click(button("Clear all")); expect(onClear).not.toHaveBeenCalled();
     await render({ state, running: true, queueCount: 3, onClear }); await type("unfinished thought");
-    await click(button("Clear entire queue (3)")); expect(onClear).toHaveBeenCalledOnce();
+    await click(button("Clear all")); expect(onClear).toHaveBeenCalledOnce();
     await render({ state: { type: "running" }, running: true });
     expect(button("Stop compaction")).toBeDefined();
     expect(input().value).toBe("unfinished thought");

@@ -1,5 +1,6 @@
 import { useRef, type MouseEvent } from "react";
 import { queueKindOf, type QueuedMessage, type QueueKind } from "../queue";
+import { LedgeLines } from "./LedgeLines";
 
 export interface QueueBinding {
   /** Pi's queue in delivery order, from the last session status. */
@@ -11,11 +12,11 @@ export interface QueueBinding {
 const kindLabels: Record<QueueKind, string> = { steer: "Steer", followUp: "Follow-up", compaction: "Compaction" };
 
 /**
- * Shape: the work waiting for the agent, after assistant-ui's message-queue
- * element. Pi owns the queue and can only clear all of it, so there is no
- * per-item remove. Stop returns every item to the draft instead.
+ * Shape: the work waiting for the agent, as the ledge's band nearest the input bar, after assistant-ui's
+ * message-queue element. Pi owns the queue and can only clear all of it, so there is no per-item remove. Stop
+ * returns every item to the draft instead.
  *
- * The live region stays mounted while the list comes and goes, so a screen
+ * The live region stays mounted while the list comes and goes, and while the ledge is folded away, so a screen
  * reader hears the first queued item and hears the queue empty.
  */
 export function QueuedMessages({ items, disabled, onClear }: QueueBinding) {
@@ -29,25 +30,16 @@ export function QueuedMessages({ items, disabled, onClear }: QueueBinding) {
   }
   return <>
     <span className="queue-announcer sr-only" role="status">{announcement}</span>
-    {items.length > 0 && <section className="queue" aria-label="Queued messages">
-      <div className="queue-head">
-        <span aria-hidden>{items.length} queued</span>
-        <button type="button" disabled={disabled} onClick={clear}
-          title="Removes every queued item, including items from other windows. The current run continues.">
-          Clear entire queue{items.length > 1 ? ` (${items.length})` : ""}
-        </button>
-      </div>
-      {/* Focusable so a keyboard can scroll it when it overflows its height budget. */}
-      <ol className="queue-items" tabIndex={0} aria-label="Queue, in delivery order">
-        {items.map((item, index) => {
-          const kind = queueKindOf(item);
-          // Pi gives queued items no IDs. Position and content identify a row.
-          return <li key={`${index}:${item.kind}:${item.text}`} className="queue-item" data-kind={kind}>
-            <span className="queue-kind">{kindLabels[kind]}</span><span className="sr-only">: </span>
-            <span className="queue-text">{item.text}</span>
-          </li>;
-        })}
-      </ol>
-    </section>}
+    {/* Pi gives queued items no IDs. Position and content identify a line. */}
+    <LedgeLines label="Queued messages" listLabel="Queue, in delivery order"
+      head={<><strong>{items.length}</strong> queued, sent in this order</>}
+      action={{ label: items.length > 1 ? "Clear all" : "Clear", disabled, onPress: clear,
+        title: items.length > 1 ? "Removes every queued message, including ones from other windows. The current run continues."
+          : "Removes the queued message, including from other windows. The current run continues." }}
+      lines={items.map((item, index) => {
+        const kind = queueKindOf(item);
+        return { key: `${index}:${item.kind}:${item.text}`, kind: kindLabels[kind], kindTone: kind === "steer" ? "strong" : undefined,
+          face: kind === "compaction" ? "code" : undefined, text: item.text };
+      })} />
   </>;
 }
