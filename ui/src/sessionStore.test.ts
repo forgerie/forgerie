@@ -74,7 +74,9 @@ describe("Pi command transport", () => {
     const store = createSessionStore("known", api.transport); cleanup.push(store.dispose);
     await store.start();
     await waitFor(store, () => store.getSnapshot().commands.type === "ready");
-    expect(store.getSnapshot().commands).toMatchObject({ type: "ready", commands: [{ name: "session" }, { name: "review" }] });
+    expect(store.getSnapshot().commands).toMatchObject({ type: "ready", commands: [
+      { name: "recap", source: "builtin", description: "Write a catch-up from recent messages" }, { name: "session" }, { name: "review" },
+    ] });
     await store.send("/name Ledger service");
     expect(api.requests.at(-1)).toEqual({ path: "/api/sessions/known/commands/run", body: { cwd: "/workspace with spaces", text: "/name Ledger service" } });
     expect(api.requests.some((request) => request.path.endsWith("/prompt"))).toBe(false);
