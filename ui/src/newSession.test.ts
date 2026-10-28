@@ -85,6 +85,12 @@ describe("starting a session", () => {
     expect(requests[1]!.body).toEqual({ cwd: "/code/forgerie", requestId: expect.any(String), text: "Fix the build" });
   });
 
+  it("names a chosen model chain by its name alone, in place of a model", async () => {
+    const { api, requests } = await server({});
+    await api.start("/code/forgerie", "Fix the build", { modelChain: "worker", thinkingLevel: "high" });
+    expect(requests[0]!.body).toMatchObject({ cwd: "/code/forgerie", modelSpec: "worker", thinkingLevel: "high" });
+  });
+
   it("leaves Pi's defaults alone when nothing was chosen", async () => {
     const { api, requests } = await server({});
     await api.start("/code/forgerie", "hi", {});

@@ -17,7 +17,7 @@ import { issueOutcomeFrom, issueOutcomeOf, type IssueOutcome } from "./issues/fi
 import { suggestionRefOf, suggestionRefSchema, type SuggestionRef } from "./backlog/suggestions/suggestionsApi";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
 import { gatedEntryOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
-import { chainSwitchOf, type ModelChainSwitchNotice } from "./models/chainSwitch";
+import { chainSwitchOf, MODEL_CHAIN_SWITCH_KIND, type ModelChainSwitchNotice } from "./models/chainSwitch";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -161,9 +161,14 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
     // An event this app cannot read still shows, as plain system text.
     return { id, role: "system", parts: [{ type: "text", text }], ...(processEvent ? { processEvent } : {}), key: keyOf(message) };
   }
-  const chainSwitch = chainSwitchOf(message);
-  if (chainSwitch) return { id, role: "system", parts: [{ type: "text", text: `Switched from ${chainSwitch.from} to ${chainSwitch.to}. ${chainSwitch.error}`.trim() }],
-    chainSwitch, key: keyOf(message) };
+  if (role === "custom" && message.customType === MODEL_CHAIN_SWITCH_KIND) {
+    const chainSwitch = chainSwitchOf(message);
+    if (chainSwitch) return { id, role: "system", parts: [{ type: "text", text: `Switched from ${chainSwitch.from} to ${chainSwitch.to}. ${chainSwitch.error}`.trim() }],
+      chainSwitch, key: keyOf(message) };
+    // A switch this app cannot read still shows its text, as plain system text.
+    const text = textOf(message);
+    return text ? { id, role: "system", parts: [{ type: "text", text }], key: keyOf(message) } : undefined;
+  }
   const gatedAction = role === "custom" ? gatedEntryOf(message) : undefined;
   if (gatedAction) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], gatedAction, key: keyOf(message) };
   // A workflow's launch and each decision are user messages to the parent model, but the reader did not type them.

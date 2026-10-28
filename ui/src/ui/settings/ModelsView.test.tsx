@@ -111,6 +111,43 @@ describe("Models settings", () => {
     expect(document.body.textContent).toContain("~/.config/forgerie/config.json");
   });
 
+  describe("model chains as the default and the title model", () => {
+    const remount = async () => {
+      act(() => root.unmount());
+      const host = document.createElement("div"); document.body.replaceChildren(host); root = createRoot(host);
+      await act(async () => root.render(<ModelPrefsContext.Provider value={source}>
+        <ModelsView onBack={() => {}} listModels={async () => models} /></ModelPrefsContext.Provider>));
+      await settle();
+    };
+    const field = (label: string) => [...document.querySelectorAll(".models-default .agent-field")].find((node) => node.querySelector(".agent-field-label")?.textContent === label)!;
+    const chainRow = (name: string) => [...document.querySelectorAll<HTMLButtonElement>(".floating-panel .option-row")].find((node) => node.textContent?.startsWith(name))!;
+    beforeEach(async () => {
+      stored = { ...stored, modelChains: { worker: ["proxy/claude-opus-5-5:high", "proxy/gemini-3.8-flash"] } };
+      await remount();
+    });
+
+    it("makes a chain the default without touching favorites or shown models, and says what new sessions try", async () => {
+      await click(field("Default model").querySelector<HTMLButtonElement>(".model-trigger")!);
+      expect(document.querySelector(".floating-panel .option-list-heading")?.textContent).toBe("Model chains");
+      await click(chainRow("worker"));
+      expect(saves.at(-1)).toEqual({ revision: "r0", favorites: stored.favorites, visible: null, defaultModel: "worker" });
+      expect(field("Default model").querySelector(".model-trigger-choice")?.textContent).toBe("worker");
+      expect(field("Default model").textContent).toContain("New sessions start on the worker chain. They try Claude Opus 5.5 (High), then Gemini 3.8 Flash, moving on when a model is unavailable.");
+      expect(document.querySelector(".model-pref-default")).toBeNull();
+    });
+
+    it("makes a chain the title model, and names a missing one", async () => {
+      await click(field("Session titles").querySelector<HTMLButtonElement>(".model-trigger")!);
+      await click(chainRow("worker"));
+      expect(saves.at(-1)).toMatchObject({ titleModel: "worker" });
+      expect(field("Session titles").textContent).toContain("Writes each new session's title from its first prompt, trying Claude Opus 5.5 (High), then Gemini 3.8 Flash.");
+      stored = { ...stored, titleModel: "gone" };
+      await remount();
+      expect(field("Session titles").querySelector(".model-trigger-choice")?.textContent).toBe("gone");
+      expect(field("Session titles").textContent).toContain("No model chain is named gone. Choose a chain or a model, or create the chain under Model chains.");
+    });
+  });
+
   it("says when no signed-in provider offers the title model", async () => {
     stored = { ...stored, titleModel: "gone/small" };
     act(() => root.unmount());

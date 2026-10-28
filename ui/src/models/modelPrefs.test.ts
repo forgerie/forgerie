@@ -68,6 +68,11 @@ describe("changes", () => {
     expect(applyChange({ favorites: [], visible: null }, { type: "defaultLevel", level: "low" }, models).defaultThinkingLevel).toBe("low");
   });
 
+  it("makes a model chain the default without adding it to the favorites or the shown models", () => {
+    const prefs = { favorites: ["proxy/claude-opus-5-5"], visible: ["proxy/claude-opus-5-5"], defaultModel: "proxy/claude-opus-5-5" };
+    expect(applyChange(prefs, { type: "default", key: "worker" }, models)).toEqual({ ...prefs, defaultModel: "worker" });
+  });
+
   it("will not hide or unstar the default", () => {
     const lists = { favorites: ["proxy/claude-opus-5-5", "proxy/gemini-3.8-flash"], visible: ["proxy/claude-opus-5-5", "proxy/gemini-3.8-flash"], defaultModel: "proxy/claude-opus-5-5" };
     expect(applyChange(lists, { type: "favorite", key: "proxy/claude-opus-5-5", on: false }, models).favorites).toEqual(lists.favorites);
@@ -90,6 +95,8 @@ describe("changes", () => {
     expect(titleModelState(undefined, models)).toBe("unset");
     expect(titleModelState("gone/small", models)).toBe("unavailable");
     expect(titleModelState("proxy/claude-3-5-haiku-20241022", models)).toBe("chosen");
+    expect(titleModelState("worker", models, { worker: ["proxy/claude-3-5-haiku-20241022"] })).toBe("chain");
+    expect(titleModelState("gone", models, { worker: ["proxy/claude-3-5-haiku-20241022"] })).toBe("unknownChain");
   });
 
   it("shows models without listing one twice", () => {

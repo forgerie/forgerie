@@ -2,6 +2,8 @@ import { useState } from "react";
 import { SuggestionModelField } from "./SuggestionModelField";
 import type { SuggestionModel } from "./suggestionsApi";
 import { MODELS } from "./fixtures/suggestions";
+import { ModelPrefsContext } from "../../models/modelPrefsApi";
+import { chainPrefsSource } from "../../models/fixtures/chainPrefs";
 
 export const name = "Backlog suggestion model field";
 export const note = "The model a suggestion's File and act starts on: a global default, a project override, else the chat's model";
@@ -19,4 +21,11 @@ export function Chosen() {
 }
 export function ProjectUnset() {
   return <Field initial={undefined} fallback="The global default, Claude Haiku 4.5" hint="This project's suggestions start on this model. Unset, they use the global default." />;
+}
+/** A model chain chosen as the background model; the picker offers the app's chains above the models. */
+export function Chain() {
+  return <ModelPrefsContext.Provider value={chainPrefsSource()}>
+    <Field initial={{ modelSpec: "worker", thinkingLevel: "medium" }} fallback="The chat's model"
+      hint="File and act starts its background session on this model. Unset, the session uses the model of the chat it came from." />
+  </ModelPrefsContext.Provider>;
 }
