@@ -4,13 +4,14 @@ export const CHILD_RETRY_DELAYS = [30_000, 120_000, 300_000] as const;
 export type ChildModelFailure = "switch-now" | "wait-then-switch" | "fatal";
 const LEGACY_TRANSIENT = /overloaded|\b5\d{2}\b|auth_unavailable|server[ _-]?busy|high demand|at capacity|rate[ _-]?limit|too many requests|\b429\b|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
 const LEGACY_PERMANENT = /invalid.*(?:api[ _-]?key|credentials)|insufficient_quota|quota exceeded|billing|out of budget|usage limit reached|context.*(?:window|limit)|too many tokens/i;
-const TRANSIENT = LEGACY_TRANSIENT;
-const SWITCH = /quota|billing|credits|out of budget|spend(?:ing)?[ _-]?limit|usage[ _-]?limit|GoUsageLimitError|FreeUsageLimitError|available balance|try again in\s*~?\s*[\d.]+\s*min|model.*(?:not[ _-]?found|does not exist|not available|was not found)|unknown model|(?:invalid|incorrect|expired|revoked).*?(?:api[ _-]?key|credentials)|(?:api[ _-]?key|credentials).*(?:invalid|incorrect|expired|revoked)|authentication.*(?:failed|invalid)/i;
+const STATUS = /\b(?:HTTP(?:\/[\d.]+)?|status(?:[ _-]?code)?|error(?:[ _-]?code)?)["']?[\s:=]+["']?(?:429|5\d{2})\b|^\s*(?:429|5\d{2})\b|\((?:429|5\d{2})\)|\b(?:429|5\d{2})\s+(?:Internal\b|Too Many Requests\b|Service Unavailable\b|Overloaded\b|Bad Gateway\b|Gateway Timeout\b)/i;
+const TRANSIENT = /\boverloaded(?:_error)?\b|\bauth_unavailable\b|server[ _-]?busy|high demand|at capacity|\brate[ _-]?limit(?:[ _-](?:exceeded|error))?\b|too many requests|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
+const SWITCH = /\b(?:quota|billing|insufficient_quota|billing_hard_limit(?:_reached)?|enforced_spend_limit_reached|GoUsageLimitError|FreeUsageLimitError)\b|\b(?:out of|insufficient|exhausted) credits\b|\bcredit balance is too low\b|\bout of budget\b|\bspend(?:ing)?[ -]limit\b|\busage[ _-]limit(?:[ _-]reached)?\b|\bavailable balance\b|\btry again in\s*~?\s*[\d.]+\s*min\b|\bmodel.*(?:not[ _-]?found|does not exist|not available|was not found)\b|\bunknown model\b|\b(?:invalid|incorrect|expired|revoked)\b.*?\b(?:api[ _-]?key|credentials)\b|\b(?:api[ _-]?key|credentials)\b.*\b(?:invalid|incorrect|expired|revoked)\b|\bauthentication.*(?:failed|invalid)\b/i;
 export function classifyChildModelError(error: string): ChildModelFailure {
   if (/context.*(?:window|limit|length)|too many tokens|maximum.*tokens/i.test(error)) return "fatal";
   const requested = /server requested\s+([\d.]+)s retry delay/i.exec(error);
   if (SWITCH.test(error) || (requested !== null && Number(requested[1]) > 60)) return "switch-now";
-  return TRANSIENT.test(error) ? "wait-then-switch" : "fatal";
+  return STATUS.test(error) || TRANSIENT.test(error) ? "wait-then-switch" : "fatal";
 }
 /** Durable settles missing catalog models as no_model, keeping the actual text only on its task receipt. */
 export function unavailableChildModel(error: string): string | undefined {

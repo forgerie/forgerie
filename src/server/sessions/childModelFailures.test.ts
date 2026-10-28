@@ -64,3 +64,28 @@ describe("single-model legacy compatibility", () => {
     }
   });
 });
+
+describe("multi-model error wording", () => {
+  it.each([
+    "Invalid request: expected at least 500 tokens",
+    "Invalid request: file /models/500/config.json",
+    "Invalid request: tool rebilling_report is not defined",
+    "Invalid request: tool quota_report is not defined",
+  ])("does not switch or wait for unrelated numbers and identifiers: %s", (error) => {
+    expect(classifyChildModelError(error)).toBe("fatal");
+    expect(planChildModelFailure({ models: ["a/one", "b/two"], current: "a/one", error, now: 0, cooldowns: {} })).toEqual({ kind: "report" });
+  });
+  it.each([
+    // Provider/SDK messages: Anthropic credit error, OpenAI codes, and pi-ai Codex/retry messages.
+    "Your credit balance is too low to access the Anthropic API",
+    '{"error":{"type":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}',
+    "billing_hard_limit", "enforced_spend_limit_reached", "quota exceeded",
+    "You have hit your ChatGPT usage limit (plus plan). Try again in ~17 min.",
+    "Server requested 120s retry delay (max: 60s). HTTP 429 Too Many Requests",
+  ])("switches for real quota/billing/reset wording: %s", (error) => { expect(classifyChildModelError(error)).toBe("switch-now"); });
+  it.each([
+    '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+    "HTTP 529", "rate_limit_exceeded", "HTTP 500", "status 503", "status code: 502", '"status": 503',
+    "500 Internal Server Error", "error 429", "429 Too Many Requests", "request failed (429)", "HTTP/1.1 503 Service Unavailable",
+  ])("waits for provider overload or status wording: %s", (error) => { expect(classifyChildModelError(error)).toBe("wait-then-switch"); });
+});
