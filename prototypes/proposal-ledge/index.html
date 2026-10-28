@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The ledge: proposals and the queue at the input bar</title>
+<!--
+  Mockup: what the agent proposes (backlog suggestions, workflow proposals)
+  and what waits to be sent (Pi's queue) collect in one ledge that grows out
+  of the input bar's top edge. Pick a scene with ?scene=<name>; SCENES below
+  lists them. Tokens and fonts match ui/src/ui/theme.css.
+-->
+<style>
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900; font-display: block;
+  src: url(../stage-strip-blocks/fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono Variable"; font-weight: 100 800; font-display: block;
+  src: url(../stage-strip-blocks/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2"); }
+
+:root {
+  color-scheme: light dark;
+  --tint: 106;
+  --background: oklch(0.992 0.002 var(--tint));
+  --foreground: oklch(0.145 0.006 var(--tint));
+  --muted: oklch(0.97 0.004 var(--tint));
+  --muted-foreground: oklch(0.53 0.007 var(--tint));
+  --line: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --line-focus: color-mix(in oklab, var(--foreground) 25%, transparent);
+  --code-surface: color-mix(in oklab, var(--foreground) 4%, var(--background));
+  --popover: var(--background);
+  --hover-surface: color-mix(in oklab, var(--foreground) 4%, transparent);
+  --active-surface: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --quiet-foreground: color-mix(in oklab, var(--foreground) 70%, transparent);
+  --body-font: "Public Sans Variable", sans-serif;
+  --code-font: "JetBrains Mono Variable", monospace;
+  --text-size: 0.9375rem;
+  --small-text: 0.8125rem;
+  --label-text: 0.75rem;
+  --meta-text: 0.6875rem;
+  --code-size: 0.78125rem;
+  --line-height: 1.625;
+  --thread-max-width: 42rem;
+  --radius-thread: 1rem;
+  --radius-control: 0.5rem;
+  --radius-surface: 0.625rem;
+  --gutter: clamp(1rem, 2.6cqi, 1.5rem);
+  --footer-space: clamp(0.5rem, 2.5cqb, 1.25rem);
+  --control-size: 2.75rem;
+  --icon-size: 1.75rem;
+  --header-size: 3rem;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem;
+  --live: oklch(0.623 0.214 259.815);
+  --live-edge: color-mix(in oklab, var(--live) 45%, transparent);
+  --ink-live: color-mix(in oklab, var(--live) 75%, var(--foreground));
+  --diff-remove: oklch(0.6 0.2 25);
+  --ink-bad: color-mix(in oklab, var(--diff-remove) 78%, var(--foreground));
+  --float-shadow: 0 1px 2px oklch(0 0 0 / 0.06), 0 0.25rem 0.75rem -0.25rem oklch(0 0 0 / 0.14), 0 1rem 2rem -0.75rem oklch(0 0 0 / 0.2);
+  /* The input bar's own surface (composer.tsx: bg-muted/30). The ledge is made of it. */
+  --bar-surface: color-mix(in oklab, var(--muted) 30%, var(--background));
+  /* Opaque edges: the ledge's wall and the bar's top edge meet, and two translucent lines would darken where they cross. */
+  --edge: color-mix(in oklab, var(--foreground) 10%, var(--background));
+  --edge-focus: color-mix(in oklab, var(--foreground) 25%, var(--background));
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.003 var(--tint));
+    --foreground: oklch(0.985 0.002 var(--tint));
+    --muted: oklch(0.275 0.004 var(--tint));
+    --muted-foreground: oklch(0.708 0.004 var(--tint));
+    --popover: oklch(0.215 0.003 var(--tint));
+    --diff-remove: oklch(0.7 0.19 25);
+    --float-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent), 0 1px 2px oklch(0 0 0 / 0.5), 0 1rem 2rem -0.75rem oklch(0 0 0 / 0.6);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { block-size: 100%; margin: 0; }
+body { background: var(--background); color: var(--foreground); font-family: var(--body-font); font-size: var(--text-size); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+svg { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+code { font-family: var(--code-font); font-size: var(--code-size); font-variant-ligatures: none; }
+
+/* ---------- Session shell, header and thread, as shipped ---------- */
+.session-shell { container: shell / size; position: relative; block-size: 100dvh; display: flex; flex-direction: column; min-inline-size: 0; }
+.session-header { flex: none; block-size: var(--header-size); display: flex; align-items: center; gap: var(--space-2);
+  padding-inline: clamp(1rem, 2.6cqi, 1.25rem); border-block-end: 1px solid var(--line); }
+.session-title { flex: 1; min-inline-size: 0; margin: 0; font-size: var(--small-text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-button { position: relative; display: grid; place-items: center; flex: none; inline-size: var(--icon-size); block-size: var(--icon-size);
+  padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.icon-button svg { inline-size: 1.125rem; block-size: 1.125rem; }
+.icon-button:hover { background: var(--hover-surface); color: var(--foreground); }
+/* Drawn small, pressed large: every small control reaches the 44px hit area through ::before. */
+.hit::before, .icon-button::before { content: ""; position: absolute; inset-block-start: 50%; inset-inline-start: 50%;
+  inline-size: max(100%, var(--control-size)); block-size: max(100%, var(--control-size)); translate: -50% -50%; }
+
+.thread { flex: 1; min-block-size: 0; overflow-y: auto; padding: clamp(1rem, 3cqb, 1.5rem) var(--gutter) var(--space-4); }
+.thread-inner { max-inline-size: var(--thread-max-width); margin-inline: auto; display: flex; flex-direction: column; gap: clamp(1rem, 3.2cqb, 1.5rem); }
+.bubble { align-self: flex-end; max-inline-size: min(85%, 32rem); padding: 0.5rem 1rem; border-radius: var(--radius-thread); background: var(--muted); line-height: var(--line-height); }
+.reply { line-height: var(--line-height); }
+.reply p { margin: 0 0 0.75rem; }
+.reply p:last-child { margin-block-end: 0; }
+.reply code { padding: 0.0625rem 0.3125rem; border-radius: 0.25rem; background: var(--code-surface); }
+.event { position: relative; margin: 0; padding-inline-start: calc(7px + var(--space-2)); color: var(--muted-foreground); font-size: var(--small-text); line-height: 1.5; }
+.event::before { content: ""; position: absolute; inset-inline-start: 0; inset-block-start: calc(0.75em - 3.5px); inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--muted-foreground); }
+.event strong { color: var(--foreground); font-weight: 550; }
+
+/* Today's backlog card in the thread (DecisionCard, ink edge), for the "today" scene. */
+.decision-card { display: grid; gap: var(--space-2); padding: var(--space-1) 0 var(--space-1) var(--space-4); border-inline-start: 0.125rem solid var(--foreground);
+  font-size: var(--small-text); line-height: 1.5; }
+.decision-card h3 { margin: 0; font-size: var(--small-text); font-weight: 600; }
+.decision-card .lead { font-size: var(--text-size); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.decision-card p { margin: 0; font-size: var(--text-size); line-height: 1.625; }
+.decision-card .where { color: var(--muted-foreground); }
+.decision-card .choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* Today's queue (theme.css .queue), for the "today" scene. */
+.old-queue { display: flex; flex-direction: column; gap: var(--space-1); margin-block-end: var(--space-3); font-size: var(--small-text); }
+.old-queue-head { display: flex; align-items: center; justify-content: space-between; padding-inline-start: var(--space-1); color: var(--muted-foreground);
+  font-family: var(--code-font); font-size: var(--meta-text); }
+.old-queue-head button { min-block-size: var(--control-size); padding-inline: var(--space-2); border: 0; background: transparent; color: var(--muted-foreground); font-family: var(--body-font); font-size: var(--small-text); }
+.old-queue-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--line);
+  border-radius: var(--radius-surface); background: var(--bar-surface); }
+.old-queue-item span:first-child { flex: none; min-inline-size: 4.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); }
+.old-queue-item span:last-child { flex: 1 1 12rem; color: var(--quiet-foreground); line-height: 1.45; }
+
+/* ---------- Buttons ---------- */
+.button { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 2rem; padding-inline: var(--space-3);
+  border: 1px solid var(--edge); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.button:hover { border-color: var(--edge-focus); }
+.button svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.button[data-primary] { border-color: transparent; background: var(--foreground); color: var(--background); }
+.button[data-primary]:hover { background: color-mix(in oklab, var(--foreground) 88%, var(--background)); }
+.button[data-quiet] { border-color: transparent; color: var(--muted-foreground); }
+.button[data-quiet]:hover { background: var(--hover-surface); color: var(--foreground); }
+.square { position: relative; flex: none; display: grid; place-items: center; inline-size: 2rem; block-size: 2rem; padding: 0; border: 0;
+  border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); }
+.square:hover, .square[aria-expanded="true"] { background: var(--hover-surface); color: var(--foreground); }
+.square svg { inline-size: 1rem; block-size: 1rem; }
+
+/* ---------- The dock: the ledge, then the input bar ---------- */
+.dock { flex: none; position: relative; display: flex; flex-direction: column; margin: 0 var(--gutter) var(--footer-space); }
+@container shell (min-width: 46rem) { .dock { margin-inline: auto; inline-size: min(var(--thread-max-width), 100% - 2 * var(--gutter)); } }
+.dock { --wall: var(--edge); }
+.dock:focus-within { --wall: var(--edge-focus); }
+
+/* The ledge grows out of the bar's top edge. It is made of the bar's surface and the bar's edge, sits inside the bar's
+   rounded corners, and meets the bar's top edge with two small inner curves, so it reads as one object pulled up out
+   of the bar, not a card that sits on it. It has no bottom edge: the bar's top edge stops under it. */
+.ledge { --fillet: 0.5rem; --inset: calc(var(--radius-thread) + var(--fillet));
+  container: ledge / inline-size; position: relative; z-index: 1; margin: 0 var(--inset) -2px;
+  border: 1px solid var(--wall); border-block-end: 0; border-radius: var(--radius-surface) var(--radius-surface) 0 0;
+  background: var(--bar-surface); font-size: var(--small-text); }
+.ledge::before, .ledge::after { content: ""; position: absolute; inset-block-end: 1px; inline-size: var(--fillet); block-size: var(--fillet); pointer-events: none; }
+.ledge::before { inset-inline-start: calc(-1 * var(--fillet));
+  background: radial-gradient(circle at 0 0, transparent calc(var(--fillet) - 1px), var(--wall) calc(var(--fillet) - 1px), var(--wall) var(--fillet), var(--bar-surface) calc(var(--fillet) + 0.5px)); }
+.ledge::after { inset-inline-end: calc(-1 * var(--fillet));
+  background: radial-gradient(circle at 100% 0, transparent calc(var(--fillet) - 1px), var(--wall) calc(var(--fillet) - 1px), var(--wall) var(--fillet), var(--bar-surface) calc(var(--fillet) + 0.5px)); }
+.ledge-body { display: flex; flex-direction: column; min-inline-size: 0; }
+
+/* More than one proposal, folded: the newest one is in front, and the edges of the others show behind it. Two edges
+   at most, so three proposals and thirty look the same until the count is read. */
+/* The edges take their own room, so they never cover the thread's last line. */
+.ledge:has(> .lips) { margin-block-start: 0.5625rem; }
+.lips { position: absolute; inset-inline: 0; inset-block-end: 100%; block-size: 0.5rem; pointer-events: none; }
+.lip { position: absolute; inset-block-end: 0; block-size: 0.3125rem; border: 1px solid var(--wall); border-block-end: 0;
+  border-radius: 0.4375rem 0.4375rem 0 0; background: var(--bar-surface); }
+.lip:nth-child(1) { inset-inline: var(--space-3); }
+.lip:nth-child(2) { inset-inline: var(--space-6); inset-block-end: 0.3125rem; block-size: 0.25rem; }
+@container shell (height < 30rem) { .lip:nth-child(2) { display: none; } }
+
+/* ---------- A proposal row ---------- */
+.props { margin: 0; padding: 0; list-style: none; }
+.prop { position: relative; display: flex; align-items: center; gap: var(--space-2) var(--space-3); min-inline-size: 0; min-block-size: 3rem;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3); }
+.props > .prop + .prop { border-block-start: 1px solid var(--line); }
+/* The row's words are one press: it shows the full card in the chat. */
+.prop-main { position: relative; flex: 1; min-inline-size: 0; display: grid; gap: 0.125rem; padding: var(--space-1) 0; border: 0; background: transparent;
+  text-align: start; border-radius: var(--radius-control); }
+.prop-main:hover .prop-title { text-decoration: underline; text-decoration-color: var(--line-focus); text-underline-offset: 0.2em; }
+.prop-line { display: flex; align-items: baseline; gap: var(--space-2); min-inline-size: 0; }
+.prop-kind { flex: none; min-inline-size: 3.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; }
+.prop[data-kind="workflow"] .prop-kind { color: var(--ink-live); }
+.prop-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.prop-gist { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--label-text); }
+/* One proposal has the room to say what it is about; a short window spends that line on the thread. */
+@container shell (height < 30rem) { .prop-gist { display: none; } }
+.prop-actions { flex: none; display: flex; align-items: center; gap: var(--space-1); }
+/* One filled button per ledge. In the open list every row has the same weight, so the primaries are outlined and File goes quiet. */
+.ledge[data-open] .prop .button[data-primary] { border-color: var(--edge-focus); background: transparent; color: var(--foreground); }
+.ledge[data-open] .prop .button[data-primary]:hover { background: var(--hover-surface); }
+.ledge[data-open] .prop .button:not([data-primary]) { border-color: transparent; color: var(--muted-foreground); }
+.prop-status { flex: none; color: var(--muted-foreground); font-size: var(--label-text); white-space: nowrap; padding-inline-end: var(--space-2); }
+.prop-status[data-tone="live"] { color: var(--ink-live); }
+.prop-problem { color: var(--ink-bad); font-size: var(--label-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prop-done { color: var(--muted-foreground); }
+.prop-done .prop-title { font-weight: 450; color: var(--quiet-foreground); }
+.prop-done a { color: var(--ink-live); font-weight: 500; text-decoration: underline; text-decoration-color: var(--live-edge); text-underline-offset: 0.2em; }
+
+/* The count, at the front of the folded stack: a press opens the list. */
+.stack-toggle { position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.125rem; block-size: 1.75rem; padding: 0 0.3125rem 0 0.4375rem;
+  margin-inline-start: calc(-1 * var(--space-1)); border: 1px solid var(--edge); border-radius: var(--radius-control); background: var(--background);
+  font-size: var(--label-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.stack-toggle:hover { border-color: var(--edge-focus); }
+.stack-toggle svg { inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+
+/* The open list: a heading that counts, then one line per proposal. It scrolls inside a share of the window's height,
+   so the bar under it keeps its room; a cut row and a fade say there is more. */
+.ledge-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: 2.25rem;
+  padding-inline: var(--space-3) var(--space-1); border-block-end: 1px solid var(--line); color: var(--muted-foreground); font-size: var(--label-text); }
+.ledge-head strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ledge[data-open] .props { max-block-size: min(40cqb, 20rem); overflow-y: auto; overscroll-behavior: contain; }
+@container shell (height < 30rem) { .ledge[data-open] .props { max-block-size: 34cqb; } }
+.ledge[data-open] .props[data-overflow] { mask-image: linear-gradient(to bottom, #000 calc(100% - 1.75rem), transparent); }
+
+/* Width decides the actions. Wide: File and File and act inline, the rest in More. Narrow: the one primary inline,
+   the rest in More. Very narrow: the words take the row, the actions wrap under them at the end. */
+.wide-only { display: none; }
+@container ledge (width >= 30rem) { .wide-only { display: inline-flex; } .narrow-only { display: none; }
+  /* The second line starts where the title starts. */
+  .prop-gist, .prop-problem { padding-inline-start: calc(3.75rem + var(--space-2)); } }
+/* Narrow: the kind moves over the title, so the title gets the row's whole width. */
+@container ledge (width < 30rem) {
+  .prop-line { flex-direction: column; align-items: stretch; gap: 0; }
+  .prop-kind { min-inline-size: 0; line-height: 1.3; }
+  /* The title is the summary: two lines before it cuts, and the press shows the rest. */
+  .prop-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+  .q-kind { min-inline-size: 3.75rem; }
+}
+@container ledge (width < 20rem) {
+  .prop { flex-wrap: wrap; padding-block-end: var(--space-2); }
+  .prop-main { flex-basis: 100%; order: -1; }
+  .prop-actions { margin-inline-start: auto; }
+  .prop-kind { min-inline-size: 0; }
+}
+
+/* ---------- The queue, in the same ledge, nearest the bar ---------- */
+/* What waits to be sent sits closest to where it was typed. It is quieter than a proposal: no action of its own,
+   because Pi can only clear the whole queue. Each line shows its start; a press shows all of it. */
+.queue { min-inline-size: 0; }
+.props + .queue, .ledge-head + .props + .queue { border-block-start: 1px solid var(--line); }
+.queue-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: 2.25rem;
+  padding-inline: var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); }
+.queue-head strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+.queue-items { margin: 0; padding: 0 0 var(--space-1); list-style: none; max-block-size: min(22cqb, 9rem); overflow-y: auto; overscroll-behavior: contain; }
+.q { display: flex; align-items: baseline; gap: var(--space-2) var(--space-3); min-inline-size: 0; padding-inline: var(--space-3) var(--space-1); }
+.q-main { flex: 1; min-inline-size: 0; display: flex; align-items: baseline; gap: var(--space-2); min-block-size: 2rem; padding: 0.4375rem 0; border: 0; background: transparent; text-align: start; }
+.q-kind { flex: none; min-inline-size: 3.75rem; color: var(--muted-foreground); font-family: var(--code-font); font-size: var(--meta-text); font-variant-ligatures: none; }
+.q[data-kind="steer"] .q-kind { color: var(--foreground); }
+.q-text { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--quiet-foreground); line-height: 1.45; }
+.q[data-expanded] .q-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.q-solo { padding-block: var(--space-1); }
+.q-solo .button { align-self: center; }
+
+/* ---------- The input bar, as shipped ---------- */
+.bar { position: relative; border: 1px solid var(--wall); border-radius: var(--radius-thread); background: var(--bar-surface); }
+.bar-text { min-block-size: 2.25rem; padding: var(--space-3) var(--space-4) var(--space-2); font-size: 1rem; line-height: 1.5rem; overflow-wrap: anywhere; }
+.bar-text[data-empty] { color: var(--muted-foreground); }
+.bar-actions { display: flex; align-items: center; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
+.model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 1 auto; min-inline-size: 0; overflow: hidden; block-size: 2rem; padding-inline: var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.model-trigger span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.model-trigger svg { inline-size: 0.875rem; block-size: 0.875rem; }
+.spacer { flex: 1; }
+.send { position: relative; display: grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); border: 0; border-radius: var(--radius-control);
+  background: var(--foreground); color: var(--background); }
+.send svg { inline-size: 1rem; block-size: 1rem; }
+.send[data-outline] { border: 1px solid var(--line-focus); background: transparent; color: var(--foreground); }
+.send[data-disabled] { opacity: 0.4; }
+.steer { block-size: 2rem; padding-inline: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; }
+
+/* ---------- More: a menu at window level, so a scrolled list can never clip it ---------- */
+.menu { position: fixed; z-index: 20; min-inline-size: 12rem; max-inline-size: calc(100vw - 1rem); padding: var(--space-1); border: 1px solid var(--line);
+  border-radius: var(--radius-surface); background: var(--popover); box-shadow: var(--float-shadow); font-size: var(--small-text); }
+.menu-head { padding: var(--space-2) var(--space-3) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.4; }
+.menu-head code { color: var(--foreground); font-size: var(--meta-text); }
+.menu button { display: flex; align-items: center; gap: var(--space-2); inline-size: 100%; min-block-size: var(--control-size); padding-inline: var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: transparent; text-align: start; }
+.menu button:hover { background: var(--hover-surface); }
+.menu button svg { inline-size: 1rem; block-size: 1rem; color: var(--muted-foreground); }
+.menu [hidden] { display: none; }
+.menu hr { margin: var(--space-1) var(--space-2); border: 0; border-block-start: 1px solid var(--line); }
+
+.sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main class="session-shell" id="shell"></main>
+
+<script>
+const icon = {
+  panel: '<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>',
+  tree: '<svg viewBox="0 0 24 24"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>',
+  chevUp: '<svg viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg>',
+  chevDown: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>',
+  locate: '<svg viewBox="0 0 24 24"><path d="M3 12h4"/><path d="M17 12h4"/><path d="M12 3v4"/><path d="M12 17v4"/><circle cx="12" cy="12" r="3"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  cpu: '<svg viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="2"/><path d="M9 9h6v6H9z"/></svg>',
+};
+const esc = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/* ---------- Content: real shapes from the backlog fixtures and the propose tools ---------- */
+const KIND = { issue: "Issue", backlog: "Backlog", workflow: "Workflow" };
+const PROPOSALS = {
+  retry: { kind: "issue", title: "Retry once when the provider stream drops before message.end",
+    gist: "A stream that closes early ends the reply with no error, so you read half an answer.", where: "simonwjackson/forgerie" },
+  theme: { kind: "workflow", title: "Split theme.css into one file per surface",
+    gist: "3 stages, 2 workers. Every part renders again at the four Fold postures before it lands." },
+  dock: { kind: "backlog", title: "Give the pinned dock a height budget when the Fold is on its side",
+    gist: "At 711 × 374 the dock and the bar leave four lines of thread.", where: ".forgerie/backlog/2026-10-28-dock-height.md" },
+  picker: { kind: "issue", title: "Show the thinking level in the session picker", gist: "", where: "simonwjackson/forgerie" },
+  oldline: { kind: "backlog", title: "Drop OldIssueProposalLine after the next archive sweep", gist: "", where: ".forgerie/backlog/2026-10-28-old-issue-line.md" },
+  audit: { kind: "workflow", title: "Audit every *.part.tsx for a narrow-tall state", gist: "" },
+  meter: { kind: "issue", title: "Count a queued compaction in the context meter", gist: "", where: "simonwjackson/forgerie" },
+  steer: { kind: "backlog", title: "Say what Steer does in its tooltip, not how", gist: "", where: ".forgerie/backlog/2026-10-28-steer-tooltip.md" },
+  longword: { kind: "issue", title: "Handle ERR_HTTP2_PROTOCOL_ERROR_DURING_STREAM_RESET_AFTER_GOAWAY_FRAME_RECEIVED in streamRelay.ts", gist: "", where: "simonwjackson/forgerie" },
+};
+const QUEUE = {
+  steer: { kind: "steer", text: "Also check the session store, it might clear the rows the same way." },
+  follow: { kind: "followUp", text: "When that's done, run the Fold postures and send me the light and dark shots." },
+  long: { kind: "followUp", text: "Then write the test for the resume path. It should cover a read that returns after the app comes back, a read that fails, and a read that is still running when the app goes to the background again, because that third case is the one that flashed on the Fold this morning and I want to be sure it stays fixed." },
+};
+const QKIND = { steer: "Steer", followUp: "Follow-up", compaction: "Compaction" };
+
+/* ---------- Scenes ---------- */
+const SCENES = {
+  today: { today: true, running: true, queue: ["steer", "follow"] },
+  one: { props: ["retry"] },
+  "one-workflow": { props: ["theme"] },
+  many: { props: ["retry", "theme", "dock"] },
+  "many-open": { props: ["retry", "theme", "dock"], open: true },
+  "lots-open": { props: ["retry", "theme", "dock", "picker", "oldline", "audit", "meter", "steer", "longword"], open: true },
+  queue: { running: true, queue: ["steer", "follow", "long"] },
+  "queue-one": { running: true, queue: ["follow"] },
+  both: { props: ["retry", "theme", "dock"], running: true, queue: ["steer", "follow"] },
+  "both-open": { props: ["retry", "theme", "dock"], open: true, running: true, queue: ["steer", "follow"] },
+  menu: { props: ["retry"], menu: 0 },
+  states: { props: ["retry", "theme", "dock", "longword"], open: true,
+    states: { retry: { kind: "filing" }, dock: { kind: "failed", message: "Not filed: the backlog folder is read-only." }, theme: { kind: "done" } } },
+};
+const params = new URLSearchParams(location.search);
+const name = params.get("scene") ?? "many";
+const scene = structuredClone(SCENES[name] ?? SCENES.many);
+document.title = `Ledge: ${name}`;
+const state = { props: [...(scene.props ?? [])], open: !!scene.open, queue: [...(scene.queue ?? [])], expanded: new Set(), menu: scene.menu };
+
+/* ---------- Rows ---------- */
+function actionsFor(id, index) {
+  const p = PROPOSALS[id];
+  const s = scene.states?.[id];
+  if (s?.kind === "filing") return `<span class="prop-status" data-tone="live" role="status">Filing and starting…</span>`;
+  if (s?.kind === "failed") return `<button class="button hit" data-primary>Retry</button>${moreButton(index)}`;
+  if (s?.kind === "done") return `<button class="button hit" data-quiet>Open</button>`;
+  if (p.kind === "workflow") return `<button class="button hit" data-primary>Review</button>${moreButton(index)}`;
+  return `<button class="button hit wide-only" title="File it and keep it for later">File</button>
+    <button class="button hit" data-primary title="File it and start a background session on Claude Haiku 4.5">File and act</button>${moreButton(index)}`;
+}
+const moreButton = (index) => `<button class="square hit" data-more="${index}" aria-label="More" aria-haspopup="menu" aria-expanded="${state.menu === index}">${icon.more}</button>`;
+
+function propRow(id, index, { gist = false, toggle = 0 } = {}) {
+  const p = PROPOSALS[id];
+  const s = scene.states?.[id];
+  const words = s?.kind === "done"
+    ? `<span class="prop-line"><span class="prop-kind">${KIND[p.kind]}</span><span class="prop-title">Started: ${esc(p.title)}</span></span>`
+    : `<span class="prop-line"><span class="prop-kind">${KIND[p.kind]}</span><span class="prop-title">${esc(p.title)}</span></span>
+       ${s?.kind === "failed" ? `<span class="prop-problem">${esc(s.message)}</span>` : gist && p.gist ? `<span class="prop-gist">${esc(p.gist)}</span>` : ""}`;
+  return `<li class="prop${s?.kind === "done" ? " prop-done" : ""}" data-kind="${p.kind}" data-id="${id}">
+    ${toggle > 1 ? `<button class="stack-toggle hit" data-toggle aria-expanded="false" aria-label="Show all ${toggle} proposals">${toggle}${icon.chevUp}</button>` : ""}
+    <button class="prop-main" title="Show the full card in the chat">${words}</button>
+    <span class="prop-actions">${actionsFor(id, index)}</span>
+  </li>`;
+}
+
+function proposalsBlock() {
+  const ids = state.props;
+  if (ids.length === 0) return "";
+  if (ids.length === 1) return `<ul class="props" aria-label="1 proposal">${propRow(ids[0], 0, { gist: true })}</ul>`;
+  if (!state.open) {
+    // Folded: the newest proposal in front. The count opens the list.
+    const front = ids[ids.length - 1];
+    return `<ul class="props" aria-label="${ids.length} proposals, newest shown">${propRow(front, ids.length - 1, { toggle: ids.length })}</ul>`;
+  }
+  // Open: newest first, so the one in front of the folded stack stays on top.
+  const rows = ids.map((id, index) => ({ id, index })).reverse();
+  return `<div class="ledge-head"><span><strong>${ids.length}</strong> proposals</span>
+      <button class="button hit" data-quiet data-toggle aria-expanded="true">Fold${icon.chevDown}</button></div>
+    <ul class="props" aria-label="${ids.length} proposals"${ids.length > 4 ? " data-overflow" : ""}>${rows.map(({ id, index }) => propRow(id, index)).join("")}</ul>`;
+}
+
+function queueBlock() {
+  const items = state.queue;
+  if (items.length === 0) return "";
+  const row = (key, index) => {
+    const q = QUEUE[key];
+    return `<li class="q${state.expanded.has(index) ? "" : ""}" data-kind="${q.kind}"${state.expanded.has(index) ? " data-expanded" : ""}>
+      <button class="q-main" data-q="${index}" title="Show all of it"><span class="q-kind">${QKIND[q.kind]}</span><span class="q-text">${esc(q.text)}</span></button></li>`;
+  };
+  if (items.length === 1) {
+    const q = QUEUE[items[0]];
+    return `<section class="queue" aria-label="1 queued message"><div class="q q-solo" data-kind="${q.kind}"${state.expanded.has(0) ? " data-expanded" : ""}>
+      <button class="q-main" data-q="0" title="Show all of it"><span class="q-kind">${QKIND[q.kind]}</span><span class="q-text">${esc(q.text)}</span></button>
+      <button class="button hit" data-quiet title="Removes the queued message. The current run continues.">Clear</button></div></section>`;
+  }
+  return `<section class="queue" aria-label="${items.length} queued messages">
+    <div class="queue-head"><span><strong>${items.length}</strong> queued, sent in this order</span>
+      <button class="button hit" data-quiet title="Removes every queued message, including ones from other windows. The current run continues.">Clear all</button></div>
+    <ol class="queue-items">${items.map(row).join("")}</ol></section>`;
+}
+
+function ledge() {
+  const p = proposalsBlock(), q = queueBlock();
+  if (p === "" && q === "") return "";
+  const folded = state.props.length > 1 && !state.open;
+  return `<section class="ledge" aria-label="Waiting at the input"${state.open && state.props.length > 1 ? " data-open" : ""}>
+    ${folded ? `<div class="lips" aria-hidden="true"><span class="lip"></span>${state.props.length > 2 ? '<span class="lip"></span>' : ""}</div>` : ""}
+    <div class="ledge-body">${p}${q}</div></section>`;
+}
+
+function bar() {
+  const running = scene.running;
+  const text = running ? "" : "";
+  return `<div class="bar">
+    <div class="bar-text" data-empty>${running ? "Queue a message, or steer" : "Ask anything"}</div>
+    <div class="bar-actions">
+      <button class="icon-button" aria-label="Attach">${icon.plus}</button>
+      <button class="model-trigger"><span>Claude Opus 5.5</span><span>High</span>${icon.chevDown}</button>
+      <button class="icon-button" aria-label="Dictate">${icon.mic}</button>
+      <span class="spacer"></span>
+      ${running ? `<button class="steer" disabled>Steer</button><button class="send" data-outline data-disabled aria-label="Queue message">${icon.up}</button>
+        <button class="send" aria-label="Stop">${icon.stop}</button>` : `<button class="send" data-disabled aria-label="Send">${icon.up}</button>`}
+    </div></div>`;
+}
+
+/* ---------- The thread ---------- */
+function thread() {
+  const p = PROPOSALS.retry;
+  const card = `<div class="decision-card"><h3>Backlog suggestion</h3><div class="lead">${esc(p.title)}</div>
+      <p>Today a stream that closes early ends the reply with no error, and the reader sees half an answer. Retry once from the last complete block. If the retry fails too, say so in the reply.</p>
+      <div class="where">Files an issue in <code>simonwjackson/forgerie</code>. File and act starts on Claude Haiku 4.5.</div>
+      <div class="choices"><button class="button hit" data-primary>File and act</button><button class="button hit">File</button><button class="button hit" data-quiet>Dismiss</button></div></div>`;
+  return `<div class="thread"><div class="thread-inner">
+    <div class="bubble">The tool row stays on "running" after the stream drops. Can you find why and fix it?</div>
+    <div class="reply">
+      <p>The row stuck because <code>streamRelay.ts</code> never sends <code>tool.end</code> when the provider closes the stream early. I close every open row on a lost stream now, and the new test covers it.</p>
+      <p>The same early close also cuts the reply itself short, with no error. That is a separate fix, so I suggested it for the backlog instead of doing it here.</p>
+    </div>
+    ${scene.today ? card : `<p class="event">Suggested for the backlog: <strong>${esc(p.title)}</strong>. It waits at the input.</p>`}
+  </div></div>`;
+}
+
+function oldQueue() {
+  return `<section class="old-queue"><div class="old-queue-head"><span>${state.queue.length} queued</span><button>Clear entire queue (${state.queue.length})</button></div>
+    ${state.queue.map((key) => `<div class="old-queue-item"><span>${QKIND[QUEUE[key].kind]}</span><span>${esc(QUEUE[key].text)}</span></div>`).join("")}</section>`;
+}
+
+/* ---------- More menu ---------- */
+function menu(index) {
+  const id = state.props[index];
+  const p = PROPOSALS[id];
+  const filing = p.kind !== "workflow";
+  return `<div class="menu" role="menu" aria-label="More for this proposal">
+    <div class="menu-head">${p.kind === "issue" ? `Files an issue in <code>${p.where}</code>` : p.kind === "backlog" ? `Files <code>${p.where.split("/").pop()}</code> in the backlog folder` : "A workflow for this task"}</div>
+    ${filing ? `<button role="menuitem" class="narrow-menu">${icon.file}File</button>
+    <button role="menuitem">${icon.cpu}File and act on another model…</button>` : ""}
+    <button role="menuitem">${icon.locate}Show the full card in the chat</button>
+    <hr>
+    <button role="menuitem">${icon.x}Dismiss</button></div>`;
+}
+
+function render() {
+  const shell = document.getElementById("shell");
+  shell.innerHTML = `
+    <header class="session-header">
+      <button class="icon-button" aria-label="Sessions">${icon.panel}</button>
+      <h1 class="session-title">Fix the stuck tool row after a lost stream</h1>
+      <button class="icon-button" aria-label="Session tree">${icon.tree}</button>
+    </header>
+    ${thread()}
+    <div class="dock">${scene.today ? (state.queue.length ? oldQueue() : "") : ledge()}${bar()}</div>
+    ${state.menu !== undefined && state.props[state.menu] !== undefined ? menu(state.menu) : ""}`;
+  placeMenu();
+}
+
+// The menu opens above its button, at window level, kept inside the window.
+function placeMenu() {
+  const m = document.querySelector(".menu");
+  const b = document.querySelector(`[data-more="${state.menu}"]`);
+  if (!m || !b) return;
+  // File is in the menu only when the row had no room for it.
+  const inlineFile = b.closest(".prop")?.querySelector(".wide-only");
+  const fileShown = inlineFile !== null && inlineFile !== undefined && getComputedStyle(inlineFile).display !== "none";
+  m.querySelector(".narrow-menu")?.toggleAttribute("hidden", fileShown);
+  const r = b.getBoundingClientRect();
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
+  m.style.top = `${Math.max(8, r.top - h - 6)}px`;
+}
+
+document.addEventListener("click", (event) => {
+  const t = event.target.closest("button");
+  if (!t) { if (state.menu !== undefined) { state.menu = undefined; render(); } return; }
+  if (t.hasAttribute("data-toggle")) { state.open = !state.open; state.menu = undefined; render(); return; }
+  if (t.dataset.more !== undefined) { const i = Number(t.dataset.more); state.menu = state.menu === i ? undefined : i; render(); return; }
+  if (t.dataset.q !== undefined) { const i = Number(t.dataset.q); state.expanded.has(i) ? state.expanded.delete(i) : state.expanded.add(i); render(); return; }
+  if (t.closest(".menu") && /Dismiss/.test(t.textContent)) { state.props.splice(state.menu, 1); state.menu = undefined; render(); return; }
+  if (state.menu !== undefined && !t.closest(".menu")) { state.menu = undefined; render(); }
+});
+window.addEventListener("resize", placeMenu);
+document.fonts.ready.then(render);
+render();
+</script>
+</body>
+</html>

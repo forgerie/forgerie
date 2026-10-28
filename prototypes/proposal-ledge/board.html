@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The ledge: every scene</title>
+<style>
+@font-face { font-family: "Public Sans Variable"; font-weight: 100 900;
+  src: url(../stage-strip-blocks/fonts/public-sans-latin-wght-normal.woff2) format("woff2"); }
+:root { color-scheme: light dark; --bg: oklch(0.95 0.003 106); --ink: oklch(0.2 0.006 106); --muted: oklch(0.5 0.007 106); --frame: oklch(0.8 0.004 106); }
+@media (prefers-color-scheme: dark) { :root { --bg: oklch(0.12 0.003 106); --ink: oklch(0.95 0.002 106); --muted: oklch(0.65 0.004 106); --frame: oklch(0.3 0.004 106); } }
+body { margin: 0; padding: 2rem clamp(1rem, 4vw, 3rem) 4rem; background: var(--bg); color: var(--ink); font-family: "Public Sans Variable", sans-serif; }
+h1 { margin: 0 0 0.25rem; font-size: 1.375rem; font-weight: 600; }
+.intro { margin: 0 0 2.5rem; max-inline-size: 62ch; color: var(--muted); line-height: 1.55; }
+section { margin-block-end: 3rem; }
+h2 { margin: 0 0 0.25rem; font-size: 1rem; font-weight: 600; }
+section > p { margin: 0 0 1rem; max-inline-size: 70ch; color: var(--muted); font-size: 0.875rem; line-height: 1.55; }
+.row { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-end; }
+figure { margin: 0; }
+figcaption { margin-block-start: 0.375rem; color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+iframe { display: block; border: 1px solid var(--frame); border-radius: 0.75rem; background: transparent; }
+</style>
+</head>
+<body>
+<h1>The ledge</h1>
+<p class="intro">What the agent proposes, and what waits to be sent, collect in one ledge that grows out of the input bar's top edge. One proposal shows its title, one line about it, and its actions. Several fold into a stack with the newest in front; the count opens the list. The frames are live: press the count, Fold, More, and a queued line.</p>
+<div id="board"></div>
+<script>
+const scenes = [
+  ["today", "Today", "The backlog card scrolls away with the thread, and the queue is a column of boxed cards above the bar."],
+  ["one", "One proposal", "Kind, title, one line about it, then File and File and act. More holds the rest. The title shows the full card in the chat."],
+  ["one-workflow", "One workflow proposal", "The same row. Review is its one action; the sheet keeps the plan."],
+  ["many", "Three proposals, folded", "The newest in front, two edges behind it, and the count. Thirty proposals look the same until you read the count."],
+  ["many-open", "Three proposals, open", "Newest first. Every row keeps its own action, outlined, so no row shouts over another."],
+  ["lots-open", "Nine proposals, open", "The list scrolls inside a share of the window's height. The cut row and the fade say there is more. The long title cuts with an ellipsis."],
+  ["queue-one", "One queued message", "One quiet line nearest the bar, with Clear."],
+  ["queue", "Three queued messages", "In delivery order, one line each. A press shows a whole message."],
+  ["both", "Proposals and the queue", "One ledge, two bands: the queue nearest the bar, because it is the bar's own work; proposals above it."],
+  ["both-open", "Both, open", "The open list and the queue share the ledge's height budget."],
+  ["menu", "More, open", "At window level, so a scrolled list never clips it. On a narrow ledge, File moves in here."],
+  ["states", "States", "Filing, a failure with Retry under its reason, a workflow just started, and a title with no break points."],
+];
+const postures = [[475, 638], [711, 374], [932, 553]];
+document.getElementById("board").innerHTML = scenes.map(([id, title, note]) => `
+  <section><h2>${title}</h2><p>${note}</p><div class="row">
+  ${postures.map(([w, h]) => `<figure><iframe src="index.html?scene=${id}" width="${w}" height="${h}" loading="lazy" title="${title}, ${w} by ${h}"></iframe>
+    <figcaption>${w} × ${h}</figcaption></figure>`).join("")}
+  </div></section>`).join("");
+</script>
+</body>
+</html>
