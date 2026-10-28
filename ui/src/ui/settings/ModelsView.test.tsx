@@ -17,6 +17,8 @@ let root: Root;
 let stored: ModelPrefs;
 let saves: ModelPrefsSave[];
 let refuse: boolean;
+/** While set, a read waits for it: a test can resolve a read at a moment it chooses. */
+let readGate: Promise<void> | undefined;
 let source: ModelPrefsSource;
 const listeners = new Set<(prefs: ModelPrefs) => void>();
 const settle = () => act(async () => { for (let index = 0; index < 8; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -29,9 +31,9 @@ beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "xhigh", titleModel: null, modelChains: {}, modelChainsProblem: null, favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", configPath: "/home/me/.config/forgerie/config.json", home: "/home/me" };
-  saves = []; refuse = false; listeners.clear();
+  saves = []; refuse = false; readGate = undefined; listeners.clear();
   source = {
-    read: async () => { for (const listener of listeners) listener(stored); return stored; },
+    read: async () => { if (readGate) await readGate; for (const listener of listeners) listener(stored); return stored; },
     save: async (save) => {
       saves.push(save);
       if (refuse) throw new PrefsConflict("The model lists changed since this page read them.");
@@ -195,5 +197,55 @@ describe("Models settings", () => {
     await click(button("Rename anyway")!);
     expect(saves.at(-1)).toEqual({ revision: "r9", favorites: stored.favorites, visible: null,
       modelChains: { fast: [llama, haiku], builder: [flash, opus, haiku] } });
+  });
+
+  it("refuses a Rename anyway confirmed after a read has resolved but before the page shows its lists, and asks again", async () => {
+    const opus = "proxy/claude-opus-5-5", flash = "proxy/gemini-3.8-flash", llama = "local/llama3:8b", haiku = "proxy/claude-3-5-haiku-20241022";
+    stored = { ...stored, modelChains: { worker: [opus, flash], fast: [llama] } };
+    act(() => root.unmount());
+    const host = document.createElement("div"); document.body.replaceChildren(host); root = createRoot(host);
+    await act(async () => root.render(<ModelPrefsContext.Provider value={source}>
+      <ModelsView onBack={() => {}} listModels={async () => models} chains={(props) => <ModelChainsSection {...props} />}
+        agents={[{ name: "Builder", model: "worker" }]} /></ModelPrefsContext.Provider>));
+    await settle();
+    const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === text);
+    const renameTo = async (name: string) => {
+      const form = document.querySelector<HTMLFormElement>(".action-row form")!;
+      const input = form.querySelector("input")!;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, name); input.dispatchEvent(new Event("input", { bubbles: true })); });
+      await act(async () => { form.requestSubmit(); });
+      await settle();
+    };
+    await click(byLabel("More commands for worker"));
+    await click(button("Rename chain")!);
+    await renameTo("builder");
+    refuse = true;
+    await click(byLabel("Move Gemini 3.8 Flash up"));
+    refuse = false;
+    stored = { ...stored, revision: "r9", modelChains: { fast: [llama, haiku], worker: [flash, opus, haiku] } };
+    const before = saves.length;
+    // Reload lists unlocks the page at once, and its read waits.
+    let release = () => {};
+    readGate = new Promise((resolve) => { release = resolve; });
+    await click(button("Reload lists")!);
+    const confirm = button("Rename anyway")!;
+    expect(confirm).toBeDefined();
+    await act(async () => {
+      // The read resolves and the page takes the new revision, but React has not drawn the new lists yet.
+      release();
+      for (let index = 0; index < 20; index++) await Promise.resolve();
+      // The reader confirms in that gap, on the question asked against the old lists.
+      confirm.click();
+    });
+    await settle();
+    // Nothing is saved from the old map, under any revision.
+    expect(saves.slice(before)).toEqual([]);
+    // The question is gone, and the form says why and asks again.
+    expect(button("Rename anyway")).toBeUndefined();
+    expect(document.querySelector(".action-row form")?.textContent).toContain("The model lists were read again.");
+    await renameTo("builder");
+    await click(button("Rename anyway")!);
+    expect(saves.slice(before)).toEqual([{ revision: "r9", favorites: stored.favorites, visible: null,
+      modelChains: { fast: [llama, haiku], builder: [flash, opus, haiku] } }]);
   });
 });

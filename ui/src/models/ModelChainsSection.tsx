@@ -30,7 +30,11 @@ export interface ModelChainsSectionProps {
   generation: number;
   /** Where the chains are saved, as the page names paths. */
   where: string;
-  onChange: (chains: ModelChains) => void;
+  /**
+   * Saves the whole map, built from the lists of read `generation`. The page answers false when it has read newer
+   * lists since; the change is then dropped, and a question the reader confirmed is asked again.
+   */
+  onChange: (chains: ModelChains, generation: number) => boolean | void;
 }
 
 const COPY = {
@@ -40,6 +44,7 @@ const COPY = {
   pending: "Add a model to save this chain.",
   limit: `A chain holds at most ${String(MAX_MODEL_CHAIN_LENGTH)} models.`,
   lastEntry: "A chain keeps at least one model. Delete the chain instead.",
+  reread: "The model lists were read again. Check the chain, then rename it again.",
   unavailable: "No signed-in provider offers this model, so runs skip it.",
   nameHint: "Agents name the chain by it: lower-case letters, digits and hyphens.",
   inherit: { id: "inherit", label: "Agent's level" },
@@ -61,7 +66,8 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
   /** New chains with no model yet. They are not saved, and live as long as the page. */
   const [pending, setPending] = useState<string[]>([]);
   const [creating, setCreating] = useState<{ error?: string | undefined }>();
-  const [renaming, setRenaming] = useState<{ name: string; error?: string | undefined }>();
+  /** `attempt` counts refused confirmations: each one draws a fresh form, without the question it refused. */
+  const [renaming, setRenaming] = useState<{ name: string; error?: string | undefined; attempt?: number }>();
   /** A delete that waits for the reader, for the read of the lists it was asked about. */
   const [deleting, setDeleting] = useState<{ name: string; generation: number }>();
   const [open, setOpen] = useState<{ chain: string; slot: Slot; at: PickerOpen }>();
@@ -78,8 +84,10 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
    * The lists as they are now. A question the reader answers later, such as Rename anyway, acts on these and not on
    * the lists it was asked about, which a failed save and a new read may have replaced.
    */
-  const latest = useRef({ chains, pending, frozen });
-  latest.current = { chains, pending, frozen };
+  const latest = useRef({ chains, pending, frozen, generation });
+  latest.current = { chains, pending, frozen, generation };
+  /** Saves a map built from the lists on screen. False: the page has read newer lists, and nothing changed. */
+  const send = (next: ModelChains) => onChange(next, latest.current.generation) !== false;
   const listModels = async () => [...models];
   const modelFor = (key: string): SessionModel => {
     const offered = models.find((model) => modelKey(model) === key);
@@ -91,14 +99,14 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
 
   /** Saves a chain's entries. A new chain is saved with its first model. */
   const save = (name: string, entries: readonly string[]) => {
-    onChange(withChain(latest.current.chains, name, entries));
-    setPending((current) => current.filter((item) => item !== name));
+    if (send(withChain(latest.current.chains, name, entries))) setPending((current) => current.filter((item) => item !== name));
   };
   const remove = (name: string) => {
     setDeleting(undefined);
-    if (renaming?.name === name) setRenaming(undefined);
     const now = latest.current.chains;
-    if (Object.hasOwn(now, name)) onChange(withoutChain(now, name));
+    // Refused: the question is gone and the newer lists show; the reader deletes again if they still want to.
+    if (Object.hasOwn(now, name) && !send(withoutChain(now, name))) return;
+    if (renaming?.name === name) setRenaming(undefined);
     setPending((current) => current.filter((item) => item !== name));
   };
   /** Renames against the lists as they are now, checked again, since the reader may confirm long after asking. */
@@ -107,8 +115,11 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
     const current = namesOf(now, waiting);
     const refused = stopped ? "The model lists cannot change until the page reads them again."
       : current.includes(from) ? nameProblem(to, current.filter((name) => name !== from)) : `There is no chain named ${from} any more.`;
-    if (refused) { setRenaming({ name: from, error: refused }); throw new Error(refused); }
-    if (Object.hasOwn(now, from)) onChange(renameChain(now, from, to));
+    if (refused) { setRenaming((current) => ({ ...current, name: from, error: refused })); throw new Error(refused); }
+    if (Object.hasOwn(now, from) && !send(renameChain(now, from, to))) {
+      setRenaming((current) => ({ name: from, error: COPY.reread, attempt: (current?.attempt ?? 0) + 1 }));
+      return;
+    }
     setPending((items) => items.map((item) => item === from ? to : item));
     setRenaming(undefined);
   };
@@ -151,7 +162,7 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
   const submitRename = async (from: string, value: string) => {
     if (value === from) { setRenaming(undefined); return; }
     const refused = nameProblem(value, names.filter((name) => name !== from));
-    setRenaming({ name: from, error: refused });
+    setRenaming((current) => ({ ...current, name: from, error: refused }));
     if (refused) throw new Error(refused);
     const users = agents ? chainUsers(agents, from) : [];
     if (users.length === 0 || !Object.hasOwn(chains, from)) { rename(from, value); return undefined; }
@@ -180,7 +191,7 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
       const one = users?.length === 1;
       const below = <>
         {/* Keyed by the read: a new read of the lists drops a Rename anyway that was asked against the old ones. */}
-        {renaming?.name === name ? <TextSubmit key={generation} label={`Rename ${name}`} hint={COPY.nameHint} action="Rename" placeholder={name} pending={frozen}
+        {renaming?.name === name ? <TextSubmit key={`${String(generation)}:${String(renaming.attempt ?? 0)}`} label={`Rename ${name}`} hint={COPY.nameHint} action="Rename" placeholder={name} pending={frozen}
           initial={name} autoFocus error={renaming.error} cancel={{ label: "Cancel", onPress: () => setRenaming(undefined) }}
           onSubmit={(value) => submitRename(name, value)} /> : null}
         {deleting?.name === name && deleting.generation === generation && users && users.length > 0 ? <Consequence icon={<TriangleAlertIcon />} tone="warn"

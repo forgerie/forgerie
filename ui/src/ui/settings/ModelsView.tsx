@@ -79,8 +79,13 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
   const [lists, setLists] = useState<Lists>();
   const [phase, setPhase] = useState<Phase>({ type: "idle" });
   const [query, setQuery] = useState("");
-  /** Counts reads of the lists, so a section can drop questions it asked against an older read. */
+  /** The read the page draws: a section drops questions it asked against an older one. */
   const [reads, setReads] = useState(0);
+  /**
+   * The read the save loop holds. It moves in the same step as `saved.current`, before React draws the new lists, so
+   * a change built from the lists on screen in that gap, with the new revision but the old lists, is refused.
+   */
+  const generation = useRef(0);
   // The save loop's own view: what the server holds, and what the page wants.
   const saved = useRef<ModelPrefs | undefined>(undefined);
   const wanted = useRef<Lists | undefined>(undefined);
@@ -93,8 +98,9 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
       if (signal?.aborted) return;
       saved.current = prefs;
       wanted.current = undefined;
+      generation.current += 1;
       setLists(listsOf(prefs));
-      setReads((count) => count + 1);
+      setReads(generation.current);
       setLoad({ type: "ready", prefs, models });
       setPhase({ type: "idle" });
     } catch (error) {
@@ -122,12 +128,14 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
     } finally { saving.current = false; }
   }
   const models = load.type === "ready" ? load.models : [];
-  function change(next: PrefsChange) {
-    if (!lists || phase.type === "failed") return;
+  /** Applies a change built from the lists of read `from`, or refuses it (false) when the page has read newer ones since. */
+  function change(next: PrefsChange, from = reads): boolean {
+    if (!lists || phase.type === "failed" || from !== generation.current) return false;
     const after = applyChange(wanted.current ?? lists, next, models);
     wanted.current = after;
     setLists(after);
     void flush();
+    return true;
   }
 
   const view = useMemo(() => {
@@ -170,7 +178,7 @@ export function ModelsView({ onBack, onClose, listModels = availableModels, chai
         <TitleModel lists={lists} models={models} locked={phase.type === "failed"} onChange={change} />
       </div>
       {chains?.({ chains: lists.modelChains ?? {}, problem: load.prefs.modelChainsProblem, models, agents, locked: phase.type === "failed", generation: reads,
-        where: tildify(load.prefs.configPath, home), onChange: (next) => change({ type: "chains", chains: next }) })}
+        where: tildify(load.prefs.configPath, home), onChange: (next, from) => change({ type: "chains", chains: next }, from) })}
       <div className="models-summary">
         <p>{lists.visible === null
           ? <>Every model is shown. Hide one, and from then on the menu offers only the models you show. Models a provider adds later stay hidden too.</>
