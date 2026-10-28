@@ -8,13 +8,13 @@ import { awaitWithContext, BACKGROUND_CONTEXT as context } from "@earendil-works
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { createRegistry, defineExtension, defineTask, type TaskId } from "@earendil-works/pi-durable";
+import { createRegistry, defineDoc, defineExtension, defineTask, type TaskId } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { durableChildExtensions } from "./durableChildAgents.js";
 import { DurableSessionJournal } from "./durableSessionJournal.js";
 import { sanitizedGitEnv } from "../git/gitEnv.js";
 import type { WorkflowRun } from "../../shared/workflowRuns.js";
-import { associateWorkflowChild, autoStopFailureAdvice, closeProposalsOnReply, decideWorkflowProposal, decideWorkflowStop, openWorkflowProposals, proposeWorkflow, requestWorkflowStop, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
+import { associateWorkflowChild, settleWorkflowChild, autoStopFailureAdvice, closeProposalsOnReply, decideWorkflowProposal, decideWorkflowStop, openWorkflowProposals, proposeWorkflow, requestWorkflowStop, startWorkflowProposal, workflowExtension, workflowProposals, workflowRuns, WORKFLOW_DOC_KIND, WORKFLOW_PROPOSALS_DOC_KIND } from "./durableWorkflowRuns.js";
 
 it("closes an open proposal when the user replies, and leaves decided proposals as they were", async () => {
   const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-proposal-reply-"));
@@ -200,4 +200,47 @@ it.each([
     expect(run?.stops?.["land"]?.state).toBe("waiting");
     expect(run?.children).toMatchObject([{ name: "alpha", state: { kind: "working" } }]);
   });
+});
+
+it.each([false, true])("sanitizes native failed submissions, reporter recovery and old workflow reads (recover: %s)", async (recover) => {
+  const secret = "private-fixture-secret";
+  const error = `Incorrect API key provided: ${secret}`;
+  const FailedReporter = defineTask<null, { phase: "fail" }, null>({
+    name: "test.diagnostic-reporter", version: 1, initial: () => ({ phase: "fail" }),
+    phases: { fail: (_task, runtime, ctx) => runtime.commit(() => ({ status: "terminal", outcome: { status: "failed", error: { message: error } } }), ctx) },
+    abort: (_task, runtime, ctx) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+  });
+  const directory = await mkdtemp(join(tmpdir(), "forgerie-workflow-diagnostic-"));
+  const manager = SessionManager.create(directory, directory);
+  const models = createModels(); const provider = fauxProvider(); models.setProvider(provider.provider);
+  provider.setResponses(Array.from({ length: 20 }, () => fauxAssistantMessage("Waiting.")));
+  const registry = createRegistry(); registry.install(workflowExtension()); registry.install(defineExtension({ name: "test.diagnostic", tasks: [FailedReporter] }));
+  const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" } } });
+  try {
+    const parent = journal.conversation.id;
+    const proposal = await journal.conversation.commit((tx) => proposeWorkflow(tx, parent, "p:diagnostic", { name: "diagnostic", summary: "Check recovery.", text: "---\nworkflow: {version: 1}\n---\nWait.", basis: { kind: "new", reason: "Test." } }), context);
+    const run = await startWorkflowProposal(journal.harness, journal.conversation, directory, manager.getSessionId(), proposal.id, {}, "diagnostic", context);
+    const reporter = await journal.conversation.commit(async (tx) => {
+      const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
+      const reporter = await tx.createTask(FailedReporter, null, { ownership: { kind: "conversation" }, background: true });
+      const submission = await tx.createSubmission({ type: "input", conversationId: child.id, requestId: `child:${String(reporter)}`, status: "unanswered", reason: "model_error", detail: error });
+      await associateWorkflowChild(tx, parent, child.id, reporter, "worker");
+      if (!recover) await settleWorkflowChild(tx, parent, reporter, submission);
+      return reporter;
+    }, context);
+    await journal.harness.waitForTask(reporter, context);
+    const recovered = await workflowRuns(journal.harness, parent, context);
+    expect(JSON.stringify(recovered)).not.toContain(secret);
+    expect(recovered[0]?.children[0]?.state).toMatchObject({ kind: "settled", outcome: "failed", result: "invalid credentials", deliveryError: "invalid credentials" });
+    const StoredRuns = defineDoc<{ active: string | null; records: Record<string, WorkflowRun> }>({ kind: WORKFLOW_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ active: null, records: {} }) });
+    await journal.conversation.commit(async (tx) => {
+      const doc = await tx.doc(StoredRuns, parent); const stored = doc.records[run.id];
+      if (stored === undefined) throw new Error("Missing workflow");
+      stored.state = { kind: "finished", outcome: "failed", result: "Finished.", finishedAt: Date.now() }; doc.active = null;
+      const child = stored.children[0];
+      if (child?.state.kind !== "settled") throw new Error("Missing settled child");
+      child.state.result = error; child.state.deliveryError = error; child.state.delivered = true;
+    }, context);
+    expect(JSON.stringify(await workflowRuns(journal.harness, parent, context))).not.toContain(secret);
+  } finally { await journal.close(); await rm(directory, { recursive: true, force: true }); }
 });

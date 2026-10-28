@@ -1,3 +1,5 @@
+import { workflowChildDiagnostic } from "../../shared/workflowChildDiagnostic.js";
+import { childModelDiagnostic } from "../../shared/childModelDiagnostic.js";
 import { waitingStops, workflowGlance, type WorkflowGlance } from "../../shared/workflowGlance.js";
 import { createHash } from "node:crypto";
 import { AssistantEntry, defineDoc, defineExtension, defineTask, defineTool, InboxDoc, LiveDoc, type CommitPublication, type Conversation, type ConversationId, type Cursor, type Harness, type SubmissionRecord, type TaskId, type Tx } from "@earendil-works/pi-durable";
@@ -135,7 +137,8 @@ const StallWatch = defineTask<StallInput, StallState, null>({
         }
         const later = { status: "running" as const, checkpoint: { phase: "watch" as const, until: runtime.now() + WORKFLOW_STALL_GRACE_MS, woken } };
         if (blocker === "busy") return later;
-        const { child, error } = task.input;
+        const { child } = task.input;
+        const error = childModelDiagnostic(task.input.error);
         if (woken) {
           run.stall = { state: "flagged", child, error, at: Date.now() };
           return end();
@@ -770,7 +773,7 @@ export async function undeliveredWorkflowChild(tx: Tx, parent: ConversationId, r
 async function submissionState(tx: Tx, submission: SubmissionRecord): Promise<WorkflowChild["state"]> {
   if (submission.type !== "input") throw new Error("Workflow child submission is not input");
   if (submission.status === "queued" || submission.status === "placed") return { kind: "working" };
-  if (submission.status === "unanswered") return { kind: "settled", outcome: submission.reason === "aborted" ? "stopped" : "failed", result: submission.detail === undefined ? submission.reason : typeof submission.detail === "string" ? submission.detail : JSON.stringify(submission.detail), delivered: false };
+  if (submission.status === "unanswered") return workflowChildDiagnostic({ kind: "settled", outcome: submission.reason === "aborted" ? "stopped" : "failed", result: submission.detail === undefined ? submission.reason : typeof submission.detail === "string" ? submission.detail : JSON.stringify(submission.detail), delivered: false });
   const answer = (await tx.entry(AssistantEntry, submission.answer))?.model?.[0];
   if (answer?.role !== "assistant") throw new Error("Workflow child answer is missing");
   const result = answer.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
@@ -798,6 +801,7 @@ const reporterIdSchema = Type.Unsafe<TaskId>(Type.Integer({ minimum: 1 }));
 const childIdSchema = Type.Unsafe<ConversationId>(Type.Integer({ minimum: 1 }));
 async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: WorkflowRun): Promise<void> {
   for (const child of run.children) {
+    child.state = workflowChildDiagnostic(child.state);
     if (child.state.kind === "settled" && (child.state.delivered !== false || child.state.deliveryError !== undefined)) continue;
     const id = child.reporterId;
     if (!Check(reporterIdSchema, id)) throw new Error("Invalid workflow reporter identity");
@@ -824,6 +828,7 @@ async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: Work
     if (await childParentSubmission(tx, parent, `child-report:${String(id)}`) !== undefined) child.state.delivered = true;
     else if (outcome.status === "aborted") child.state.delivered = "aborted";
     else child.state.deliveryError = reason;
+    child.state = workflowChildDiagnostic(child.state);
   }
 }
 async function assertChildWorkSettled(tx: Tx, parent: ConversationId): Promise<void> {
@@ -846,7 +851,8 @@ function publicRun(run: WorkflowRun & { requestedInputs?: WorkflowInputs; reques
   // Doc drafts are transaction overlays. Materialize nested fields before the commit settles.
   const plain: unknown = JSON.parse(JSON.stringify(value));
   if (!Check(WorkflowRunSchema, plain)) throw new Error("Invalid workflow record");
-  return plain;
+  return { ...plain, children: plain.children.map((child) => ({ ...child, state: workflowChildDiagnostic(child.state) })),
+    ...(plain.stall === undefined ? {} : { stall: { ...plain.stall, error: childModelDiagnostic(plain.stall.error) } }) };
 }
 function sameInputs(a: Record<string, string | number | boolean | null>, b: Record<string, string | number | boolean | null>): boolean {
   return Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([name, value]) => Object.hasOwn(b, name) && b[name] === value);

@@ -18,7 +18,7 @@ import { Type, type AssistantMessage, type Message } from "@earendil-works/pi-ai
 import {
   AgentDoc, AssistantEntry, CompactionTask, GenerationTask, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool, hook, section, wrapTool,
   type Conversation, type ConversationId, type EntryId, type Extension, type Harness, type TaskGraph, type TaskId,
-  type ToolRegistration, type SubmissionRecord, type Tx, type Storage, type EntryRecord, type Cursor,
+  type ToolRegistration, type Tx, type Storage, type EntryRecord, type Cursor,
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
@@ -97,11 +97,6 @@ function chainModels(reference: string | undefined, chains: ModelChains, parent:
   const spec = reference ?? (parent.model === undefined ? undefined : `${parent.model.provider}/${parent.model.modelId}`);
   return spec === undefined ? [] : resolveModelChain(spec, chains, thinking ?? parent.thinkingLevel);
 }
-function diagnosticSubmission(submission: SubmissionRecord): SubmissionRecord {
-  return submission.status !== "unanswered" ? submission : { ...submission, reason: childModelDiagnostic(submission.reason),
-    ...(submission.detail === undefined ? {} : { detail: childModelDiagnostic(typeof submission.detail === "string" ? submission.detail : JSON.stringify(submission.detail)) }) };
-}
-
 function fallbackNote(fallbacks: readonly ChildFallback[]): string {
   return fallbacks.length === 0 ? "" : ` (ran on ${fallbacks.at(-1)?.to ?? ""} after ${fallbacks.map((item) => `${item.from}: ${childModelDiagnostic(item.reason)}`).join("; ")})`;
 }
@@ -237,7 +232,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         if (progress.delegated) return;
       }
       // Ancillary accounting/reporting must not replace the child's durable submission outcome.
-      await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, diagnosticSubmission(settled)); }, context);
+      await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled); }, context);
       const worktreeReport = settled.status !== "unanswered" && reporter.input.worktreeId !== undefined
         ? await requireWorktrees(selected.worktrees).report(reporter.input.worktreeId) : undefined;
       await runtime.commit(async (tx) => {
@@ -289,7 +284,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
             if (plan.kind === "report") {
               const claim = doc.retryOwners?.[run];
               const settled = claim === undefined ? undefined : await tx.submissionByRequest(conversationId, claim.requestId);
-              if (settled !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, diagnosticSubmission(settled));
+              if (settled !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled);
               return { status: "running", checkpoint: { phase: "report", diagnosticsSafe: true, report: `[subagent ${name} failed: model_error: ${error}]${fallbackNote(record?.fallbacks ?? [])}` } };
             }
             if (plan.kind === "retry") return { status: "running", checkpoint: { phase: "retry", attempt, error, run, failure,
@@ -342,7 +337,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           }
           // An ancillary reporter failure need not have stopped its admitted child input.
           if (submission?.status === "queued" || submission?.status === "placed") { progress.pending = true; return undefined; }
-          if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, diagnosticSubmission(submission));
+          if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, submission);
           return { status: "running", checkpoint: { phase: "report", suppressed: accepted === undefined ? "aborted" : "duplicate" } };
         }, context);
         if (!progress.pending) return;
@@ -368,7 +363,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     if (task.state.checkpoint.phase === "deliver") {
       const attempt = task.state.checkpoint.attempt ?? 0;
       const submission = await tx.submissionByRequest(task.input.conversationId, attempt === 0 ? `child:${String(task.id)}` : `child:${String(task.id)}:retry:${String(attempt)}`);
-      if (submission !== undefined && submission.status !== "queued" && submission.status !== "placed") await settleWorkflowChild(tx, runtime.conversationId, task.id, diagnosticSubmission(submission));
+      if (submission !== undefined && submission.status !== "queued" && submission.status !== "placed") await settleWorkflowChild(tx, runtime.conversationId, task.id, submission);
     }
     if (accepted !== undefined) await deliveredWorkflowChild(tx, runtime.conversationId, task.id);
     else await undeliveredWorkflowChild(tx, runtime.conversationId, task.id, "aborted");
