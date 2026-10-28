@@ -3,10 +3,27 @@ import type { Message } from "@earendil-works/pi-ai";
 export const CHILD_MODEL_CONTINUE = "Continue where you stopped; the previous model was unavailable.";
 const LEGACY_RETRY_PREFIX = "Continue where you stopped; the last request failed with:";
 
+/** Bound work before any regex. Keep only complete tokens/quoted values when the input is clipped. */
+function diagnosticInput(text: string): string {
+  if (text.length <= 4096) return text;
+  const prefix = text.slice(0, 4096);
+  let boundary = 0; let quote = ""; let escaped = false;
+  for (let index = 0; index < prefix.length; index++) {
+    const char = prefix[index];
+    if (escaped) { escaped = false; continue; }
+    if (quote !== "") {
+      if (char === "\\") escaped = true;
+      else if (char === quote) quote = "";
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === " " || char === "\n" || char === "\r" || char === "\t") boundary = index + 1;
+  }
+  return `${prefix.slice(0, boundary)} [truncated]`;
+}
+
 /** Outbound provider diagnostics are untrusted: redact before truncating, including tokens across the cut. */
 export function childModelDiagnostic(text: string): string {
-  const redacted = text.replace(/\p{Cf}/gu, "")
-    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi, (url) => url.replace(/\/\/[^/\s]*@/, "//[redacted]@").replace(/[?#].*$/, "?[redacted]"))
+  const redacted = diagnosticInput(text).replace(/\p{Cf}/gu, "")
+    .replace(/\b(?:https?|wss?):\/\/[^\s<>"']{1,4096}/gi, (url) => url.replace(/\/\/[^/\s]*@/, "//[redacted]@").replace(/[?#].*$/, "?[redacted]"))
     .replace(/\bsk-[A-Za-z0-9_-]+/gi, "[redacted]")
     .replace(/\bBearer\s+[^\s"',;<>]+/gi, "Bearer [redacted]")
     .replace(/\b(api[_-]?key)(["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s"'&,;<>]+)/gi, "$1$2[redacted]")

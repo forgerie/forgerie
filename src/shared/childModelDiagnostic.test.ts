@@ -43,3 +43,19 @@ it("scrubs pending legacy reports without truncating their legitimate child answ
   const report = childModelDiagnosticReport(oldReport);
   expect(report).not.toContain(secret); expect(report).toContain(answer);
 });
+
+it("bounds adversarial megabyte inputs before regex processing", () => {
+  const adversarial = "a.".repeat(512 * 1024);
+  const start = performance.now();
+  const diagnostic = childModelDiagnostic(adversarial);
+  expect(performance.now() - start).toBeLessThan(50);
+  expect(diagnostic.length).toBeLessThanOrEqual(300);
+});
+it.each([
+  `${"complete context ".repeat(250)}api_key="private fixture secret ${"x".repeat(5000)}`,
+  `${"complete context ".repeat(250)}sk-review-fixture-${"X".repeat(5000)}`,
+  `${"complete context ".repeat(250)}https://example.test?token=private-fixture-secret${"X".repeat(5000)}`,
+])("does not expose a credential clipped at the input boundary", (error) => {
+  const diagnostic = childModelDiagnostic(error);
+  expect(diagnostic).not.toContain("private"); expect(diagnostic).not.toContain("sk-review");
+});
