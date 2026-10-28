@@ -143,18 +143,13 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 .dock { --wall: var(--edge); }
 .dock:focus-within { --wall: var(--edge-focus); }
 
-/* The ledge grows out of the bar's top edge. It is made of the bar's surface and the bar's edge, sits inside the bar's
-   rounded corners, and meets the bar's top edge with two small inner curves, so it reads as one object pulled up out
-   of the bar, not a card that sits on it. It has no bottom edge: the bar's top edge stops under it. */
-.ledge { --fillet: 0.5rem; --inset: calc(var(--radius-thread) + var(--fillet));
-  container: ledge / inline-size; position: relative; z-index: 1; margin: 0 var(--inset) -2px;
-  border: 1px solid var(--wall); border-block-end: 0; border-radius: var(--radius-surface) var(--radius-surface) 0 0;
+/* The ledge is the bar grown taller. It has the bar's full width, surface and edge, and the bar's top corners move up
+   to it, so the two read as one rounded shape with a faint line across it, not a card that sits on the bar. */
+.ledge { container: ledge / inline-size; position: relative; margin: 0;
+  border: 1px solid var(--wall); border-block-end: 0; border-radius: var(--radius-thread) var(--radius-thread) 0 0;
   background: var(--bar-surface); font-size: var(--small-text); }
-.ledge::before, .ledge::after { content: ""; position: absolute; inset-block-end: 1px; inline-size: var(--fillet); block-size: var(--fillet); pointer-events: none; }
-.ledge::before { inset-inline-start: calc(-1 * var(--fillet));
-  background: radial-gradient(circle at 0 0, transparent calc(var(--fillet) - 1px), var(--wall) calc(var(--fillet) - 1px), var(--wall) var(--fillet), var(--bar-surface) calc(var(--fillet) + 0.5px)); }
-.ledge::after { inset-inline-end: calc(-1 * var(--fillet));
-  background: radial-gradient(circle at 100% 0, transparent calc(var(--fillet) - 1px), var(--wall) calc(var(--fillet) - 1px), var(--wall) var(--fillet), var(--bar-surface) calc(var(--fillet) + 0.5px)); }
+.ledge-body { padding-block-start: var(--space-1); }
+.dock:has(> .ledge) .bar { border-start-start-radius: 0; border-start-end-radius: 0; border-block-start-color: var(--line); }
 .ledge-body { display: flex; flex-direction: column; min-inline-size: 0; }
 
 /* More than one proposal, folded: the newest one is in front, and the edges of the others show behind it. Two edges
@@ -164,8 +159,8 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 .lips { position: absolute; inset-inline: 0; inset-block-end: 100%; block-size: 0.5rem; pointer-events: none; }
 .lip { position: absolute; inset-block-end: 0; block-size: 0.3125rem; border: 1px solid var(--wall); border-block-end: 0;
   border-radius: 0.4375rem 0.4375rem 0 0; background: var(--bar-surface); }
-.lip:nth-child(1) { inset-inline: var(--space-3); }
-.lip:nth-child(2) { inset-inline: var(--space-6); inset-block-end: 0.3125rem; block-size: 0.25rem; }
+.lip:nth-child(1) { inset-inline: var(--radius-thread); }
+.lip:nth-child(2) { inset-inline: calc(2 * var(--radius-thread)); inset-block-end: 0.3125rem; block-size: 0.25rem; }
 @container shell (height < 30rem) { .lip:nth-child(2) { display: none; } }
 
 /* ---------- A proposal row ---------- */

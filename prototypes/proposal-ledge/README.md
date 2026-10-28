@@ -29,10 +29,10 @@ and `./sheet.sh light <scene>` joins one scene's four postures into one image.
 
 ## The shape
 
-The ledge grows out of the input bar's top edge. It uses the bar's surface
-and the bar's edge colour. It sits inside the bar's rounded corners and meets
-the bar with two small inner curves. It has no bottom edge, so it reads as one
-object pulled up out of the bar, not as a card that sits on top of it. When the
+The ledge is the input bar grown taller. It has the bar's full width, surface
+and edge colour. The bar's top corners move up to the ledge, and a faint line
+separates the two, so they read as one rounded shape. An earlier draft made
+the ledge a narrower tab with curved feet; that shape read badly and is gone. When the
 bar takes focus, the ledge's edge darkens with it.
 
 ## Rules the mockup follows
