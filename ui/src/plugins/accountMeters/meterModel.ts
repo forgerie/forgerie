@@ -1,6 +1,6 @@
 import {
-  accountDrained, formatAmount, isUnmeteredWindow, orderedWindows, providerRouting, visibleWindows,
-  windowCountdown, windowLabel, windowStanding, type QuotaAccount, type QuotaPayload, type QuotaWindow, type Standing,
+  accountDrained, formatAmount, isUnmeteredWindow, orderedWindows, poolStanding, providerRouting, spanLabel, visibleWindows,
+  windowCountdown, windowLabel, windowStanding, type QuotaAccount, type QuotaPayload, type QuotaProvider, type QuotaWindow, type Standing,
 } from "./quotaData";
 
 /** What a lane's slot draws. */
@@ -38,8 +38,12 @@ export interface ResetMarker {
   words: string;
 }
 export interface MeterAccount {
-  /** Unique across providers: `provider/email`. */
+  /** Unique across providers: `provider/email`, or `provider/pool` for a pool. */
   key: string;
+  /** The account the detail opens at when this one is pressed: itself, or a pool's routed account. */
+  opens: string;
+  /** How many accounts this one stands for, where it is a pool of them. */
+  pooled: number | undefined;
   email: string;
   reset: ResetMarker | undefined;
   /**
@@ -74,18 +78,75 @@ export function shortDate(instant: string | Date, zone?: string): string {
   return new Date(instant).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(zone ? { timeZone: zone } : {}) });
 }
 
-/** The meters as rows, from one payload. Pure: the caller passes the clock. */
-export function meterModel(payload: QuotaPayload, settings: Readonly<Record<string, unknown>>, now: Date, zone?: string): MeterProvider[] {
+/**
+ * The meters as rows, from one payload. Pure: the caller passes the clock.
+ * With `pooled`, a service's accounts in service draw as one account where
+ * `poolable` allows: see `poolStanding` for how a pool is paced. Its accounts
+ * out of service stay, so the caller still decides whether to show them.
+ */
+export function meterModel(payload: QuotaPayload, settings: Readonly<Record<string, unknown>>, now: Date, zone?: string,
+  { pooled = false }: { pooled?: boolean } = {}): MeterProvider[] {
   return payload.providers.map((provider) => {
     // The routed mark answers a question only where the router pins one of several accounts.
     const marksRouted = providerRouting(provider) === "pinned" && provider.accounts.length > 1;
-    return { id: provider.id, name: provider.name, accounts: provider.accounts.map((account) =>
-      meterAccount(provider.id, account, visibleWindows(orderedWindows(account), settings), marksRouted, now, zone)) };
+    const accounts = provider.accounts.map((account) =>
+      meterAccount(provider.id, account, visibleWindows(orderedWindows(account), settings), marksRouted, now, zone));
+    const pool = pooled ? poolAccount(provider, settings, now, zone) : undefined;
+    return { id: provider.id, name: provider.name,
+      accounts: pool ? [pool, ...accounts.filter((account) => account.disabled)] : accounts };
   });
 }
 
-function resetMarker(account: QuotaAccount, now: Date, zone: string | undefined): ResetMarker | undefined {
-  const expiries = account.resets?.expiresAt.filter((instant) => new Date(instant).getTime() > now.getTime()) ?? [];
+/**
+ * Whether a service's accounts can be read as one: two or more in service,
+ * and every bar they show a budget. A pool's yes or no and a balance have no
+ * pace to share, so a service that shows one keeps its accounts apart.
+ */
+function poolable(windows: readonly QuotaWindow[]): boolean {
+  return windows.every((quotaWindow) => !isUnmeteredWindow(quotaWindow) && formatAmount(quotaWindow.remainingAmount) === undefined);
+}
+
+/** A service's accounts in service as one account, one line per window any of them shows. */
+function poolAccount(provider: QuotaProvider, settings: Readonly<Record<string, unknown>>, now: Date, zone: string | undefined): MeterAccount | undefined {
+  const members = provider.accounts.filter((account) => account.available);
+  if (members.length < 2) return undefined;
+  const shown = members.map((account) => visibleWindows(orderedWindows(account), settings));
+  if (!poolable(shown.flat())) return undefined;
+  const ids = [...new Set(orderedWindows({ windows: shown.flat() }).map((quotaWindow) => quotaWindow.id))];
+  const lines = ids.map((id) => poolLine(shown.flatMap((windows) => windows.filter((quotaWindow) => quotaWindow.id === id)), ids.length > 1, now));
+  const key = `${provider.id}/pool`;
+  const routed = members.find((account) => account.selected) ?? members[0]!;
+  const expiries = members.flatMap((account) => account.resets?.expiresAt ?? []).sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+  return { key, opens: `${provider.id}/${routed.email}`, pooled: members.length, email: "", reset: resetMarker(expiries, now, zone),
+    routed: false, out: members.every((account) => accountDrained(account)), disabled: false, lines, clocks: clockRuns(lines),
+    empty: lines.length > 0 ? undefined : "Every bar is turned off" };
+}
+
+/** One window across a pool's accounts. */
+function poolLine(windows: readonly QuotaWindow[], labelled: boolean, now: Date): MeterLine {
+  const first = windows[0]!;
+  const label = labelled ? windowLabel(first) ?? first.name : undefined;
+  const reading = poolStanding(windows, now);
+  const { standing } = reading;
+  const remaining = Math.round(reading.remaining);
+  const until = (instant: string | undefined) => instant === undefined ? "" : spanLabel(new Date(instant).getTime() - now.getTime());
+  // The clock names the reset the news is about: the first loss, or else the soonest refill.
+  const countdown = until(standing.kind === "loss" ? reading.lostAt : reading.soonest);
+  const lost = Math.round(reading.lost);
+  const pace = standing.pace === undefined ? "no pace, because a window states no length or has turned over"
+    : standing.kind === "dry" || standing.kind === "drained" ? `${String(Math.round(standing.pace - reading.remaining))} points behind an even spend`
+    : lost >= 1 && reading.rate !== undefined
+      ? `${String(lost)} points reset unused at one account's even spend, the first in ${until(reading.lostAt)}; spend at ${reading.rate.toFixed(1)} times that to lose none`
+      : "on an even spend";
+  return { id: first.id, label, share: String(remaining),
+    mark: { kind: "bar", remaining, standing, doom: standing.kind === "loss" && reading.rate !== undefined ? doom(reading.rate) : 0 },
+    clock: standingClock(countdown, standing),
+    words: sentence(`${first.name}: ${String(remaining)}% left across ${String(windows.length)} accounts`,
+      countdown === "" ? undefined : `first reset in ${until(reading.soonest)}`, pace) };
+}
+
+function resetMarker(found: readonly string[], now: Date, zone: string | undefined): ResetMarker | undefined {
+  const expiries = found.filter((instant) => new Date(instant).getTime() > now.getTime());
   const first = expiries[0];
   if (first === undefined) return undefined;
   const count = expiries.length;
@@ -103,7 +164,8 @@ export function meterAccount(providerId: string, account: QuotaAccount, windows:
   const lines = ordered.map((quotaWindow) => meterLine(quotaWindow, account.available, labelled, now));
   const empty = lines.length > 0 ? undefined
     : account.windows.length === 0 ? "No windows reported" : "Every bar is turned off";
-  return { key: `${providerId}/${account.email}`, email: account.email, reset: resetMarker(account, now, zone),
+  const key = `${providerId}/${account.email}`;
+  return { key, opens: key, pooled: undefined, email: account.email, reset: resetMarker(account.resets?.expiresAt ?? [], now, zone),
     routed: marksRouted && account.selected, out, disabled: !account.available, lines, clocks: clockRuns(lines), empty };
 }
 

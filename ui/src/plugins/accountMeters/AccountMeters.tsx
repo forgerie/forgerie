@@ -72,10 +72,10 @@ export function meterBlock(account: MeterAccount, provider: string, index: numbe
   return {
     action: reset && onAskReset && !glance ? { label: `${reset.words}. Use a reset…`, icon: <RotateCcwIcon />, count: String(reset.count),
       tone: reset.soon ? "warn" : "live", onPress: () => onAskReset(account.key) } : undefined,
-    press: onOpen ? { label: `Quota details for ${who}`, onPress: () => onOpen(account.key) } : undefined,
+    press: onOpen ? { label: `Quota details for ${account.pooled ? `each ${provider} account` : who}`, onPress: () => onOpen(account.opens) } : undefined,
     chosen: chosen !== undefined && chosen === account.key,
     key: `${account.email}:${String(index)}`, caption: account.email || undefined, marked: account.routed, struck: account.out,
-    label: `${who}${account.routed ? ", routed" : ""}${account.out ? ", out of service" : ""}${reset && glance ? `, ${reset.words}` : ""}`,
+    label: `${who}${account.pooled ? `, ${String(account.pooled)} accounts as one` : ""}${account.routed ? ", routed" : ""}${account.out ? ", out of service" : ""}${reset && glance ? `, ${reset.words}` : ""}`,
     rows,
     spans: account.clocks.map((run) => ({ start: run.start, end: run.end, content: <Figure tone={CLOCK[run.clock.tone]}>{run.clock.text}</Figure> })),
   };

@@ -5,7 +5,7 @@ import { ResetDialog } from "./ResetDialog";
 import { inService, meterModel } from "./meterModel";
 import { resetPreview } from "./resetModel";
 import type { QuotaPayload } from "./quotaData";
-import { NOW, QUOTA, QUOTA_RESET_LAPSING, QUOTA_WITH_RESETS, SETTINGS, ZONE } from "./fixtures/quota";
+import { NOW, QUOTA, QUOTA_ALIGNED, QUOTA_RESET_LAPSING, QUOTA_WITH_RESETS, SETTINGS, ZONE } from "./fixtures/quota";
 
 export const name = "Account meters";
 export const note = "Each AI account's quota at the foot of the session list; press an account for its detail";
@@ -13,14 +13,14 @@ export const note = "Each AI account's quota at the foot of the session list; pr
 const providers = inService(meterModel(QUOTA, SETTINGS, NOW));
 
 /** The meters, live: press an account to open the detail at it, and a chip there to ask about a reset. */
-function Live({ payload, asking: first }: { payload: QuotaPayload; asking?: string }) {
+function Live({ payload, asking: first, pooled = false }: { payload: QuotaPayload; asking?: string; pooled?: boolean }) {
   const [open, setOpen] = useState(true);
   const [sheet, setSheet] = useState<string | undefined>();
   const [asking, setAsking] = useState<string | undefined>(first);
   const preview = asking === undefined ? undefined : resetPreview(payload, asking, NOW, ZONE);
   return <>
     <AccountMeters open={open} onToggle={() => setOpen(!open)} onRetry={() => {}} onOpen={setSheet}
-      view={{ type: "ready", providers: inService(meterModel(payload, SETTINGS, NOW, ZONE)), doubtful: false }} />
+      view={{ type: "ready", providers: inService(meterModel(payload, SETTINGS, NOW, ZONE, { pooled })), doubtful: false }} />
     {sheet === undefined ? null : <QuotaSheet providers={meterModel(payload, {}, NOW, ZONE)} doubtful={false} focus={sheet}
       onClose={() => setSheet(undefined)} onRefresh={() => {}} onAskReset={setAsking} />}
     {preview ? <ResetDialog preview={preview} onUse={() => setAsking(undefined)} onCancel={() => setAsking(undefined)} /> : null}
@@ -29,6 +29,14 @@ function Live({ payload, asking: first }: { payload: QuotaPayload; asking?: stri
 
 export default function Open() {
   return <Live payload={QUOTA} />;
+}
+/** Each service's accounts as one: Codex's two read as one pool, paced as one account spends. Press it for each account. */
+export function OneBarPerService() {
+  return <Live payload={QUOTA} pooled />;
+}
+/** Two accounts that reset together, both full, a week out: grey to the half, orange past it. */
+export function PoolLosesAnAccount() {
+  return <Live payload={QUOTA_ALIGNED} pooled />;
 }
 export function Closed() {
   const [open, setOpen] = useState(false);

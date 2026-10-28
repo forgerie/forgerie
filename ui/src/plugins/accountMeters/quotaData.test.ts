@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   accountDrained, formatAmount, isStale, isUnmeteredWindow, orderedWindows, PACE_MARGIN_POINTS, parseQuotaPayload,
-  providerRouting, spanLabel, visibleWindows, windowCountdown, windowLabel, windowPaceFraction, windowStanding,
+  poolStanding, providerRouting, spanLabel, visibleWindows, windowCountdown, windowLabel, windowPaceFraction, windowStanding,
 } from "./quotaData";
 
 // Ported from the original client plugin's quota-data.test.js. The cases and
@@ -152,5 +152,55 @@ describe("pace", () => {
     expect(windowStanding({ id: "seven_day", lengthSeconds: 604800, remainingPercent: 0, resetsAt: "2026-09-25T12:00:00Z" }, now).kind).toBe("drained");
     expect(windowStanding({ id: "antigravity_claude", remainingPercent: 40, resetsAt: "2026-09-25T12:00:00Z" }, now).kind).toBe("unpaced");
     expect(windowStanding({ id: "seven_day", lengthSeconds: 604800, remainingPercent: 40, resetsAt: "2026-09-21T12:00:00Z" }, now).kind).toBe("unpaced");
+  });
+});
+
+describe("a pool of accounts", () => {
+  const now = new Date("2026-10-28T18:15:27Z");
+  const hours = (count: number) => new Date(now.getTime() + count * 3_600_000).toISOString();
+  const week = (remainingPercent: number, resetsAt: string) => ({ id: "seven_day", lengthSeconds: 604800, remainingPercent, resetsAt });
+
+  it("loses a whole account when two full ones reset together and are spent at one account's pace", () => {
+    const reading = poolStanding([week(100, hours(168)), week(100, hours(168))], now);
+    expect(reading.remaining).toBe(100);
+    // Grey on the left half, orange on the right: one account's worth resets unused.
+    expect(reading.standing).toEqual({ kind: "loss", pace: 50 });
+    expect(reading.lost).toBeCloseTo(100);
+    expect(reading.rate).toBeCloseTo(2);
+  });
+  it("cannot let an empty account cancel out a full one that resets first", () => {
+    // The live Claude reading of 2026-10-28: 59% resetting in 37.7 h, 2% resetting in 67.7 h.
+    const soon = "2026-10-30T08:00:00Z";
+    const reading = poolStanding([week(2, "2026-10-31T14:00:00Z"), week(59, soon)], now);
+    expect(reading.remaining).toBe(30.5);
+    expect(reading.standing.kind).toBe("loss");
+    expect(reading.standing.pace).toBeCloseTo((22.47 + 2) / 2, 1);
+    expect(reading.lost).toBeCloseTo(36.5, 0);
+    expect(reading.lostAt).toBe(soon);
+    expect(reading.soonest).toBe(soon);
+    expect(reading.rate).toBeCloseTo(2.63, 1);
+  });
+  it("reads one account exactly as its own bar does", () => {
+    for (const share of [5, 40, 50, 90]) {
+      const single = week(share, hours(84));
+      expect(poolStanding([single], now).standing).toEqual(windowStanding(single, now));
+    }
+  });
+  it("loses nothing when the accounts are spread so that one account's pace spends them all", () => {
+    // Each account holds just what one account's pace spends before its own reset, after the one before it.
+    const reading = poolStanding([week(50, hours(84)), week(50, hours(168))], now);
+    expect(reading.lost).toBeCloseTo(0);
+    expect(reading.standing.kind).toBe("ok");
+    expect(reading.rate).toBeCloseTo(1);
+  });
+  it("runs dry only when it empties before the soonest reset refills it", () => {
+    const dry = poolStanding([week(0, hours(84)), week(5, hours(84))], now);
+    expect(dry.standing).toEqual({ kind: "dry", pace: 25 });
+    expect(dry.lost).toBe(0);
+    // A little left, but the other account refills in an hour: not dry.
+    expect(poolStanding([week(1, hours(1)), week(0, hours(120))], now).standing.kind).toBe("ok");
+  });
+  it("gives no pace when any account's window has none", () => {
+    expect(poolStanding([week(100, hours(10)), { id: "seven_day", lengthSeconds: 604800, remainingPercent: 100, resetsAt: null }], now).standing.kind).toBe("unpaced");
   });
 });

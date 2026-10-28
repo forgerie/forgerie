@@ -266,12 +266,91 @@ export type Standing =
 export function windowStanding(quotaWindow: WindowFacts, now: Date): Standing {
   const fraction = windowPaceFraction(quotaWindow, now);
   if (fraction === undefined) return { kind: "unpaced", pace: undefined };
-  const pace = fraction * 100;
-  const remaining = Math.max(0, Math.min(100, quotaWindow.remainingPercent ?? 0));
+  return standingAt(clampShare(quotaWindow.remainingPercent), fraction * 100);
+}
+
+const clampShare = (value: number | undefined) => Math.max(0, Math.min(100, value ?? 0));
+
+function standingAt(remaining: number, pace: number): Standing {
   if (remaining <= 0) return { kind: "drained", pace };
   if (remaining - pace >= PACE_MARGIN_POINTS) return { kind: "loss", pace };
   if (pace - remaining >= PACE_MARGIN_POINTS) return { kind: "dry", pace };
   return { kind: "ok", pace };
+}
+
+/** One window read across several accounts of one plan, as if they were one account that many times as large. */
+export interface PoolReading {
+  /** The pool's share left, 0 to 100. */
+  remaining: number;
+  /** The pool against one account's even spend, in shares of the pool. */
+  standing: Standing;
+  /** Points, of one account's 100, that reset unused at one account's even spend. */
+  lost: number;
+  /** When the first of those points reset. */
+  lostAt: string | undefined;
+  /** The soonest reset in the pool. */
+  soonest: string | undefined;
+  /**
+   * How many times one account's even spend the pool needs so that nothing
+   * resets unused. 1 or less: one account's pace is enough. Undefined when
+   * the pool has no pace.
+   */
+  rate: number | undefined;
+}
+
+/**
+ * Where a pool of accounts stands against one account's even spend.
+ *
+ * The router sends all work to the account that resets soonest, so a pool is
+ * spent one account at a time, and each account's own bar calls one
+ * account's even spend "on pace". Spent at that rate, the pool loses
+ * whatever is still in an account when it resets. This plays the windows
+ * forward at that rate, soonest reset first: a point spent before its
+ * account resets falls before the pace mark; a point still there at its reset
+ * falls past it, and counts as lost. Soonest first loses the least, so the
+ * loss is what that rate cannot avoid.
+ *
+ * The pool runs dry only if it empties before the soonest reset refills it;
+ * that shortfall moves the pace mark past the fill. For one account this is
+ * `windowStanding` exactly.
+ *
+ * Every account is taken to have the same allowance, so their shares add up.
+ * Credit a reset adds later is not counted: only credit already granted can
+ * be lost. A window with no pace leaves the whole pool unpaced.
+ */
+export function poolStanding(windows: readonly WindowFacts[], now: Date): PoolReading {
+  const count = Math.max(1, windows.length);
+  const remaining = windows.reduce((sum, quotaWindow) => sum + clampShare(quotaWindow.remainingPercent), 0) / count;
+  const timed = windows.map((quotaWindow) => {
+    const fraction = windowPaceFraction(quotaWindow, now);
+    return fraction === undefined ? undefined
+      : { share: clampShare(quotaWindow.remainingPercent), length: windowSeconds(quotaWindow)!, left: fraction * windowSeconds(quotaWindow)!, resetsAt: quotaWindow.resetsAt! };
+  });
+  const soonest = [...windows].map((quotaWindow) => quotaWindow.resetsAt).filter((at): at is string => typeof at === "string")
+    .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0];
+  const unpaced: PoolReading = { remaining, standing: { kind: "unpaced", pace: undefined }, lost: 0, lostAt: undefined, soonest, rate: undefined };
+  if (windows.length === 0 || timed.some((entry) => entry === undefined)) return unpaced;
+  const ordered = (timed as NonNullable<(typeof timed)[number]>[]).sort((left, right) => left.left - right.left);
+  // One account's even spend, in points a second. The accounts share a plan, so the first window's length speaks for all.
+  const perSecond = 100 / ordered[0]!.length;
+  let cursor = 0;
+  let spent = 0;
+  let lost = 0;
+  let due = 0;
+  let rate = 0;
+  let lostAt: string | undefined;
+  for (const entry of ordered) {
+    due += entry.share;
+    rate = Math.max(rate, due / (perSecond * entry.left));
+    const used = Math.min(entry.share, Math.max(0, entry.left - cursor) * perSecond);
+    cursor = used >= entry.share ? cursor + entry.share / perSecond : Math.max(cursor, entry.left);
+    spent += used;
+    // A hair of float error is not a loss.
+    if (entry.share - used > 1e-6) { lost += entry.share - used; lostAt ??= entry.resetsAt; }
+  }
+  const shortfall = Math.max(0, perSecond * ordered[0]!.left - due);
+  const pace = Math.min(100, (spent + shortfall) / count);
+  return { remaining, standing: standingAt(remaining, pace), lost, lostAt, soonest, rate };
 }
 
 /** Old enough to doubt: five minutes without a fresh reading. */

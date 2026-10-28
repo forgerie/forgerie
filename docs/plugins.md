@@ -56,6 +56,8 @@ The current app owns its plugin UI and manifests. `src/shared/appPluginManifests
 }
 ```
 
+`pool_accounts` ("One bar per service", on by default) folds a service's accounts into one bar per window in the sidebar. The pool is paced as one account spends, soonest reset first, because the router sends work to one account at a time. The orange past the pace mark is credit that resets unused at that pace. It applies only where two or more accounts are in service and every bar shown is a paced budget. The detail sheet always shows each account.
+
 Use the declared Settings fields rather than a generic JSON editor. Switches save at once. An address waits for Save. Draft text stays in memory, not browser storage.
 
 The current Settings API uses `/aui/plugins` and revision-checked mutations. The active-profile Pi package API remains at `/api/pi-packages`. Neither API discovers or serves upstream browser plugins.

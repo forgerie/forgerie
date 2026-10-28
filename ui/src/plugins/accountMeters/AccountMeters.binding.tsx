@@ -55,7 +55,8 @@ export function AccountMetersShelf({ settings, read, redeem = redeemReset, newRe
   const payload = quota.payload ? withoutSpent(quota.payload, spent) : undefined;
   const age = payload ? spanLabel(Math.max(0, now.getTime() - new Date(payload.updatedAt).getTime())) : "";
   const stale = payload !== undefined && isStale(payload.updatedAt, now);
-  const providers = payload ? inService(meterModel(payload, settings, now)) : undefined;
+  // The sidebar folds each service's accounts into one where Settings says so; the sheet always shows each one.
+  const providers = payload ? inService(meterModel(payload, settings, now, undefined, { pooled: settings["pool_accounts"] !== false })) : undefined;
   const detail = payload ? meterModel(payload, {}, now) : undefined;
   const doubtful = quota.error !== undefined || stale;
   const view: MetersView = providers ? { type: "ready", providers, doubtful }

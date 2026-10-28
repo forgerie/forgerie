@@ -68,6 +68,10 @@ export const QUOTA_RESET_LAPSING = parseQuotaPayload(withResets({
   "claude/work@example.com": CLAUDE_RESET,
   "codex/team@example.com": { expiresAt: ["2026-10-11T02:00:00Z", "2026-10-29T18:51:16Z"], restartsWindows: true },
 }));
+/** Two full Claude accounts that reset together, a week after `NOW`. Spent at one account's pace, one of them resets unused. */
+export const QUOTA_ALIGNED = parseQuotaPayload({ ...READING, providers: READING.providers.map((provider) => provider.id !== "claude" ? provider
+  : { ...provider, accounts: ["work@example.com", "home@example.com"].map((email, index) => ({ email, available: true, selected: index === 0, priority: 100,
+    windows: [{ id: "seven_day", name: "Seven-day", usedPercent: 0, remainingPercent: 100, resetsAt: "2026-10-16T04:45:00Z", lengthSeconds: week }] })) }) });
 /** The zone the fixtures print dates in, so a part reads the same on every machine. */
 export const ZONE = "America/Denver";
 

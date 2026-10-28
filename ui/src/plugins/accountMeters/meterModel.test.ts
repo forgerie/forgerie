@@ -77,6 +77,35 @@ describe("the meters", () => {
     expect(account.lines[0]).toMatchObject({ label: undefined, share: "100", clock: { text: "8d" }, mark: { kind: "bar", standing: { kind: "loss" } } });
     expect(account.lines[0]!.words).toMatch(/^Credits: 100% left, resets in 8d, \d+ points ahead of an even spend\.$/);
   });
+  it("folds a service's accounts in service into one, keeping those out of service, when asked", () => {
+    const [, pooledCodex] = meterModel(payload, {}, now, undefined, { pooled: true });
+    // One Codex account is in service, so there is nothing to fold.
+    expect(pooledCodex!.accounts.map((account) => account.key)).toEqual(["codex/a@example", "codex/b@example"]);
+    const two = parseQuotaPayload({ version: 1, updatedAt: "2026-10-09T03:59:00Z", providers: [
+      { id: "claude", name: "Claude", routing: "pinned", accounts: [
+        { email: "first@example", available: true, selected: false, priority: 100, windows: [week(100, "2026-10-16T04:00:00Z")],
+          resets: { expiresAt: ["2026-10-20T00:00:00Z"], restartsWindows: false } },
+        { email: "second@example", available: true, selected: true, priority: 100, windows: [week(100, "2026-10-16T04:00:00Z")] },
+        { email: "gone@example", available: false, selected: false, priority: 100, windows: [week(100, "2026-10-16T04:00:00Z")] },
+      ] },
+      { id: "antigravity", name: "Antigravity", accounts: ["x", "y"].map((email) => ({ email, available: true, selected: false, priority: 100, windows: [
+        { id: "antigravity_gemini", name: "Gemini", usedPercent: 0, remainingPercent: 100, resetsAt: "2026-10-09T23:31:55Z" }] })) },
+    ] });
+    const [claude, antigravity] = meterModel(two, {}, now, undefined, { pooled: true });
+    const [pool, gone] = claude!.accounts;
+    expect(pool).toMatchObject({ key: "claude/pool", opens: "claude/second@example", pooled: 2, email: "", routed: false, disabled: false,
+      reset: { count: 1 } });
+    // Two full accounts that reset together, a week out: half of the pool resets unused at one account's pace.
+    expect(pool!.lines[0]).toMatchObject({ share: "100", mark: { kind: "bar", remaining: 100, standing: { kind: "loss", pace: 50 } }, clock: { text: "7d", tone: "loss" } });
+    expect(pool!.lines[0]!.words).toBe("Seven-day: 100% left across 2 accounts, first reset in 7d, 100 points reset unused at one account's even spend, the first in 7d; spend at 2.0 times that to lose none.");
+    expect(pool!.lines[0]!.mark.kind === "bar" && pool!.lines[0]!.mark.doom).toBeCloseTo(Math.log(2) / Math.log(8));
+    expect(gone).toMatchObject({ key: "claude/gone@example", disabled: true });
+    expect(inService([claude!])[0]!.accounts.map((account) => account.key)).toEqual(["claude/pool"]);
+    // A pool's yes or no has no pace to share.
+    expect(antigravity!.accounts.map((account) => account.pooled)).toEqual([undefined, undefined]);
+    // Off by default: the detail sheet's reading.
+    expect(meterModel(two, {}, now)[0]!.accounts.map((account) => account.key)).toEqual(["claude/first@example", "claude/second@example", "claude/gone@example"]);
+  });
   it("hides the bars the user turned off, and says so when nothing is left", () => {
     const [hidden] = meterModel(payload, { five_hour: false, seven_day: false, weekly_fable: false }, now);
     expect(hidden!.accounts[0]!.empty).toBe("Every bar is turned off");

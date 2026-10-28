@@ -17,7 +17,8 @@ let ids: number;
 const now = new Date("2026-10-09T04:00:00Z");
 const read: QuotaRead = (endpoint) => { reads.push(endpoint); return answer(); };
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-const settings = (stored: Record<string, unknown> = {}): AppSettings => resolveAppSettings(accountMetersManifest, stored);
+// Most cases read each account apart; "one bar per service" has its own cases below.
+const settings = (stored: Record<string, unknown> = {}): AppSettings => resolveAppSettings(accountMetersManifest, { pool_accounts: false, ...stored });
 async function render(value: AppSettings) {
   await act(async () => root.render(<AccountMetersShelf settings={value} read={read} clock={() => now}
     redeem={(endpoint, request) => { redeems.push(request); reads.push(`redeem ${endpoint}`); return redeemAnswer(); }}
@@ -189,6 +190,25 @@ describe("account meters", () => {
       expect(dialog()).toBeNull();
     });
   });
+  describe("one bar per service", () => {
+    const sheet = () => document.querySelector<HTMLDialogElement>("dialog.sheet-dialog");
+    const shelfBlocks = () => [...document.querySelectorAll<HTMLElement>(".shelf .lane-grid-block")];
+    it("is on unless Settings turns it off, and folds a service's accounts into one paced against one account's spend", async () => {
+      await render(resolveAppSettings(accountMetersManifest, {}));
+      expect(shelfBlocks().map((node) => node.getAttribute("aria-label"))).toEqual(["me@work.example", "Codex, 2 accounts as one"]);
+      // At one account's pace, 45 points reset unused in 4d and 50 more in 7d.
+      expect(lanes()[2]).toMatch(/^Seven-day: 98% left across 2 accounts, first reset in 4d, 95 points reset unused at one account's even spend, the first in 4d; spend at 1\.\d times that to lose none\.$/);
+    });
+    it("opens the sheet with each account broken out, at the routed one", async () => {
+      await render(resolveAppSettings(accountMetersManifest, {}));
+      expect(document.querySelectorAll(".shelf .lane-grid-open")[1]!.getAttribute("aria-label")).toBe("Quota details for each Codex account");
+      await act(async () => shelfBlocks()[1]!.click());
+      expect([...sheet()!.querySelectorAll(".lane-grid-block")].map((node) => node.getAttribute("aria-label")))
+        .toEqual(["me@work.example", "a@example, routed", "b@example"]);
+      expect(sheet()!.querySelector(".lane-grid-block[data-chosen]")!.getAttribute("aria-label")).toBe("a@example, routed");
+    });
+  });
+
   describe("the detail sheet", () => {
     const sheet = () => document.querySelector<HTMLDialogElement>("dialog.sheet-dialog");
     const shelfBlocks = () => [...document.querySelectorAll<HTMLElement>(".shelf .lane-grid-block")];

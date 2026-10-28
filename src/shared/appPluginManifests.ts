@@ -7,7 +7,8 @@ import type { AppPluginManifest } from "./appPlugins.js";
  * The id is the original client plugin's id, so the bars a user already
  * turned off there stay off. One toggle per bar the router reports, keyed by
  * the router's window id. A window the router adds later has no toggle and
- * stays visible.
+ * stays visible. `pool_accounts` is not a window: it folds each service's
+ * accounts into one in the sidebar.
  */
 export const accountMetersManifest: AppPluginManifest = {
   id: "cliproxyapi-quota",
@@ -16,6 +17,8 @@ export const accountMetersManifest: AppPluginManifest = {
   settings: [
     { type: "url", id: "endpoint", label: "Quota address", default: "https://cliproxyapi.hummingbird-lake.ts.net/quota",
       description: "The CLIProxyAPI router's /quota address. The router must allow this app's address to read it." },
+    { type: "boolean", id: "pool_accounts", label: "One bar per service", default: true,
+      description: "Shows a service's accounts as one account. Orange is what will reset unused if you spend at one account's even pace. The detail still shows each account." },
     { type: "boolean", id: "five_hour", label: "Five-hour window", description: "Claude's rolling five-hour allowance.", default: true },
     { type: "boolean", id: "seven_day", label: "Seven-day window", description: "The weekly allowance of Claude and Codex accounts.", default: true },
     { type: "boolean", id: "weekly_fable", label: "Fable window", description: "Claude's weekly allowance for the Fable model. It resets with the seven-day window.", default: true },
