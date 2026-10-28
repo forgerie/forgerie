@@ -20,12 +20,21 @@ function diagnosticInput(text: string): string {
   return `${prefix.slice(0, boundary)} [truncated]`;
 }
 
+/** Fixed credential phrases/codes; do not classify identifiers such as auth_unavailable as bad credentials. */
+export function isChildCredentialFailure(text: string): boolean {
+  return /\b(?:invalid_api_key|invalid_credentials|authentication_error|unauthorized)\b|\b(?:invalid|incorrect|expired|revoked|bad|missing)\s+(?:(?:api[ _-]?)?key|credentials?|auth(?:entication)?)\b|\b(?:(?:api[ _-]?)?key|credentials?|auth(?:entication)?)(?:\s+provided)?(?:\s+(?:is|are|was|were))?\s+(?:invalid|incorrect|expired|revoked|failed|error|missing)\b/i.test(text);
+}
+
 /** Outbound provider diagnostics are untrusted: redact before truncating, including tokens across the cut. */
-export function childModelDiagnostic(text: string): string {
-  const redacted = diagnosticInput(text).replace(/\p{Cf}/gu, "")
+export function childModelDiagnostic(text: string, credentials = false): string {
+  const input = diagnosticInput(text);
+  if (credentials || isChildCredentialFailure(input)) return "invalid credentials";
+  const redacted = input.replace(/\p{Cf}/gu, "")
     .replace(/\b(?:https?|wss?):\/\/[^\s<>"']{1,4096}/gi, (url) => url.replace(/\/\/[^/\s]*@/, "//[redacted]@").replace(/[?#].*$/, "?[redacted]"))
     .replace(/\bsk-[A-Za-z0-9_-]+/gi, "[redacted]")
     .replace(/\bBearer\s+[^\s"',;<>]+/gi, "Bearer [redacted]")
+    .replace(/\b(provided)(\s*:\s*)(?:"[^"]*"|'[^']*'|[^\s"',;<>]+)/gi, "$1$2[redacted]")
+    .replace(/\b(key|token|password)(\s*[:=]\s*|\s+)(?:"[^"]*"|'[^']*'|[^\s"',;<>]+)/gi, "$1$2[redacted]")
     .replace(/\b(api[_-]?key)(["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s"'&,;<>]+)/gi, "$1$2[redacted]")
     .replace(/[a-f0-9]{32,}/gi, "[redacted]")
     .replace(/[A-Za-z0-9+/_=-]{40,}/g, "[redacted]")

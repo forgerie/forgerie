@@ -312,3 +312,10 @@ it("declines native compaction of an old raw retry prompt instead of exposing it
   expect(task.state.outcome.status).toBe("completed"); expect(run.calls).toHaveLength(1);
   expect(JSON.stringify(run.requests)).not.toContain("private-fixture-secret");
 });
+
+it.each(["Invalid API key: private-fixture-secret", "Incorrect API key provided: private-fixture-secret"])("keeps labelled credential text out of every reporter output: %s", async (error) => {
+  const run = await fixture({ a: [error] });
+  await run.spawn(); await vi.waitFor(() => { expect(run.reports).toHaveLength(1); });
+  const outputs = JSON.stringify([await run.children(), await run.history(), run.reports, await run.cooldowns().snapshot(), await run.cooldownFile(), run.requests]);
+  expect(outputs).not.toContain("private-fixture-secret"); expect(outputs).toContain("invalid credentials");
+});

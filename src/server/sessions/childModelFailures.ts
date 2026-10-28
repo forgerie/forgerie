@@ -1,3 +1,4 @@
+import { isChildCredentialFailure } from "../../shared/childModelDiagnostic.js";
 import { parseModelChoice, modelKey, selectChainModel, type ModelCooldowns } from "../../shared/modelChains.js";
 
 export const CHILD_RETRY_DELAYS = [30_000, 120_000, 300_000] as const;
@@ -7,18 +8,18 @@ const LEGACY_PERMANENT = /invalid.*(?:api[ _-]?key|credentials)|insufficient_quo
 const STATUS = /\b(?:HTTP(?:\/[\d.]+)?|status(?:[ _-]?code)?|error(?:[ _-]?code)?)["']?[\s:=]+["']?(?:429|5\d{2})\b|^\s*(?:429|5\d{2})\b|\((?:429|5\d{2})\)|\b(?:429|5\d{2})\s+(?:Internal\b|Too Many Requests\b|Service Unavailable\b|Overloaded\b|Bad Gateway\b|Gateway Timeout\b)/i;
 const BILLING_STATUS = /\b(?:HTTP(?:\/[\d.]+)?|status(?:[ _-]?code)?|error(?:[ _-]?code)?)["']?[\s:=]+["']?402\b|^\s*402\b|\(402\)|\b402\s+Payment Required\b/i;
 const TRANSIENT = /\boverloaded(?:_error)?\b|\bauth_unavailable\b|server[ _-]?busy|high demand|at capacity|\brate[ _-]?limit(?:[ _-](?:exceeded|error))?\b|too many requests|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
-const SWITCH = /\b(?:insufficient_quota|billing_hard_limit_reached|enforced_spend_limit_reached|GoUsageLimitError|FreeUsageLimitError)\b|\b(?:out of|insufficient|exhausted) credits\b|\bcredit balance is too low\b|\bbilling (?:issue|error|problem|details|limit)\b|\bcheck your (?:plan and )?billing\b|\bquota exceeded\b|\bpayment required\b|\bout of budget\b|\bspend(?:ing)?[ -]limit\b|\busage[ _-]limit(?:[ _-]reached)?\b|\btry again in\s*~?\s*[\d.]+\s*min\b|\bmodel.*(?:not[ _-]?found|does not exist|not available|was not found)\b|\bunknown model\b|\b(?:invalid|incorrect|expired|revoked)\b.*?\b(?:api[ _-]?key|credentials)\b|\b(?:api[ _-]?key|credentials)\b.*\b(?:invalid|incorrect|expired|revoked)\b|\bauthentication.*(?:failed|invalid)\b/i;
+const SWITCH = /\b(?:insufficient_quota|billing_hard_limit_reached|enforced_spend_limit_reached|GoUsageLimitError|FreeUsageLimitError)\b|\b(?:out of|insufficient|exhausted) credits\b|\bcredit balance is too low\b|\bbilling (?:issue|error|problem|details|limit)\b|\bcheck your (?:plan and )?billing\b|\bquota exceeded\b|\bpayment required\b|\bout of budget\b|\bspend(?:ing)?[ -]limit\b|\busage[ _-]limit(?:[ _-]reached)?\b|\btry again in\s*~?\s*[\d.]+\s*min\b|\bmodel.*(?:not[ _-]?found|does not exist|not available|was not found)\b|\bunknown model\b/i;
 export function classifyChildModelError(error: string): ChildModelFailure {
   if (/context.*(?:window|limit|length)|too many tokens|maximum.*tokens/i.test(error)) return "fatal";
   const requested = /server requested\s+([\d.]+)s retry delay/i.exec(error);
-  if (BILLING_STATUS.test(error) || SWITCH.test(error) || (requested !== null && Number(requested[1]) > 60)) return "switch-now";
+  if (isChildCredentialFailure(error) || BILLING_STATUS.test(error) || SWITCH.test(error) || (requested !== null && Number(requested[1]) > 60)) return "switch-now";
   return STATUS.test(error) || TRANSIENT.test(error) ? "wait-then-switch" : "fatal";
 }
 // Serialized with reporter checkpoints so redaction/truncation cannot change a replayed decision.
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
-export type ChildFailureAssessment = { kind: ChildModelFailure; retryLegacy: boolean };
+export type ChildFailureAssessment = { kind: ChildModelFailure; retryLegacy: boolean; credentials?: boolean };
 export function assessChildModelFailure(error: string): ChildFailureAssessment {
-  return { kind: classifyChildModelError(error), retryLegacy: !LEGACY_PERMANENT.test(error) && LEGACY_TRANSIENT.test(error) };
+  return { kind: classifyChildModelError(error), credentials: isChildCredentialFailure(error), retryLegacy: !LEGACY_PERMANENT.test(error) && LEGACY_TRANSIENT.test(error) };
 }
 /** Durable settles missing catalog models as no_model, keeping the actual text only on its task receipt. */
 export function unavailableChildModel(error: string): string | undefined {

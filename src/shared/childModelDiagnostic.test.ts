@@ -16,7 +16,7 @@ it.each([
   ["WebSocket closed: wss://api.example.test/v1?token=private-fixture-secret", "private-fixture-secret"],
 ])("redacts provider diagnostics: %s", (error, secret) => {
   const diagnostic = childModelDiagnostic(error);
-  expect(diagnostic).not.toContain(secret); expect(diagnostic).toContain("[redacted]");
+  expect(diagnostic).not.toContain(secret); expect(diagnostic).toMatch(/\[redacted\]|^invalid credentials$/);
   expect(diagnostic.length).toBeLessThanOrEqual(300); expect(childModelDiagnostic(diagnostic)).toBe(diagnostic);
 });
 it("redacts before truncation and normalizes control characters", () => {
@@ -59,3 +59,8 @@ it.each([
   const diagnostic = childModelDiagnostic(error);
   expect(diagnostic).not.toContain("private"); expect(diagnostic).not.toContain("sk-review");
 });
+
+it.each(["Invalid API key: private-fixture-secret", "Incorrect API key provided: private-fixture-secret", "Authentication failed: private-fixture-secret", "Invalid credentials: private-fixture-secret"])("uses a category-only diagnostic for credential failures: %s", (error) => {
+  expect(childModelDiagnostic(error)).toBe("invalid credentials");
+});
+it.each(["Request failed: key: private-fixture-secret", "Request failed: key private-fixture-secret", "Request failed: provided: private-fixture-secret", "Request failed: token: private-fixture-secret", "Request failed: token private-fixture-secret", "Request failed: password: private-fixture-secret", "Request failed: password private-fixture-secret"])("scrubs labelled tokens in other diagnostics: %s", (error) => { expect(childModelDiagnostic(error)).not.toContain("private-fixture-secret"); });

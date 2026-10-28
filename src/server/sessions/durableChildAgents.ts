@@ -186,8 +186,8 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           }
         }, context);
       }
-      const diagnostic = detail === undefined ? undefined : childModelDiagnostic(detail);
       const failure = detail === undefined ? undefined : assessChildModelFailure(detail);
+      const diagnostic = detail === undefined ? undefined : childModelDiagnostic(detail, failure?.credentials);
       if (settled.status === "unanswered" && (settled.reason === "model_error" || settled.reason === "no_model")) {
         const settings = await runtime.snapshot(AgentDoc, conversationId, context);
         const current = (settled.reason === "no_model" && detail !== undefined ? unavailableChildModel(detail) : undefined)
