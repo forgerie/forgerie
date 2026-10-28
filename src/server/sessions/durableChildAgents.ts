@@ -186,11 +186,18 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           ?? (await runtime.snapshot(Children, runtime.conversationId, context))?.failureModels?.[String(settled.id)]
           ?? (settings?.model === undefined ? undefined : `${settings.model.provider}/${settings.model.modelId}${settings.thinkingLevel === undefined ? "" : `:${settings.thinkingLevel}`}`);
         const until = detail === undefined ? undefined : childModelCooldown(detail, runtime.now());
-        if (current !== undefined && until !== undefined) {
-          try { await selected.modelCooldowns?.mark(modelKey(current), until, detail ?? "model_error"); }
+        let marked = false;
+        if (current !== undefined && until !== undefined && selected.modelCooldowns !== undefined) {
+          try { await selected.modelCooldowns.mark(modelKey(current), until, detail ?? "model_error"); marked = true; }
           catch (error) { runtime.report(error); } // A cooldown disk failure must not hide the child's provider outcome.
         }
-        const cooldowns = { ...await selected.modelCooldowns?.snapshot() ?? {}, ...(current === undefined || until === undefined ? {} : { [modelKey(current)]: { until, reason: detail ?? "model_error" } }) };
+        const cooldowns = await selected.modelCooldowns?.snapshot() ?? {};
+        // Successful writes (including a refused shorter deadline) make the persisted snapshot authoritative.
+        // Without a write, retain any longer known deadline while adding the local failure.
+        if (!marked && current !== undefined && until !== undefined) {
+          const previous = cooldowns[modelKey(current)];
+          cooldowns[modelKey(current)] = { until: Math.max(previous?.until ?? 0, until), reason: previous !== undefined && previous.until > until ? previous.reason : detail ?? "model_error" };
+        }
         const chains = selected.modelChains?.() ?? {};
         const progress = { delegated: false };
         await runtime.commit(async (tx) => {

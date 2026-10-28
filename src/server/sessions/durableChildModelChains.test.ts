@@ -70,7 +70,7 @@ async function fixture(errors: Record<string, string[]>, chains: ModelChains = {
       await (await journal.conversation.submit({ type: "input", content: "SPAWN" }, context)).wait(context);
       return journal.conversation.context(context);
     },
-    restart: async (at: number) => { await recorder.close(); await journal.close(); now = at; cooldowns = new ModelCooldownRegistry(cooldownPath, (error) => { warnings.push(error); }); await open(); },
+    restart: async (at: number, failCooldownWrite = false) => { await recorder.close(); await journal.close(); now = at; cooldowns = new ModelCooldownRegistry(cooldownPath, (error) => { warnings.push(error); }); if (failCooldownWrite) vi.spyOn(cooldowns, "mark").mockRejectedValueOnce(new Error("Configured cooldown write failure")); await open(); },
     stop: async () => { const child = (await listChildren(journal.harness, journal.conversation.id, context))[0]; if (child !== undefined) await stopChild(journal.harness, journal.conversation, child.conversationId, context); },
     idle: async () => { await vi.waitFor(async () => { expect((await journal.harness.snapshot(LiveDoc, journal.conversation.id, context))?.run).toBeUndefined(); }); },
   };
@@ -219,4 +219,19 @@ it("reports a context-window error without trying a different model", async () =
   const run = await fixture({ a: ["maximum context length exceeded"] });
   await run.spawn(); await vi.waitFor(() => { expect(run.reports[0]).toContain("maximum context length exceeded"); });
   expect(run.calls.map((call) => call.model)).toEqual(["a"]); expect(run.warnings).toEqual([]);
+});
+
+it.each([false, true])("does not shorten a stored cooldown while planning exhaustion (mark fails: %s)", async (failCooldownWrite) => {
+  const run = await fixture({ a: ["HTTP 429", "HTTP 429. Retry-After: 1"] });
+  await run.spawn(); await vi.waitFor(async () => { expect((await run.children())[0]?.retry?.until).toBe(1_060_000); });
+  await run.cooldowns().mark("faux/a", 9_000_000, "Stored A cooldown");
+  await run.cooldowns().mark("faux/b", 2_000_000, "Stored B cooldown");
+  await run.restart(1_060_000, failCooldownWrite);
+  await vi.waitFor(async () => {
+    const child = (await run.children())[0];
+    expect(child?.fallback).toMatchObject({ from: "faux/a", to: "faux/b" });
+    expect(child?.retry?.until).toBe(1_090_000);
+  });
+  expect((await run.cooldowns().snapshot())["faux/a"]?.until).toBe(9_000_000);
+  expect(run.warnings).toHaveLength(failCooldownWrite ? 1 : 0);
 });
