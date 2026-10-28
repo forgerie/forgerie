@@ -247,13 +247,30 @@ code { font-family: var(--code-font); font-size: var(--code-size); font-variant-
 .q-solo .button { align-self: center; }
 
 /* ---------- The input bar, as shipped ---------- */
-.bar { position: relative; border: 1px solid var(--wall); border-radius: var(--radius-thread); background: var(--bar-surface); }
+.bar { container: bar / inline-size; position: relative; border: 1px solid var(--wall); border-radius: var(--radius-thread); background: var(--bar-surface); }
 .bar-text { min-block-size: 2.25rem; padding: var(--space-3) var(--space-4) var(--space-2); font-size: 1rem; line-height: 1.5rem; overflow-wrap: anywhere; }
 .bar-text[data-empty] { color: var(--muted-foreground); }
 .bar-actions { display: flex; align-items: center; gap: clamp(var(--space-2), 4cqi, var(--space-4)); padding: 0 var(--space-2) var(--space-2); }
+/* The ledge's handle: always in the bar, in the same place, so one press folds everything above the bar away and one
+   press brings it back. Folded, the bar is its normal height and the handle is the only trace: the counts, and a live
+   dot when something new arrived while folded. A new proposal never reopens the ledge on its own. */
+.handle { position: relative; flex: none; display: inline-flex; align-items: center; gap: 0.3125rem; block-size: 2rem; padding: 0 var(--space-2) 0 0.625rem;
+  border: 1px solid var(--edge); border-radius: 999px; background: var(--background); color: var(--foreground);
+  font-size: var(--label-text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.handle:hover { border-color: var(--edge-focus); }
+.handle svg { inline-size: 0.875rem; block-size: 0.875rem; color: var(--muted-foreground); }
+.handle-words { font-weight: 500; color: var(--muted-foreground); }
+.handle-words b { font-weight: 600; color: var(--foreground); }
+.handle[data-new]::after { content: ""; position: absolute; inset-block-start: -2px; inset-inline-end: -2px; inline-size: 8px; block-size: 8px;
+  border: 2px solid var(--bar-surface); border-radius: 50%; background: var(--live); }
+/* Narrow bar: one total. The split stays in the ledge, and in the handle's name for a screen reader. */
+.handle-total { display: none; }
+@container bar (width < 28rem) { .handle-words { display: none; } .handle-total { display: inline; } }
+/* The folded bar must stay one row: the model name is a readout, so it gives way before the bar grows. */
+@container bar (width < 22rem) { .bar-actions { gap: var(--space-1); } .model-trigger span:first-child { display: none; } .steer { padding-inline: var(--space-2); } }
 .model-trigger { display: inline-flex; align-items: center; gap: var(--space-2); flex: 0 1 auto; min-inline-size: 0; overflow: hidden; block-size: 2rem; padding-inline: var(--space-2);
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
-.model-trigger span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.model-trigger span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
 .model-trigger svg { inline-size: 0.875rem; block-size: 0.875rem; }
 .spacer { flex: 1; }
 .send { position: relative; display: grid; place-items: center; inline-size: var(--icon-size); block-size: var(--icon-size); border: 0; border-radius: var(--radius-control);
@@ -335,6 +352,9 @@ const SCENES = {
   both: { props: ["retry", "theme", "dock"], running: true, queue: ["steer", "follow"] },
   "both-open": { props: ["retry", "theme", "dock"], open: true, running: true, queue: ["steer", "follow"] },
   menu: { props: ["retry"], menu: 0 },
+  "one-min": { props: ["retry"], min: true },
+  "both-min": { props: ["retry", "theme", "dock"], running: true, queue: ["steer", "follow"], min: true },
+  "min-new": { props: ["retry", "theme", "dock", "picker"], min: true, arrived: true },
   states: { props: ["retry", "theme", "dock", "longword"], open: true,
     states: { retry: { kind: "filing" }, dock: { kind: "failed", message: "Not filed: the backlog folder is read-only." }, theme: { kind: "done" } } },
 };
@@ -342,7 +362,7 @@ const params = new URLSearchParams(location.search);
 const name = params.get("scene") ?? "many";
 const scene = structuredClone(SCENES[name] ?? SCENES.many);
 document.title = `Ledge: ${name}`;
-const state = { props: [...(scene.props ?? [])], open: !!scene.open, queue: [...(scene.queue ?? [])], expanded: new Set(), menu: scene.menu };
+const state = { props: [...(scene.props ?? [])], open: !!scene.open, queue: [...(scene.queue ?? [])], expanded: new Set(), menu: scene.menu, min: !!scene.min, arrived: !!scene.arrived };
 
 /* ---------- Rows ---------- */
 function actionsFor(id, index) {
@@ -408,12 +428,23 @@ function queueBlock() {
 }
 
 function ledge() {
+  if (state.min) return "";
   const p = proposalsBlock(), q = queueBlock();
   if (p === "" && q === "") return "";
   const folded = state.props.length > 1 && !state.open;
   return `<section class="ledge" aria-label="Waiting at the input"${state.open && state.props.length > 1 ? " data-open" : ""}>
     ${folded ? `<div class="lips" aria-hidden="true"><span class="lip"></span>${state.props.length > 2 ? '<span class="lip"></span>' : ""}</div>` : ""}
     <div class="ledge-body">${p}${q}</div></section>`;
+}
+
+function handle() {
+  const p = state.props.length, q = state.queue.length;
+  if (p + q === 0) return "";
+  const parts = [p ? `${p} proposal${p === 1 ? "" : "s"}` : "", q ? `${q} queued` : ""].filter(Boolean).join(", ");
+  const words = [p ? `<b>${p}</b> proposal${p === 1 ? "" : "s"}` : "", q ? `<b>${q}</b> queued` : ""].filter(Boolean).join(", ");
+  const name = state.min ? `Show ${parts}` : `Fold ${parts} away`;
+  return `<button class="handle hit" data-min aria-expanded="${!state.min}" aria-label="${name}${state.arrived ? ", 1 new" : ""}" title="${name}"${state.arrived ? " data-new" : ""}>
+    <span class="handle-words">${words}</span><span class="handle-total">${p + q}</span>${state.min ? icon.chevUp : icon.chevDown}</button>`;
 }
 
 function bar() {
@@ -423,6 +454,7 @@ function bar() {
     <div class="bar-text" data-empty>${running ? "Queue a message, or steer" : "Ask anything"}</div>
     <div class="bar-actions">
       <button class="icon-button" aria-label="Attach">${icon.plus}</button>
+      ${handle()}
       <button class="model-trigger"><span>Claude Opus 5.5</span><span>High</span>${icon.chevDown}</button>
       <button class="icon-button" aria-label="Dictate">${icon.mic}</button>
       <span class="spacer"></span>
@@ -499,6 +531,7 @@ function placeMenu() {
 document.addEventListener("click", (event) => {
   const t = event.target.closest("button");
   if (!t) { if (state.menu !== undefined) { state.menu = undefined; render(); } return; }
+  if (t.hasAttribute("data-min")) { state.min = !state.min; state.arrived = false; state.menu = undefined; render(); return; }
   if (t.hasAttribute("data-toggle")) { state.open = !state.open; state.menu = undefined; render(); return; }
   if (t.dataset.more !== undefined) { const i = Number(t.dataset.more); state.menu = state.menu === i ? undefined : i; render(); return; }
   if (t.dataset.q !== undefined) { const i = Number(t.dataset.q); state.expanded.has(i) ? state.expanded.delete(i) : state.expanded.add(i); render(); return; }

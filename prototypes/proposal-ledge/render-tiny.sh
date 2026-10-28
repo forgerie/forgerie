@@ -6,6 +6,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 scheme="${1:-light}"; shift || true
 scenes=("$@")
-if [ ${#scenes[@]} -eq 0 ]; then scenes=(one many both many-open states menu); fi
+if [ ${#scenes[@]} -eq 0 ]; then scenes=(one many both many-open states menu one-min both-min); fi
 export CHROME_BIN="$(command -v chromium)"
 node shoot-size.mjs --width 320 --height 568 --scheme "${scheme}" --label tiny "${scenes[@]}"

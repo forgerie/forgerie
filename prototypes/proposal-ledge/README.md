@@ -26,6 +26,9 @@ and `./sheet.sh light <scene>` joins one scene's four postures into one image.
 | `both-open` | The same, open. |
 | `menu` | More, open. |
 | `states` | Filing, failed with Retry, a workflow just started, a title with no break points. |
+| `one-min` | One proposal, the ledge folded away to the handle. |
+| `both-min` | Proposals and the queue, folded away. |
+| `min-new` | Folded away, and a new proposal arrived: a live dot on the handle. |
 
 ## The shape
 
@@ -52,6 +55,14 @@ bar takes focus, the ledge's edge darkens with it.
 - **The title is a press.** It shows the full card, so the long text is always
   one press away. In the thread, the card becomes one quiet line that says the
   proposal waits at the input, as the pinned dock does today.
+- **The handle folds it all away.** While the ledge holds anything, the bar
+  has a handle after the attach button: the counts ("3 proposals, 2 queued")
+  and a chevron. On a bar under 28rem wide it shows one total. One press folds
+  the whole ledge away, so only the bar is left at its normal height, and one
+  press brings it back. The handle is always in the same place, so the reader
+  never has to find it. Folded stays folded: a new proposal puts a live dot on
+  the handle and does not reopen the ledge. Every capability stays one press
+  away.
 - **The queue sits nearest the bar,** below the proposals, because it is the
   bar's own work. It is quieter than a proposal and has no per-item action,
   because Pi can only clear the whole queue. Each line shows the start of the
@@ -75,6 +86,10 @@ is a guess until it is measured on the device.
 
 More opens at window level, above its button, so a scrolled list never clips
 it.
+
+Folded away, the bar never grows past one row of controls. Under 22rem wide,
+the model name gives way first (the level stays), because it is a readout and
+the handle is a control.
 
 ## Not in the mockup yet
 

@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 scheme="${1:-light}"; shift || true
 scenes=("$@")
 if [ ${#scenes[@]} -eq 0 ]; then
-  scenes=(today one one-workflow many many-open lots-open queue queue-one both both-open menu states)
+  scenes=(today one one-workflow many many-open lots-open queue queue-one both both-open menu states one-min both-min min-new)
 fi
 export CHROME_BIN="$(command -v chromium)"
 mkdir -p shots
