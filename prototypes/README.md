@@ -10,6 +10,7 @@ Prototypes do not ship with Forgerie and do not run as part of its production bu
 | [`pen-context/`](pen-context/) | Pen input, transcript marking, diff review, and drawing experiments. |
 | [`skills-and-prompts/`](skills-and-prompts/) | Active session-lens and Settings-library mockup. |
 | [`logo-tally/`](logo-tally/) | Logo candidates drawn from the chat's tally marks. |
+| [`proposal-ledge/`](proposal-ledge/) | Mockup: agent proposals and the queue collect in a ledge that grows out of the input bar. |
 
 Read an experiment's own README before starting or stopping it. A plain HTML experiment can run from a local HTTP server; use the managed process tool when starting one from an agent session.
 
