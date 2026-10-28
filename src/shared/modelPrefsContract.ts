@@ -17,6 +17,10 @@ import { z } from "zod";
  * The title model is Forgerie's `sessionTitleModel` config key: the model that
  * writes a new session's title from its first prompt. `null` means each
  * session's own model writes it.
+ *
+ * Model chains are Forgerie's `modelChains` config key: named, ordered model
+ * lists for Durable child agents. A save sends the whole map, and the server
+ * checks it with the same rule the daemon uses.
  */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -33,6 +37,12 @@ export const modelPrefsSchema = z.object({
   defaultThinkingLevel: z.string().nullable(),
   /** Forgerie's `sessionTitleModel` as a `provider/id` key, or `null` for "the session's own model". */
   titleModel: z.string().nullable(),
+  /**
+   * Forgerie's `modelChains`, in the file's order. A map the daemon would refuse is still read here, as far as it is a
+   * map of text lists, so the page can show it; `modelChainsProblem` then says why every chain is ignored.
+   */
+  modelChains: z.record(z.string(), z.array(z.string())),
+  modelChainsProblem: z.string().nullable(),
   /** Where the lists live, for the settings page to name. */
   favoritesPath: z.string(),
   visiblePath: z.string(),
@@ -49,5 +59,7 @@ export const modelPrefsSaveSchema = z.object({
   defaultThinkingLevel: z.enum(THINKING_LEVELS).optional(),
   /** Absent: unchanged. `null`: each session's own model writes its title. */
   titleModel: z.string().regex(/^[^/\s]+\/\S+$/u).max(300).nullable().optional(),
+  /** Absent: unchanged. The whole map; the server refuses one that breaks the chain rules. An empty map removes the key. */
+  modelChains: z.record(z.string().max(100), z.array(z.string().max(300)).max(100)).optional(),
 });
 export type ModelPrefsSave = z.infer<typeof modelPrefsSaveSchema>;

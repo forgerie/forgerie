@@ -1,6 +1,6 @@
 import { Check } from "typebox/value";
 import { expect, it } from "vitest";
-import { ModelChainsSchema, childModelReference, parseModelChoice, resolveModelChain, selectChainModel } from "./modelChains.js";
+import { ModelChainsSchema, chainEntryProblem, chainNameProblem, childModelReference, modelChainsProblem, parseModelChoice, resolveModelChain, selectChainModel } from "./modelChains.js";
 
 it.each([null, [], { "Bad-name": ["a/b"] }, { "-bad": ["a/b"] }, { good: [] }, { good: ["missing-provider"] }, { good: ["a/"] }, { good: ["a/:high"] }, { good: ["a/b/:high"] }, { good: ["a/b c"] }, { good: [5] }])("rejects invalid chains %j", (value) => { expect(Check(ModelChainsSchema, value)).toBe(false); });
 it("accepts model IDs with slashes and colons, and digit-led names", () => {
@@ -33,4 +33,15 @@ it("allows chain declarations through the workflow wire schema", async () => {
   const { WorkflowModelSchema } = await import("./workflowRuns.js");
   for (const model of ["worker", "worker:high", "openrouter/openai/gpt-5:low", "local/qwen:32b", null]) expect(Check(WorkflowModelSchema, model)).toBe(true);
   for (const model of ["bad name", "worker:unsupported-thinking", "a/", "/b", `provider/${"x".repeat(129)}`, 5]) expect(Check(WorkflowModelSchema, model)).toBe(false);
+});
+it("names the first problem in words, and none for a valid map", () => {
+  expect(modelChainsProblem({ worker: ["a/one:high"], "2-fast": ["local/qwen:32b"] })).toBeUndefined();
+  expect(modelChainsProblem({})).toBeUndefined();
+  expect(modelChainsProblem(null)).toBe("modelChains must be an object that maps chain names to lists of models.");
+  expect(modelChainsProblem({ good: ["a/b"], "-bad": ["a/b"] })).toBe('Chain "-bad": Use lower-case letters, digits and hyphens, and start with a letter or digit.');
+  expect(modelChainsProblem({ good: ["a/b", 5] })).toBe('Chain "good": An entry is not text.');
+  expect(chainNameProblem("")).toBe("Name the chain.");
+  expect(chainNameProblem("worker-2")).toBeUndefined();
+  expect(chainEntryProblem("a/b:high")).toBeUndefined();
+  expect(chainEntryProblem("a/b c")).toBe('"a/b c" is not a provider/model-id reference.');
 });

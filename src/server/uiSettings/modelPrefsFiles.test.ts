@@ -83,6 +83,59 @@ describe("model list files", () => {
     await expect(readPrefs(files)).rejects.toMatchObject({ status: 500 });
   });
 
+  it("reads model chains in the file's order and writes the whole map, keeping every other config key", async () => {
+    const files = await paths();
+    await writeFile(files.config, JSON.stringify({ port: 8504, sessionTitleModel: "proxy/small", modelChains: { worker: ["a/one:high", "b/two"], fast: ["c/three"] } }, null, 2));
+    const before = await readPrefs(files);
+    expect(before).toMatchObject({ modelChains: { worker: ["a/one:high", "b/two"], fast: ["c/three"] }, modelChainsProblem: null });
+    expect(Object.keys(before.modelChains)).toEqual(["worker", "fast"]);
+    const modelChains = { worker: ["b/two", "a/one:high"], "1-review": ["openrouter/openai/gpt-5:low", "local/qwen:32b"] };
+    const after = await savePrefs(files, { revision: before.revision, favorites: [], visible: null, titleModel: null, modelChains });
+    expect(after).toMatchObject({ modelChains, titleModel: null, modelChainsProblem: null });
+    expect(after.revision).not.toBe(before.revision);
+    expect(JSON.parse(await readFile(files.config, "utf8"))).toEqual({ port: 8504, modelChains });
+    // A save without chains leaves them alone; an empty map removes the key.
+    const kept = await savePrefs(files, { revision: after.revision, favorites: ["proxy/a"], visible: null });
+    expect(kept.modelChains).toEqual(modelChains);
+    await savePrefs(files, { revision: kept.revision, favorites: ["proxy/a"], visible: null, modelChains: {} });
+    expect(JSON.parse(await readFile(files.config, "utf8"))).toEqual({ port: 8504 });
+    expect(await exists(`${files.config}.${String(process.pid)}.tmp`)).toBe(false);
+  });
+
+  it("reads chains the daemon ignores, says why, and lets a valid map replace them", async () => {
+    const files = await paths();
+    await writeFile(files.config, JSON.stringify({ modelChains: { "Bad name": ["a/one"], good: ["missing-provider", 5], odd: "a/one" } }));
+    const before = await readPrefs(files);
+    expect(before.modelChains).toEqual({ "Bad name": ["a/one"], good: ["missing-provider"] });
+    expect(before.modelChainsProblem).toContain('Chain "Bad name"');
+    const after = await savePrefs(files, { revision: before.revision, favorites: [], visible: null, modelChains: { good: ["a/one"] } });
+    expect(after).toMatchObject({ modelChains: { good: ["a/one"] }, modelChainsProblem: null });
+  });
+
+  it.each([
+    [{ "Bad name": ["a/one"] }, 'Chain "Bad name": Use lower-case letters'],
+    [{ worker: [] }, 'Chain "worker" needs at least one model.'],
+    [{ worker: ["missing-provider"] }, 'Chain "worker": "missing-provider" is not a provider/model-id reference.'],
+    [{ worker: Array.from({ length: 17 }, (_, index) => `a/m${String(index)}`) }, 'Chain "worker" has 17 models. A chain holds at most 16.'],
+  ])("refuses chains that break the chain rules, and writes nothing: %j", async (modelChains, message) => {
+    const files = await paths();
+    await writeFile(files.config, JSON.stringify({ port: 8504 }));
+    const before = await readPrefs(files);
+    const refused = savePrefs(files, { revision: before.revision, favorites: [], visible: null, modelChains });
+    await expect(refused).rejects.toMatchObject({ status: 400 });
+    await expect(refused).rejects.toThrow(message);
+    expect(JSON.parse(await readFile(files.config, "utf8"))).toEqual({ port: 8504 });
+  });
+
+  it("refuses chains saved from a read that someone else's chain edit has moved on", async () => {
+    const files = await paths();
+    await writeFile(files.config, JSON.stringify({ modelChains: { worker: ["a/one"] } }));
+    const before = await readPrefs(files);
+    await writeFile(files.config, JSON.stringify({ modelChains: { worker: ["a/one", "b/two"] } }));
+    await expect(savePrefs(files, { revision: before.revision, favorites: [], visible: null, modelChains: { worker: ["c/three"] } })).rejects.toMatchObject({ status: 409 });
+    expect(JSON.parse(await readFile(files.config, "utf8"))).toEqual({ modelChains: { worker: ["a/one", "b/two"] } });
+  });
+
   it("refuses a save made from lists that changed since they were read", async () => {
     const files = await paths({ enabledModels: ["proxy/a"] });
     const before = await readPrefs(files);
@@ -118,5 +171,26 @@ describe("model list files", () => {
     expect(await saved.json()).toMatchObject({ favorites: ["proxy/b"] });
     expect((await put()).status).toBe(409);
     await app.close();
+  });
+
+  it("serves chains over GET and PUT, and answers 400 for chains that break the rules", async () => {
+    const files = await paths();
+    await writeFile(files.config, JSON.stringify({ port: 8504, modelChains: { worker: ["a/one"] } }));
+    const app = Fastify({ logger: false });
+    try {
+      await registerUiSettingsRoutes(app, { modelPrefsPaths: () => Promise.resolve(files) });
+      const read: { revision: string; modelChains: unknown } = (await app.inject("/aui/model-prefs")).json();
+      expect(read.modelChains).toEqual({ worker: ["a/one"] });
+      const put = (modelChains: unknown) => app.inject({ method: "PUT", url: "/aui/model-prefs", headers: { "content-type": "application/json", host: "forgerie.test" },
+        payload: JSON.stringify({ revision: read.revision, favorites: [], visible: null, modelChains }) });
+      const refused = await put({ worker: [] });
+      expect(refused.statusCode).toBe(400);
+      expect(refused.json()).toEqual({ error: 'Chain "worker" needs at least one model.' });
+      expect((await put({ worker: "a/one" })).statusCode).toBe(400);
+      const saved = await put({ worker: ["b/two:high", "a/one"] });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.json()).toMatchObject({ modelChains: { worker: ["b/two:high", "a/one"] } });
+      expect(JSON.parse(await readFile(files.config, "utf8"))).toEqual({ port: 8504, modelChains: { worker: ["b/two:high", "a/one"] } });
+    } finally { await app.close(); }
   });
 });

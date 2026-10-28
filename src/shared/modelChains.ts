@@ -10,8 +10,36 @@ export const ModelChainReferenceSchema = Type.String({ pattern: `^[a-z0-9][a-z0-
  * keep every attempt under MAX_CHILD_ATTEMPT (64) in src/server/sessions/childRequestIds.ts.
  */
 export const MAX_MODEL_CHAIN_LENGTH = 16;
-export const ModelChainsSchema = Type.Record(Type.String({ pattern: "^[a-z0-9][a-z0-9-]*$" }), Type.Array(ModelSpecSchema, { minItems: 1, maxItems: MAX_MODEL_CHAIN_LENGTH }), { additionalProperties: false });
+export const ModelChainNameSchema = Type.String({ pattern: "^[a-z0-9][a-z0-9-]*$" });
+export const ModelChainsSchema = Type.Record(ModelChainNameSchema, Type.Array(ModelSpecSchema, { minItems: 1, maxItems: MAX_MODEL_CHAIN_LENGTH }), { additionalProperties: false });
 export type ModelChains = Static<typeof ModelChainsSchema>;
+
+/** Why a chain cannot have this name, in words for a person; undefined when it can. */
+export function chainNameProblem(name: string): string | undefined {
+  if (name === "") return "Name the chain.";
+  return Check(ModelChainNameSchema, name) ? undefined : "Use lower-case letters, digits and hyphens, and start with a letter or digit.";
+}
+/** Why a chain entry is not a model reference, in words for a person; undefined when it is one. */
+export function chainEntryProblem(entry: string): string | undefined {
+  return Check(ModelSpecSchema, entry) ? undefined : `"${String(entry)}" is not a provider/model-id reference.`;
+}
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+/** The first reason a `modelChains` value is not valid, in words for a person; undefined when it is valid. */
+export function modelChainsProblem(value: unknown): string | undefined {
+  if (Check(ModelChainsSchema, value)) return undefined;
+  if (!isRecord(value)) return "modelChains must be an object that maps chain names to lists of models.";
+  for (const [name, entries] of Object.entries(value)) {
+    const named = chainNameProblem(name);
+    if (named !== undefined) return `Chain "${name}": ${named}`;
+    if (!Array.isArray(entries) || entries.length === 0) return `Chain "${name}" needs at least one model.`;
+    if (entries.length > MAX_MODEL_CHAIN_LENGTH) return `Chain "${name}" has ${String(entries.length)} models. A chain holds at most ${String(MAX_MODEL_CHAIN_LENGTH)}.`;
+    for (const entry of entries) {
+      const problem = typeof entry === "string" ? chainEntryProblem(entry) : "An entry is not text.";
+      if (problem !== undefined) return `Chain "${name}": ${problem}`;
+    }
+  }
+  return "modelChains is not valid.";
+}
 export interface ModelChoice { model: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel }
 export function parseModelChoice(spec: string): ModelChoice | null {
   if (!Check(ModelSpecSchema, spec)) return null;

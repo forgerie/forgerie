@@ -27,7 +27,7 @@ const names = (section: Element | undefined) => [...(section?.querySelectorAll("
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "xhigh", titleModel: null, favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", configPath: "/home/me/.config/forgerie/config.json", home: "/home/me" };
+  stored = { revision: "r0", favorites: ["proxy/claude-opus-5-5:high", "proxy/*"], visible: null, defaultModel: "proxy/claude-opus-5-5", defaultThinkingLevel: "xhigh", titleModel: null, modelChains: {}, modelChainsProblem: null, favoritesPath: "/home/me/agent/settings.json", visiblePath: "/home/me/.config/forgerie/visible-models.json", configPath: "/home/me/.config/forgerie/config.json", home: "/home/me" };
   saves = []; refuse = false; listeners.clear();
   source = {
     read: async () => { for (const listener of listeners) listener(stored); return stored; },

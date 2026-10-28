@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { modelChainsProblem, type ModelChains } from "../../shared/modelChains.js";
 import { modelPrefsSaveSchema, type ModelPrefs, type ModelPrefsSave } from "../../shared/modelPrefsContract.js";
 import { activeForgerieProfile, type Gateway } from "./forgerieProfile.js";
 import { errorMessage, isErrnoCode, readJsonBody, refuseCrossSite, sendJson, SettingsHttpError } from "./http.js";
@@ -13,10 +14,13 @@ import type { Middleware } from "./routes.js";
  * in the active profile's `settings.json`, so terminal Pi with the same profile
  * sees the same favorites. Shown models are Forgerie's own list, beside
  * Forgerie's config. The title model is the `sessionTitleModel` key in
- * Forgerie's config, which sessiond reads each time it writes a title.
+ * Forgerie's config, which sessiond reads each time it writes a title. Model
+ * chains are the `modelChains` key in the same file, which sessiond reads at
+ * each child spawn and model switch.
  *
- *   GET /aui/model-prefs   both lists and their revision
- *   PUT /aui/model-prefs   { revision, favorites, visible, defaultModel?, defaultThinkingLevel?, titleModel? } (409 if the revision moved)
+ *   GET /aui/model-prefs   the lists, the chains, and their revision
+ *   PUT /aui/model-prefs   { revision, favorites, visible, defaultModel?, defaultThinkingLevel?, titleModel?, modelChains? }
+ *                          (409 if the revision moved, 400 if the chains break the chain rules)
  */
 export const MODEL_PREFS_PATH = "/aui/model-prefs";
 
@@ -58,7 +62,21 @@ const revisionOf = (state: unknown) => createHash("sha256").update(JSON.stringif
 function parseConfig(text: string | undefined, path: string): Record<string, unknown> {
   if (text === undefined) return {};
   try { return settingsSchema.parse(JSON.parse(text)); }
-  catch { throw new PrefsError(500, `${path} is not a JSON object. Fix it before you change the title model.`); }
+  catch { throw new PrefsError(500, `${path} is not a JSON object. Fix it before you change the title model or the model chains.`); }
+}
+
+/**
+ * The chains as far as they are a map of text lists, in the file's order, and why the daemon ignores them, if it does.
+ * A part that is not a text list is left out of the map; the problem still names it.
+ */
+function chainsOf(value: unknown): { chains: ModelChains; problem: string | null } {
+  if (value === undefined) return { chains: {}, problem: null };
+  const problem = modelChainsProblem(value) ?? null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { chains: {}, problem };
+  // fromEntries keeps a key such as "__proto__" an own key.
+  const chains: ModelChains = Object.fromEntries(Object.entries(value).flatMap(([name, entries]: [string, unknown]) =>
+    Array.isArray(entries) ? [[name, entries.filter((entry): entry is string => typeof entry === "string")]] : []));
+  return { chains, problem };
 }
 
 /** Writes a whole file through a temporary file, so a reader never sees half of it. */
@@ -82,8 +100,13 @@ export async function readPrefs(paths: ModelPrefsPaths): Promise<ModelPrefs> {
   const favorites = favoritesOf(settings);
   const defaultModel = defaultOf(settings);
   const defaultThinkingLevel = textOf(settings["defaultThinkingLevel"]);
-  const titleModel = textOf(parseConfig(configText, paths.config)["sessionTitleModel"]);
-  return { revision: revisionOf({ favorites, visible, defaultModel, defaultThinkingLevel, titleModel }), favorites, visible, defaultModel, defaultThinkingLevel, titleModel,
+  const config = parseConfig(configText, paths.config);
+  const titleModel = textOf(config["sessionTitleModel"]);
+  const storedChains: unknown = config["modelChains"];
+  const { chains: modelChains, problem: modelChainsProblem } = chainsOf(storedChains);
+  // The stored value, not the map read from it: an edit to a part the map leaves out still moves the revision.
+  return { revision: revisionOf({ favorites, visible, defaultModel, defaultThinkingLevel, titleModel, chains: storedChains ?? null }),
+    favorites, visible, defaultModel, defaultThinkingLevel, titleModel, modelChains, modelChainsProblem,
     favoritesPath: paths.settings, visiblePath: paths.visible, configPath: paths.config, home: homedir() };
 }
 
@@ -109,6 +132,8 @@ async function withSettingsLock<T>(path: string, task: () => Promise<T>): Promis
 }
 
 export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): Promise<ModelPrefs> {
+  const chainsProblem = save.modelChains === undefined ? undefined : modelChainsProblem(save.modelChains);
+  if (chainsProblem !== undefined) throw new PrefsError(400, chainsProblem);
   return withSettingsLock(paths.settings, async () => {
     const current = await readPrefs(paths);
     if (current.revision !== save.revision) throw new PrefsError(409, "The model lists changed since this page read them. Reload to see the current lists.");
@@ -140,10 +165,15 @@ export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): P
         await replaceFile(paths.visible, `${JSON.stringify({ visible }, null, 2)}\n`);
       }
     }
-    if (save.titleModel !== undefined && save.titleModel !== current.titleModel) {
-      // Only this key changes. Every other key in Forgerie's config stays as it is.
+    const titleChanged = save.titleModel !== undefined && save.titleModel !== current.titleModel;
+    const chainsChanged = save.modelChains !== undefined && (current.modelChainsProblem !== null || JSON.stringify(save.modelChains) !== JSON.stringify(current.modelChains));
+    if (titleChanged || chainsChanged) {
+      // Only these keys change. Every other key in Forgerie's config stays as it is.
       const config = parseConfig(await readText(paths.config), paths.config);
-      if (save.titleModel === null) delete config["sessionTitleModel"]; else config["sessionTitleModel"] = save.titleModel;
+      if (titleChanged) { if (save.titleModel === null) delete config["sessionTitleModel"]; else config["sessionTitleModel"] = save.titleModel; }
+      if (chainsChanged && save.modelChains !== undefined) {
+        if (Object.keys(save.modelChains).length === 0) delete config["modelChains"]; else config["modelChains"] = save.modelChains;
+      }
       await replaceFile(paths.config, `${JSON.stringify(config, null, 2)}\n`);
     }
     return readPrefs(paths);
