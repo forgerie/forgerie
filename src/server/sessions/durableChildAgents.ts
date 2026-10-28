@@ -566,7 +566,20 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           }, ctx);
         },
       }),
-      hook(CompactionTask, { beforeCompact: async (request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return hasUnsafeChildModelDiagnostic(request.messages) ? { decline: true } : undefined; } }),
+      hook(CompactionTask, { beforeCompact: async (request, api, ctx) => {
+        const selected = await resolve(api.conversationId, ctx); await selected.flushRunRecords?.();
+        const decision = { decline: false };
+        await selected.commit?.(async (tx) => {
+          const parent = (await tx.conversation(api.conversationId))?.owner?.conversationId;
+          const provider = (await tx.doc(AgentDoc, api.conversationId)).model?.provider;
+          if (parent === undefined || provider === undefined) return;
+          const record = Object.values((await tx.doc(Children, parent)).agents).find((child) => child.conversationId === api.conversationId);
+          decision.decline = hasUnsafeChildModelDiagnostic({ messages: request.messages, entries: request.entries, provider, fallbacks: record?.fallbacks ?? [] });
+        }, ctx);
+        // Single-model/legacy runs must still compact. Chains did not exist before this deploy and new retry
+        // prompts are generic, so no legacy cross-provider compaction needs a restart pre-send hook or migration.
+        return decision.decline ? { decline: true } : undefined;
+      } }),
     ],
     tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],
     wraps: [

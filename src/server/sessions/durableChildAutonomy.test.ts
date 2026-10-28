@@ -155,13 +155,13 @@ it("wakes the agent once when a run sits idle after a child failed, then flags t
   expect(await run.stallWatches()).toBe(1);
   await run.restart(1000000 + WORKFLOW_STALL_GRACE_MS);
   await vi.waitFor(() => { expect(run.parentInputs.filter((text) => text.includes(WAKE))).toHaveLength(1); });
-  expect(run.parentInputs.find((text) => text.includes(WAKE))).toContain("Invalid API key");
+  expect(run.parentInputs.find((text) => text.includes(WAKE))).toContain("invalid credentials");
   await vi.waitFor(async () => { expect((await run.runs())[0]?.stall).toMatchObject({ state: "woken", child: "broken" }); });
   expect(await run.waiting()).toBe(0);
   // The faux agent only replies, so nothing runs after the wake.
   await run.restart(1000000 + 2 * WORKFLOW_STALL_GRACE_MS);
   await vi.waitFor(async () => { expect((await run.runs())[0]?.stall).toMatchObject({ state: "flagged", child: "broken" }); });
-  expect((await run.runs())[0]?.stall?.error).toContain("Invalid API key");
+  expect((await run.runs())[0]?.stall?.error).toBe("invalid credentials");
   expect(await run.waiting()).toBe(1);
   expect(await run.stallWatches()).toBe(0);
   expect(run.parentInputs.filter((text) => text.includes(WAKE))).toHaveLength(1);
@@ -313,10 +313,15 @@ it.each(["auth_unavailable", "HTTP 599", "connection reset"])("retries the trans
   await run.spawn({ name: "retry", agent: "reader" });
   await vi.waitFor(async () => { expect((await run.children())[0]?.retry).toMatchObject({ attempt: 1, error }); });
 });
-it.each(["Invalid API key", "insufficient_quota 503", "Context window limit overloaded", "quota exceeded 429"])("does not retry the non-transient model error %s", async (error) => {
+it.each([
+  { error: "Invalid API key", diagnostic: "invalid credentials" },
+  { error: "insufficient_quota 503", diagnostic: "insufficient_quota 503" },
+  { error: "Context window limit overloaded", diagnostic: "Context window limit overloaded" },
+  { error: "quota exceeded 429", diagnostic: "quota exceeded 429" },
+])("does not retry the non-transient model error $error", async ({ error, diagnostic }) => {
   const run = await fixture([error]);
   await run.spawn({ name: "error", agent: "reader" });
-  await vi.waitFor(() => { expect(run.parentInputs.some((text) => text.includes(error))).toBe(true); });
+  await vi.waitFor(() => { expect(run.parentInputs.some((text) => text.includes(diagnostic))).toBe(true); });
   expect(run.calls()).toBe(1);
   expect((await run.children())[0]?.retry).toBeUndefined();
 });

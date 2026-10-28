@@ -29,8 +29,9 @@ it("scrubs SDK error context and old retry prompts without changing a user's tas
   const messages = [fauxAssistantMessage(secret, { stopReason: "error", errorMessage: `Incorrect API key provided: ${secret}` }),
     { role: "user" as const, content: `Continue where you stopped; the last request failed with: ${secret}`, timestamp: 1 }];
   expect(JSON.stringify(childModelDiagnosticContext(messages))).not.toContain(secret);
-  expect(hasUnsafeChildModelDiagnostic(messages)).toBe(true);
-  expect(hasUnsafeChildModelDiagnostic(childModelDiagnosticContext(messages))).toBe(false);
+  expect(hasUnsafeChildModelDiagnostic({ messages, entries: [{ model: messages }], provider: "other", fallbacks: [{ from: "faux/a", to: "other/b" }] })).toBe(true);
+  expect(hasUnsafeChildModelDiagnostic({ messages, entries: [{ model: messages }], provider: "faux", fallbacks: [] })).toBe(false);
+  expect(hasUnsafeChildModelDiagnostic({ messages: childModelDiagnosticContext(messages), entries: [{ model: messages }], provider: "other", fallbacks: [{ from: "faux/a", to: "other/b" }] })).toBe(false);
   expect(messages[0]).toHaveProperty("errorMessage", `Incorrect API key provided: ${secret}`);
   expect(childModelDiagnosticContext([{ role: "user", content: "Original task", timestamp: 1 }])).toEqual([{ role: "user", content: "Original task", timestamp: 1 }]);
 });
@@ -52,6 +53,7 @@ it("bounds adversarial megabyte inputs before regex processing", () => {
   expect(diagnostic.length).toBeLessThanOrEqual(300);
 });
 it.each([
+  `${"X".repeat(4000)} api_key="private fixture secret ${"x".repeat(5000)}`,
   `${"complete context ".repeat(250)}api_key="private fixture secret ${"x".repeat(5000)}`,
   `${"complete context ".repeat(250)}sk-review-fixture-${"X".repeat(5000)}`,
   `${"complete context ".repeat(250)}https://example.test?token=private-fixture-secret${"X".repeat(5000)}`,
@@ -64,3 +66,10 @@ it.each(["Invalid API key: private-fixture-secret", "Incorrect API key provided:
   expect(childModelDiagnostic(error)).toBe("invalid credentials");
 });
 it.each(["Request failed: key: private-fixture-secret", "Request failed: key private-fixture-secret", "Request failed: provided: private-fixture-secret", "Request failed: token: private-fixture-secret", "Request failed: token private-fixture-secret", "Request failed: password: private-fixture-secret", "Request failed: password private-fixture-secret"])("scrubs labelled tokens in other diagnostics: %s", (error) => { expect(childModelDiagnostic(error)).not.toContain("private-fixture-secret"); });
+
+it("allows a fallback provider to compact its own later error despite an earlier cross-provider switch", () => {
+  const sourceError = fauxAssistantMessage("", { stopReason: "error", errorMessage: "quota exceeded" });
+  const targetError = { ...sourceError, provider: "other" };
+  const legacy = { role: "user" as const, content: "Continue where you stopped; the last request failed with: HTTP 429", timestamp: 1 };
+  expect(hasUnsafeChildModelDiagnostic({ messages: [legacy], entries: [{ model: [sourceError, targetError, legacy] }], provider: "other", fallbacks: [{ from: "faux/a", to: "other/b" }] })).toBe(false);
+});

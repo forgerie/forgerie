@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createRegistry, LiveDoc } from "@earendil-works/pi-durable";
 import { afterEach, expect, it, vi } from "vitest";
@@ -17,7 +17,7 @@ import { ChildRunStore } from "./childRunStore.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture(errors: Record<string, string[]>, chains: ModelChains = { worker: ["faux/a", "faux/b"] }, profile = "worker", keepRecentTokens = 8192) {
+async function fixture(errors: Record<string, string[]>, chains: ModelChains = { worker: ["faux/a", "faux/b"] }, profile = "worker", keepRecentTokens = 8192, crossProvider = false) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-model-chains-"));
   let now = 1_000_000;
   const clock = () => now;
@@ -32,21 +32,26 @@ async function fixture(errors: Record<string, string[]>, chains: ModelChains = {
   models.setProvider(provider.provider);
   const calls: { model: string; at: number; content: string }[] = [];
   const reports: string[] = [];
-  const requests: { model: string; json: string }[] = [];
+  const requests: { model: string; provider: string; json: string }[] = [];
   let spawnArgs: { name: string; model?: string } = { name: "worker" };
-  provider.setResponses(Array.from({ length: 100 }, () => (request, _options, _state, model) => {
+  const response: FauxResponseFactory = (request, _options, _state, model) => {
     const last = request.messages.at(-1);
     const content = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
     if (model.id !== "parent") {
       calls.push({ model: model.id, at: now, content });
-      requests.push({ model: model.id, json: JSON.stringify(request.messages) });
+      requests.push({ model: model.id, provider: model.provider, json: JSON.stringify(request.messages) });
       const error = errors[model.id]?.shift();
       return error === undefined ? fauxAssistantMessage("CHAIN-SUCCESS") : fauxAssistantMessage("", { stopReason: "error", errorMessage: error });
     }
     if (content === "SPAWN") return fauxAssistantMessage([fauxToolCall("child_agent", { action: "spawn", agent: "reader", message: "Original task", ...spawnArgs })], { stopReason: "toolUse" });
     if (last?.role === "user" && content.includes("[subagent")) reports.push(content);
     return fauxAssistantMessage("PARENT-DONE");
-  }));
+  };
+  provider.setResponses(Array.from({ length: 100 }, () => response));
+  if (crossProvider) {
+    const fallbackProvider = fauxProvider({ provider: "other", models: [{ id: "b", reasoning: true }], tokensPerSecond: 100000 });
+    models.setProvider(fallbackProvider.provider); fallbackProvider.setResponses(Array.from({ length: 100 }, () => response));
+  }
   const store = new ChildRunStore(join(root, "runs.json"), clock);
   let recorder: DurableChildRunRecords;
   let journal: DurableSessionJournal;
@@ -304,13 +309,13 @@ it.each([false, true])("keeps provider diagnostics out of native compaction requ
   expect(run.warnings).toEqual([]);
 });
 
-it("declines native compaction of an old raw retry prompt instead of exposing its secret", async () => {
-  const run = await fixture({}, undefined, undefined, 1);
+it("lets a single-model child compact legacy retry text on its own provider", async () => {
+  const run = await fixture({}, { worker: ["faux/a"] }, undefined, 1);
   await run.spawn(); await vi.waitFor(() => { expect(run.reports).toHaveLength(1); }); await run.idle();
   await run.appendLegacyRetry("HTTP 429 api_key=private-fixture-secret");
   const task = await run.compact();
-  expect(task.state.outcome.status).toBe("completed"); expect(run.calls).toHaveLength(1);
-  expect(JSON.stringify(run.requests)).not.toContain("private-fixture-secret");
+  expect(task.state.outcome.status).toBe("completed"); expect(run.calls).toHaveLength(2);
+  expect(run.requests.every((request) => request.provider === "faux")).toBe(true);
 });
 
 it.each(["Invalid API key: private-fixture-secret", "Incorrect API key provided: private-fixture-secret"])("keeps labelled credential text out of every reporter output: %s", async (error) => {
@@ -318,4 +323,13 @@ it.each(["Invalid API key: private-fixture-secret", "Incorrect API key provided:
   await run.spawn(); await vi.waitFor(() => { expect(run.reports).toHaveLength(1); });
   const outputs = JSON.stringify([await run.children(), await run.history(), run.reports, await run.cooldowns().snapshot(), await run.cooldownFile(), run.requests]);
   expect(outputs).not.toContain("private-fixture-secret"); expect(outputs).toContain("invalid credentials");
+});
+
+it("declines compaction that would forward provider A's legacy error text to fallback provider B", async () => {
+  const run = await fixture({ a: ["insufficient_quota"] }, { worker: ["faux/a", "other/b"] }, undefined, 1, true);
+  await run.spawn(); await vi.waitFor(() => { expect(run.reports).toHaveLength(1); }); await run.idle();
+  await run.appendLegacyRetry("HTTP 429 api_key=private-fixture-secret");
+  const task = await run.compact();
+  expect(task.state.outcome.status).toBe("completed"); expect(run.calls).toHaveLength(2);
+  expect(JSON.stringify(run.requests.filter((request) => request.provider === "other"))).not.toContain("private-fixture-secret");
 });

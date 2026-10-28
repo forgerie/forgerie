@@ -50,11 +50,23 @@ export function childModelDiagnosticContext(messages: readonly Message[]): Messa
       ? { ...message, content: CHILD_MODEL_CONTINUE } : message);
 }
 
-/** Compaction's SDK hook cannot replace source messages. Decline rather than send an unsafe error to its model. */
-export function hasUnsafeChildModelDiagnostic(messages: readonly Message[]): boolean {
-  return messages.some((message) => (message.role === "assistant" && message.stopReason === "error"
-    && (message.content.length > 0 || (message.errorMessage !== undefined && childModelDiagnostic(message.errorMessage) !== message.errorMessage)))
-    || (message.role === "user" && typeof message.content === "string" && message.content.startsWith(LEGACY_RETRY_PREFIX)));
+/** Decline only a proven cross-provider diagnostic after a fallback, not ordinary same-provider history. */
+export function hasUnsafeChildModelDiagnostic(input: {
+  messages: readonly Message[]; entries: readonly { model?: readonly Message[] }[];
+  provider: string; fallbacks: readonly { from: string; to: string }[];
+}): boolean {
+  const sources = new Set(input.fallbacks.map((fallback) => fallback.from.split("/")[0]).filter((provider) => provider !== input.provider));
+  if (sources.size === 0) return false;
+  if (input.messages.some((message) => message.role === "assistant" && message.stopReason === "error" && sources.has(message.provider)
+    && (message.content.length > 0 || (message.errorMessage !== undefined && childModelDiagnostic(message.errorMessage) !== message.errorMessage)))) return true;
+  const visible = new Set(input.messages);
+  let source: string | undefined;
+  for (const entry of input.entries) for (const message of entry.model ?? []) {
+    if (message.role === "assistant" && message.stopReason === "error") source = message.provider;
+    if (message.role === "user" && typeof message.content === "string" && message.content.startsWith(LEGACY_RETRY_PREFIX)
+      && visible.has(message) && source !== undefined && sources.has(source)) return true;
+  }
+  return false;
 }
 
 /** Migrate pending reports written before diagnostics were scrubbed, without truncating a child's answer. */
