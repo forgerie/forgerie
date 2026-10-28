@@ -18,7 +18,7 @@ async function fixture() {
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
-  const provider = fauxProvider({ tokensPerSecond: 100000 }); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
+  const provider = fauxProvider(); models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
   provider.setResponses(Array.from({ length: 30 }, () => fauxAssistantMessage("Done")));
   const control = controlledManagedProcessLauncher();
   const archive = new SessionArchiveStore(join(root, "archive.json"));
@@ -153,6 +153,24 @@ it("rebinds the panel to the restored daemon dispatcher without losing names or 
   expect(f.errors.filter(error => typeof error === "object" && error !== null && "text" in error
     && typeof error.text === "string" && error.text.startsWith("managed process"))).toEqual([]);
 }, 15000);
+
+it("stops panel polling when the session service is disposed", async () => {
+  const f = await fixture(); const service = f.open();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await service.start(f.root);
+    await vi.waitFor(() => {
+      expect(f.hub.sessionEvents.some(({ event }) => event.type === "processes.update")).toBe(true);
+    });
+    await service.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    const get = vi.spyOn(service, "getManagedProcesses");
+    f.errors.length = 0;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(get).not.toHaveBeenCalled();
+    expect(f.errors).toEqual([]);
+  } finally { vi.useRealTimers(); }
+});
 
 it("starts the daemon after an unused session created an empty process owner", async () => {
   const f = await fixture(); const first = f.open();

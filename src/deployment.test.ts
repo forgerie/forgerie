@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -7,27 +6,48 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { z } from "zod";
 import { deployCommand } from "./deployment.js";
+import { createTestCommandScope } from "./subprocess.testSupport.js";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 const helper = fileURLToPath(new URL("../scripts/redeploy-when-idle.sh", import.meta.url));
 const roots: string[] = [], servers: Server[] = [];
+const commands: ReturnType<typeof createTestCommandScope>[] = [];
 afterEach(async () => {
+  await Promise.all(commands.map((scope) => scope.dispose()));
+  commands.length = 0;
   await Promise.all(servers.map((server) => new Promise<void>((resolve, reject) => { server.close((error) => { if (error) reject(error); else resolve(); }); })));
   servers.length = 0;
   await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
   roots.length = 0;
 });
-function command(executable: string, args: string[], env = process.env) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(executable, args, { env });
-    let stdout = "", stderr = "";
-    child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
-    child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
-    child.on("error", reject);
-    child.on("close", (code) => { resolve({ code, stdout, stderr }); });
-  });
+type SystemctlHealth = readonly [web: readonly [result: string, restarts: number], sessiond: readonly [result: string, restarts: number]];
+interface SystemctlBehavior {
+  failAction?: string;
+  persistent?: boolean;
+  removeNext?: boolean;
+  failPrevious?: boolean;
+  inactiveSessiondForNext?: boolean;
+  stillActive?: boolean;
+  health?: readonly SystemctlHealth[];
 }
+
+async function writeSystemctlBehavior(config: string, value: SystemctlBehavior): Promise<void> {
+  const health: readonly SystemctlHealth[] = value.health ?? [[["success", 0], ["success", 0]]];
+  if (health.length === 0) throw new Error("Systemctl fixture requires at least one health response");
+  // Only data crosses into the shell adapter. Never source or eval behavior.
+  await Promise.all([
+    writeFile(join(config, "fail-action"), `${value.failAction ?? ""}\n`),
+    writeFile(join(config, "flags"), [value.persistent, value.removeNext, value.failPrevious, value.inactiveSessiondForNext].map((flag) => flag === true ? "1\n" : "0\n").join("")),
+    writeFile(join(config, "health-count"), `${String(health.length)}\n`),
+    ...health.map((units, index) => writeFile(join(config, `health.${String(index + 1)}`), units.map(([result, restarts]) =>
+      `ActiveState=${value.stillActive === true ? "active" : "inactive"}\nResult=${result}\nNRestarts=${String(restarts)}`
+    ).join("\n\n") + "\n")),
+  ]);
+}
+
 async function fixture() {
+  const scope = createTestCommandScope(); commands.push(scope);
+  const command = scope.run.bind(scope);
   const root = await mkdtemp(join(tmpdir(), "forgerie-deploy-")); roots.push(root);
   const repo = join(root, "source"), target = join(root, "target");
   await mkdir(repo); await mkdir(target);
@@ -48,34 +68,70 @@ async function fixture() {
   // Compatibility helper launches this prepared CLI, which delegates to the real entrypoint.
   await writeFile(join(prepared, "cli.js"), `const {spawnSync} = require('node:child_process'); const r = spawnSync(${JSON.stringify(process.execPath)}, ['--import', 'tsx', ${JSON.stringify(cli)}, ...process.argv.slice(2)], {stdio:'inherit'}); process.exit(r.status ?? 1);`);
   const bin = join(root, "bin"); await mkdir(bin);
-  const config = join(root, "behavior.json"), calls = join(root, "calls.jsonl");
-  await writeFile(config, "{}"); await writeFile(calls, "");
-  await writeFile(join(bin, "systemctl"), `#!${process.execPath}
-const fs = require('node:fs'), path = require('node:path');
-const args = process.argv.slice(2), action = args[1];
-fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + '\\n');
-const config = ${JSON.stringify(config)}, b = JSON.parse(fs.readFileSync(config, 'utf8'));
-if (b.failAction === action) { if (!b.persistent) { delete b.failAction; fs.writeFileSync(config, JSON.stringify(b)); } process.exit(1); }
-if (action === 'stop') {
-  for (const dir of fs.readdirSync(${JSON.stringify(join(target, ".forgerie"))})) if (dir.startsWith('deploy.')) {
-    if (b.removeNext) fs.rmSync(path.join(${JSON.stringify(join(target, ".forgerie"))}, dir, 'next'), {recursive: true, force: true});
-    if (b.failPrevious) fs.mkdirSync(path.join(${JSON.stringify(join(target, ".forgerie"))}, dir, 'previous', 'conflict'), {recursive: true});
-  }
-}
-if (action === 'is-active' && b.inactiveSessiondForNext) {
-  const next = fs.readFileSync(${JSON.stringify(join(deployed, "server/index.js"))}, 'utf8') === 'next';
-  // Match systemctl's real grouped semantics: ANY active requested unit succeeds.
-  const active = args.filter(arg => arg.endsWith('.service')).some(unit => !next || unit !== 'forgerie-sessiond.service');
-  process.exit(active ? 0 : 3);
-}
-if (action === 'show') {
-  // b.health lists, per read, [web, sessiond] as [Result, NRestarts]; the last entry repeats.
-  const reads = fs.readFileSync(${JSON.stringify(calls)}, 'utf8').split('\\n').filter(line => line.includes('"show"')).length;
-  const health = b.health ?? [[['success', 0], ['success', 0]]];
-  const units = health[Math.min(reads, health.length) - 1];
-  // systemd's own property order, not the requested one.
-  console.log(units.map(([result, restarts]) => 'ActiveState=' + (b.stillActive ? 'active' : 'inactive') + '\\nResult=' + result + '\\nNRestarts=' + restarts).join('\\n\\n'));
-}
+  const config = join(root, "behavior"), calls = join(root, "calls.jsonl");
+  await mkdir(config);
+  await writeSystemctlBehavior(config, {});
+  await writeFile(calls, "");
+  // This counter belongs to the call history, not the current behavior.
+  await writeFile(join(root, "show-count"), "0\n");
+  await writeFile(join(bin, "systemctl"), `#!/bin/sh
+set -eu
+root=$FORGERIE_TEST_SYSTEMCTL_ROOT
+config="$root/behavior"
+# Arguments are controlled fixture tokens. Validate them before writing JSON.
+line='['
+separator=
+quote='"'
+for argument do
+  case "$argument" in
+    --user|show|stop|start|restart|is-active|--quiet|--property=ActiveState,Result,NRestarts|forgerie-web.service|forgerie-sessiond.service) ;;
+    *) printf '%s\\n' 'Unexpected systemctl fixture argument' >&2; exit 2 ;;
+  esac
+  line="$line$separator$quote$argument$quote"
+  separator=,
+done
+printf '%s]\\n' "$line" >> "$root/calls.jsonl"
+action=$2
+if [ "$action" = show ]; then
+  IFS= read -r shows < "$root/show-count"
+  shows=$((shows + 1))
+  printf '%s\\n' "$shows" > "$root/show-count"
+fi
+IFS= read -r fail_action < "$config/fail-action"
+{
+  IFS= read -r persistent
+  IFS= read -r remove_next
+  IFS= read -r fail_previous
+  IFS= read -r inactive_sessiond_for_next
+} < "$config/flags"
+if [ "$fail_action" = "$action" ]; then
+  if [ "$persistent" = 0 ]; then printf '\\n' > "$config/fail-action"; fi
+  exit 1
+fi
+if [ "$action" = stop ]; then
+  for stage in "$root/target/.forgerie"/deploy.*; do
+    [ -d "$stage" ] || continue
+    if [ "$remove_next" = 1 ]; then rm -rf -- "$stage/next"; fi
+    if [ "$fail_previous" = 1 ]; then mkdir -p -- "$stage/previous/conflict"; fi
+  done
+fi
+if [ "$action" = is-active ] && [ "$inactive_sessiond_for_next" = 1 ]; then
+  marker=$(cat "$root/target/dist/server/index.js")
+  # Match systemctl's grouped semantics: ANY active requested unit succeeds.
+  for argument do
+    case "$argument" in
+      *.service)
+        if [ "$marker" != next ] || [ "$argument" != forgerie-sessiond.service ]; then exit 0; fi ;;
+    esac
+  done
+  exit 3
+fi
+if [ "$action" = show ]; then
+  IFS= read -r count < "$config/health-count"
+  if [ "$shows" -gt "$count" ]; then shows=$count; fi
+  # Outputs already contain systemd's property order and blank unit separator.
+  while IFS= read -r line; do printf '%s\\n' "$line"; done < "$config/health.$shows"
+fi
 `);
   await chmod(join(bin, "systemctl"), 0o755);
   let activity: unknown = { workspaces: [{ cwd: "/other", hasSessionActivity: true }] };
@@ -106,14 +162,14 @@ if (action === 'show') {
   servers.push(server);
   await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", resolve); });
   const address = server.address(); if (address === null || typeof address === "string") throw new Error("No fixture listener");
-  const env = { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}`, FORGERIE_REDEPLOY_URL: `http://127.0.0.1:${String(address.port)}`, FORGERIE_REDEPLOY_LOG: join(root, "deploy.log"), FORGERIE_DEPLOY_SHELL: "1" };
+  const env = { ...process.env, FORGERIE_TEST_SYSTEMCTL_ROOT: root, PATH: `${bin}:${process.env["PATH"] ?? ""}`, FORGERIE_REDEPLOY_URL: `http://127.0.0.1:${String(address.port)}`, FORGERIE_REDEPLOY_LOG: join(root, "deploy.log"), FORGERIE_DEPLOY_SHELL: "1" };
   const invoke = (...args: string[]) => command(process.execPath, ["--import", "tsx", cli, "deploy", ...args], env);
   return {
-    root, repo, target, sha, prepared, deployed, invoke, env,
+    root, repo, target, sha, prepared, deployed, invoke, env, command,
     record: () => invoke("record", prepared, sha),
     publish: (...flags: string[]) => invoke(prepared, deployed, sha, ...flags, "--readiness-seconds", "0"),
     calls: async () => (await readFile(calls, "utf8")).trim().split("\n").filter(Boolean).map((line) => z.array(z.string()).parse(JSON.parse(line))),
-    behavior: async (value: object) => writeFile(config, JSON.stringify(value)),
+    behavior: (value: SystemctlBehavior) => writeSystemctlBehavior(config, value),
     activity: (value: unknown, status = 200) => { activity = value; activityStatus = status; },
     activityCalls: () => activityCalls,
     badReadiness: () => { badReadiness = true; },
@@ -167,7 +223,7 @@ it("reports a stop timeout and automatic restarts in result.json without rolling
   ] });
   // The staged unit's command, as the launcher queues it.
   const stage = join(f.target, ".forgerie/publish.warnings"); await mkdir(stage, { recursive: true });
-  const result = await command("bash", [helper, "--run-staged", join(stage, "result.json"), f.prepared, f.deployed, f.sha, "--readiness-seconds", "0"], f.env);
+  const result = await f.command("bash", [helper, "--run-staged", join(stage, "result.json"), f.prepared, f.deployed, f.sha, "--readiness-seconds", "0"], f.env);
   expect(result, result.stderr).toMatchObject({ code: 0 });
   const warnings = ["sessiond stop timed out; SIGKILL", "sessiond restarted 2× after start (NRestarts 0 → 2)"];
   for (const warning of warnings) expect(result.stdout).toContain(`Warning: ${warning}`);
@@ -231,7 +287,7 @@ it("rechecks deployed revision after waiting", async () => {
   const f = await fixture(); expect((await f.record()).code).toBe(0);
   f.activity({ workspaces: [] });
   f.onActivity(async () => {
-    await command("git", ["-C", f.target, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "advanced"]);
+    await f.command("git", ["-C", f.target, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "advanced"]);
   });
   const result = await f.publish("--when-idle", "/own", "--limit-minutes", "0");
   expect(result.code).toBe(1); expect(result.stderr).toContain("revision differs"); expect(await f.calls()).toEqual([]);
@@ -300,13 +356,13 @@ it("refuses concurrent publishers before stopping services", async () => {
 
 it.each(["busy", "unavailable"])("legacy default idle restart fails closed for %s activity", async (kind) => {
   const f = await fixture(); if (kind === "unavailable") f.activity({}, 503);
-  const result = await command("bash", [helper, "/own", "0"], f.env);
+  const result = await f.command("bash", [helper, "/own", "0"], f.env);
   expect(result.code).toBe(1); expect(result.stdout).toContain("Nothing restarted"); expect(await f.calls()).toEqual([]);
 });
 
 it("legacy publication refuses an absent expected SHA", async () => {
   const f = await fixture();
-  const result = await command("bash", [helper, "/own", "0", f.prepared, f.deployed], { ...f.env, FORGERIE_REDEPLOY_REVISION: "" });
+  const result = await f.command("bash", [helper, "/own", "0", f.prepared, f.deployed], { ...f.env, FORGERIE_REDEPLOY_REVISION: "" });
   expect(result.code).toBe(1); expect(result.stderr).toContain("FORGERIE_REDEPLOY_REVISION"); expect(await f.calls()).toEqual([]);
 });
 
@@ -314,7 +370,7 @@ it.each(["immediate", "idle"])("legacy %s publication uses the shipped publisher
   const f = await fixture(); expect((await f.record()).code).toBe(0);
   if (kind === "idle") f.activity({ workspaces: [] });
   const args = kind === "immediate" ? ["--now", f.prepared, f.deployed, f.sha] : ["/own", "0", f.prepared, f.deployed];
-  const result = await command("bash", [helper, ...args], { ...f.env, FORGERIE_REDEPLOY_REVISION: f.sha });
+  const result = await f.command("bash", [helper, ...args], { ...f.env, FORGERIE_REDEPLOY_REVISION: f.sha });
   expect(result, result.stderr).toMatchObject({ code: 0 });
   expect(f.activityCalls()).toBe(kind === "immediate" ? 0 : 1);
   expect(await readFile(join(f.deployed, "server/index.js"), "utf8")).toBe("next");

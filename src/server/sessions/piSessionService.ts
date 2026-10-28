@@ -1485,6 +1485,10 @@ export class PiSessionService implements SessionRouteService {
     for (const sessionId of this.startupSessions.keys()) this.endSessionExtensionDialogs(sessionId);
     const pendingOpens = this.pendingSessionOpenPromises();
     if (pendingOpens.length > 0) await Promise.allSettled(pendingOpens);
+    // Panels own polling timers and dispatcher subscriptions. Stop them before
+    // closing runtimes and process owners, including panels from pending opens.
+    for (const panel of this.processPanels.values()) panel.dispose();
+    this.processPanels.clear();
     const activeSessions = Array.from(new Set(this.active.values()));
     for (const active of activeSessions) {
       this.retireAttentionSession(active.runtime.session);
@@ -3327,7 +3331,10 @@ export class PiSessionService implements SessionRouteService {
       if (hadAttentionHint) this.publishDecisionHintStatus(session);
       await this.voidOpenAskForUserMessage(session);
       const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
-      const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
+      // Native admission owns the busy decision; run_start can still be waiting
+      // on the host event reader. Do not discard an explicit steer in that gap.
+      const nativeBehavior = session instanceof DurableAgentSession ? requestedBehavior : undefined;
+      const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : nativeBehavior;
       if (waitsForCompaction) {
         this.enqueuePromptBehindCompaction(session, promptText, behavior ?? "followUp", images, echoUserMessage, true, requestId);
         return;
@@ -3367,7 +3374,10 @@ export class PiSessionService implements SessionRouteService {
   private submitPrompt(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, preflightResult?: (accepted: boolean) => void, onCompletion?: (completion: PromptCompletion) => void, requestId?: string): Promise<boolean> {
     this.publishActivity(session, behavior === "steer" ? "steering queued" : behavior === "followUp" ? "message queued" : "prompt accepted", "active");
     if (behavior === undefined && echoUserMessage) this.events.publish(session.sessionId, { type: "message.append", message: userMessage(text, images) });
-    const promptOptions = buildPromptOptions(behavior, images, expandPromptTemplates, preflightResult, requestId);
+    // A native run can start before the host observes it. Queue ordinary input
+    // at Durable's admission boundary instead of rejecting from a stale flag.
+    const whenBusy = behavior ?? (session instanceof DurableAgentSession ? "followUp" : undefined);
+    const promptOptions = buildPromptOptions(whenBusy, images, expandPromptTemplates, preflightResult, requestId);
     const promptPromise = this.runSessionEntryMutation(session, "send a prompt", () => session.prompt(text, promptOptions)).then(() => {
       onCompletion?.({ accepted: true });
       return true;
@@ -3430,7 +3440,8 @@ export class PiSessionService implements SessionRouteService {
     await this.withPromptRequest(session, requestId, async () => {
       await this.voidOpenAskForUserMessage(session);
       const waitsForCompaction = session.isCompacting || this.compactionQueue.hasCompactionBoundary(session.sessionId);
-      const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : undefined;
+      const nativeBehavior = session instanceof DurableAgentSession ? requestedBehavior : undefined;
+      const behavior = session.isStreaming || waitsForCompaction ? requestedBehavior ?? "followUp" : nativeBehavior;
       if (waitsForCompaction) this.enqueuePromptBehindCompaction(session, expanded, behavior ?? "followUp", images, true, false, requestId);
       else {
         const accepted = await this.submitPromptUntilPreflight(session, expanded, behavior, images, true, false, undefined, requestId);

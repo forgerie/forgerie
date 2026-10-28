@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,10 +13,14 @@ import { LegacyMigration } from "./durableLegacyImport.js";
 import { createDurableParentState } from "./durableParentState.js";
 import { initializeParentDocuments } from "./durableParentDocuments.js";
 import { readDurableSessionLocator } from "./durableSessionLocator.js";
+import { createTestCommandScope } from "../../subprocess.testSupport.js";
 
 const directories: string[] = [];
+const commands: ReturnType<typeof createTestCommandScope>[] = [];
 const journals: DurableSessionJournal[] = [];
 afterEach(async () => {
+  await Promise.all(commands.map((scope) => scope.dispose()));
+  commands.length = 0;
   await Promise.all(journals.splice(0).map((journal) => journal.close()));
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
@@ -38,9 +40,9 @@ async function fixture() {
 
 
 async function baseBuildFixture() {
+  const scope = createTestCommandScope(); commands.push(scope);
   const directory = await mkdtemp(join(tmpdir(), "forgerie-base-journal-"));
   directories.push(directory);
-  const execute = promisify(execFile);
   // `git show f4929197:src/server/sessions/durableSessionJournal.ts`, checked in:
   // the pre-commit snapshot and shallow clones have no history to read it from.
   const source = await readFile(join(import.meta.dirname, "fixtures/durableSessionJournal.f4929197.ts.txt"), "utf8");
@@ -69,12 +71,19 @@ async function baseBuildFixture() {
     await journal.close();
     await writeFile(directory + "/session-path.txt", manager.getSessionFile());
   `);
-  await execute(process.execPath, ["--import", pathToFileURL(join(process.cwd(), "node_modules/tsx/dist/loader.mjs")).href, join(directory, "build.mts")]);
+  await executeBaseBuild(scope, join(directory, "build.mts"));
   const file = await readFile(join(directory, "session-path.txt"), "utf8");
-  return { directory, file };
+  return { directory, file, scope };
 }
 
-async function reopenWithBaseBuild(directory: string, file: string): Promise<void> {
+async function executeBaseBuild(scope: ReturnType<typeof createTestCommandScope>, script: string): Promise<void> {
+  const args = ["--import", pathToFileURL(join(process.cwd(), "node_modules/tsx/dist/loader.mjs")).href, script];
+  const result = await scope.run(process.execPath, args);
+  // Like execFile, a base-build command must reject on a nonzero exit.
+  if (result.code !== 0) throw Object.assign(new Error(`Command failed: ${process.execPath} ${args.join(" ")}\n${result.stderr}`), result);
+}
+
+async function reopenWithBaseBuild(directory: string, file: string, scope: ReturnType<typeof createTestCommandScope>): Promise<void> {
   await writeFile(join(directory, "reopen.mts"), `
     import { createModels } from "@earendil-works/pi-ai/models";
     import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
@@ -86,7 +95,7 @@ async function reopenWithBaseBuild(directory: string, file: string): Promise<voi
     if (provider.state.callCount !== 0) throw new Error("Rollback open called a provider");
     await journal.close();
   `);
-  await promisify(execFile)(process.execPath, ["--import", pathToFileURL(join(process.cwd(), "node_modules/tsx/dist/loader.mjs")).href, join(directory, "reopen.mts")]);
+  await executeBaseBuild(scope, join(directory, "reopen.mts"));
 }
 
 function expectReport(reports: readonly unknown[], message = "Invalid parent pi.usage"): void {
@@ -166,7 +175,7 @@ describe("Durable session journal", () => {
     expectReport(reports);
   });
   it.each([false, true])("leaves the import receipt readable by the base build (previous v2 receipt: %s)", async (previousV2) => {
-    const { directory, file } = await baseBuildFixture();
+    const { directory, file, scope } = await baseBuildFixture();
     const options = { manager: SessionManager.open(file), models: createModels(), registry: createRegistry(), agent: {} };
     const journal = await DurableSessionJournal.open(options);
     journals.push(journal);
@@ -185,7 +194,7 @@ describe("Durable session journal", () => {
     journals.push(repaired);
     expect(await repaired.harness.snapshot(LegacyMigration, context)).toEqual(completed);
     await repaired.close();
-    await reopenWithBaseBuild(directory, file);
+    await reopenWithBaseBuild(directory, file, scope);
   }, 20_000);
 
   it("opens a base-build journal whose title follows stamped Durable messages", async () => {

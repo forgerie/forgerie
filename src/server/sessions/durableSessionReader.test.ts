@@ -97,7 +97,7 @@ async function fixture(hub = new SessionEventHub(), acquiredCut?: (cut: SessionO
     leased: () => leased, acquired: () => acquired, failAcquire: (error: Error) => { acquireError = error; }, useLegacy: () => { legacy = true; } };
 }
 
-function client(base: string, cwd: string) {
+function client(base: string, cwd: string, onFrame?: () => void) {
   const socket = new WebSocket(`${base.replace("http:", "ws:")}/sessions/logical/events?${new URLSearchParams({ cwd, native: "1", chunks: "1" })}`);
   const frames: DurableBrowserSnapshot[] = [];
   const wireBytes: number[] = [];
@@ -106,7 +106,7 @@ function client(base: string, cwd: string) {
     const text = Buffer.isBuffer(payload) ? payload.toString("utf8") : new TextDecoder().decode(payload instanceof ArrayBuffer ? payload : Buffer.concat(payload));
     wireBytes.push(Buffer.byteLength(text));
     const value = decoder.read(text);
-    if (value !== undefined) frames.push(durableBrowserSnapshotSchema.parse(value));
+    if (value !== undefined) { frames.push(durableBrowserSnapshotSchema.parse(value)); onFrame?.(); }
   });
   cleanups.push(async () => { if (socket.readyState === socket.CLOSED) return; await new Promise<void>((resolve) => { socket.once("close", () => { resolve(); }); socket.close(); }); });
   return { socket, frames, wireBytes };
@@ -187,14 +187,19 @@ describe("native read-model HTTP and WebSocket paths", () => {
     const f = await fixture();
     const text = "界🌍".repeat(1_300_000);
     await f.user(text);
-    const connection = client(await f.start(), f.directory);
-    await vi.waitFor(() => { expect(connection.frames).toHaveLength(1); });
+    let received!: () => void;
+    const frame = new Promise<void>(resolve => { received = resolve; });
+    const connection = client(await f.start(), f.directory, () => { received(); });
+    await frame;
+    expect(connection.frames).toHaveLength(1);
     expect(connection.frames[0]?.history.messages[0]?.content).toBe(text);
     expect(connection.socket.readyState).toBe(WebSocket.OPEN);
     expect(connection.wireBytes.length).toBeGreaterThan(1);
     expect(Math.max(...connection.wireBytes)).toBeLessThanOrEqual(SESSION_FRAME_BYTES);
+    const updated = new Promise<void>(resolve => { received = resolve; });
     await f.user("later turn");
-    await vi.waitFor(() => { expect(connection.frames.at(-1)?.history.total).toBe(2); });
+    await updated;
+    expect(connection.frames.at(-1)?.history.total).toBe(2);
     expect(connection.frames.at(-1)?.history.messages[0]).toEqual(connection.frames[0]?.history.messages[0]);
   });
 
@@ -225,6 +230,8 @@ describe("native read-model HTTP and WebSocket paths", () => {
     const frames: ReturnType<typeof schema.parse>[] = [];
     const sizes: number[] = [];
     const decoder = new SessionWireDecoder();
+    let received!: () => void;
+    const frame = new Promise<void>(resolve => { received = resolve; });
     const query = new URLSearchParams({ cwd: f.directory, native: "1", open: "1", chunks: "1" });
     const socket = new WebSocket(base.replace("http:", "ws:") + "/api/sessions/logical/events?" + query.toString());
     cleanups.push(async () => {
@@ -235,9 +242,10 @@ describe("native read-model HTTP and WebSocket paths", () => {
       const payload = Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data instanceof ArrayBuffer ? data : Buffer.concat(data));
       sizes.push(Buffer.byteLength(payload));
       const value = decoder.read(payload);
-      if (typeof value === "object" && value !== null && "type" in value && value.type === "session.open" && "open" in value) frames.push(schema.parse(value.open));
+      if (typeof value === "object" && value !== null && "type" in value && value.type === "session.open" && "open" in value) { frames.push(schema.parse(value.open)); received(); }
     });
-    await vi.waitFor(() => { expect(frames).toHaveLength(1); });
+    await frame;
+    expect(frames).toHaveLength(1);
     expect(frames[0]?.page.messages).toHaveLength(101);
     expect(frames[0]?.page.start).toBe(0);
     expect(Math.max(...sizes)).toBeLessThanOrEqual(SESSION_FRAME_BYTES);

@@ -25,11 +25,55 @@ Use focused tests while editing. Run `npm run verify` before merging cross-cutti
 
 ## Serial lane
 
-`vitest.config.ts` runs the suite as two projects. The `parallel` lane runs first. The `serial` lane then runs the files in `scripts/test-serial-lane.mjs` one at a time. These files timed out when they shared the CPU with the rest of the suite, and passed when they ran alone. The lane applies to `npm test`, the coverage run and the pre-commit hook's related tests. Coverage and assertions are unchanged.
+`vitest.config.ts` runs three projects in two ordered lanes. The `parallel` and `cli` projects share the first lane and its four-worker budget. The `serial` lane then runs the files in `scripts/test-serial-lane.mjs` one at a time.
+
+The lanes use positive group orders `1` and `2`. Vitest 4.1.10 defers isolated single-worker group `0` until after numbered groups. Using group `0` would reverse the lanes with `--no-file-parallelism`. Execution tests check both modes against the real runner.
+
+The serial files timed out when they shared the CPU with the rest of the suite, and passed when they ran alone. The lane applies to `npm test`, the coverage run and the pre-commit hook's related tests. Coverage and assertions are unchanged.
 
 The lane includes `durableChildAutonomy.test.ts` and `durableRiskLabels.test.ts` under `src/server/sessions/`. Before their addition on 2026-10-17, isolated runs passed all 27 and 15 tests, respectively. `src/server/triggers/triggerTool.test.ts` joined on 2026-10-19: its `workflow_schedule` tests took 3.2 s alone against a 5 s limit, and timed out in three of four parallel runs once another test file changed the schedule. The complete file list lives in [`scripts/test-serial-lane.mjs`](../scripts/test-serial-lane.mjs); configuration regression tests check actual Vitest discovery, lane ordering, and test-file isolation.
 
 The cost is wall time: the serial files run after the others and do not overlap with them. Remove a file from the list once it passes reliably in the parallel lane. Do not add a file to hide a real failure: rerun it alone first, and add it only when the alone run passes. Passing alone supports resource contention as a cause; it does not prove contention is the only cause or rule out a race.
+
+The `cli` project contains only `src/deployment.test.ts` and `scripts/redeploy-when-idle.test.mjs`. Its 15-second test budget covers real CLI startup, Git validation, HTTP checks, and rollback. Three isolated source CLI startups took from 0.770 s to 0.872 s each on 2026-10-27.
+
+After lifecycle cleanup, three rollback cases still exceeded the old five-second limit. That limit was also the timeout for one production HTTP request. The cost is ten extra seconds before a CLI hang fails. All other whole-test deadlines, isolation, assertions, retries, and coverage thresholds stay unchanged. Configuration tests check that both files run exactly once in this project.
+
+## Load-sensitive checks
+
+Check resource use, fixture work, and teardown before changing deadlines. A passing isolated run does not rule out a lifecycle race.
+
+On 2026-10-27, unchanged source `9a4b2183af4fcc9ea018b3b87b60850132a1e8d5` reproduced 67 failed, 4,026 passed, and four skipped tests in a 900.65 s `npm test` run. No other test or build from the investigating session overlapped it. The host had 16 available CPUs. Its one-minute load started at 29.27 and ended at 39.33. Two-second samples of the test process tree peaked at 1,961.2 MiB and 23 processes. These observations support resource contention, but do not explain every failure.
+
+The investigation also reproduced two defects without waiting for a test deadline:
+
+- Process panels continued polling after `PiSessionService.dispose()`. Service teardown must dispose panels before closing their runtimes and process owners.
+- Native admission rejected input when a committed run was busy but the asynchronous host streaming flag still said idle. Durable must apply the busy policy. The host flag cannot decide admission.
+
+The log-tail reference scan used seven-line pages for a 30,000-line input. That required 4,286 `read()` calls per comparison. It now uses the ordinary 1,000-line page size, requiring 31 calls, including the final empty read. The full matrix, pagination, byte-chunk boundaries, returned lines, cursors, and retention assertions remain covered.
+
+Sequential focused checks on Node 24.13.0 gave these test-body times:
+
+| Check | Baseline | Revised |
+| --- | --- | --- |
+| One 30,000-line tail comparison | One passed in 3.04 s. | One passed in 77 ms. |
+| Complete log-tail matrix | Not measured alone. | 99 passed in 1.88 s. |
+| Parent answers, process events, and nested gates | 31 passed in 24.12 s. | 32 passed in 25.64 s, including a new disposal regression. |
+
+This is one comparison under changing host load, not a full-suite benchmark. Removing unnecessary synthetic token pacing from the three agent fixtures removes per-chunk timers, but this sample does not establish an aggregate speedup. Explicit streaming tests retain their pacing. These changes do not reserve CPU against other sessions.
+
+CLI and base-build fixtures own a `createTestCommandScope()` from `src/subprocess.testSupport.ts`. Dispose that scope before closing fixture servers or deleting temporary paths. It stops the owned subprocess group and waits for output pipes to close, including pipes inherited by descendants. Capture the scope in each fixture rather than borrowing a mutable scope from the next test.
+
+The deployment fixture still runs the real CLI. Its configured `systemctl` adapter uses a shell instead of starting a Node runtime for every unit query. Oversized socket tests wait for a decoded frame within the existing whole-test deadline. They do not use a separate one-second polling limit.
+
+Final worktree checks on 2026-10-27 passed:
+
+| Server command | Passed | Skipped | Vitest duration |
+| --- | --- | --- | --- |
+| `npm test`, through `npm run verify` | 4,095 | 4 | 420.79 s |
+| `npm test -- --no-file-parallelism` | 4,095 | 4 | 598.77 s |
+
+`npm run verify` also passed static checks, the browser build and lint, and 3,169 browser tests with one skipped. These are verification results, not controlled timing comparisons with the older baseline source.
 
 ## Managed process core acceptance
 

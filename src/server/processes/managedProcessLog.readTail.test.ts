@@ -18,12 +18,15 @@ async function browseTail(log: ManagedProcessLog, ended: boolean, count: number)
   let cursor = { offset: 0, line: 1 };
   const lines: ManagedProcessLogBatch["lines"] = [];
   let droppedLines: number | undefined;
+  // Use read()'s ordinary batch size. The 20k/30k-line cases still cross many
+  // pages and byte chunks, without thousands of filesystem opens per oracle.
+  const pageSize = 1000;
   for (;;) {
-    const batch = await log.read(ended, { cursor, maxLines: 7 });
+    const batch = await log.read(ended, { cursor, maxLines: pageSize });
     droppedLines ??= batch.droppedLines;
     lines.push(...batch.lines);
     cursor = batch.cursor;
-    if (batch.lines.length < 7) {
+    if (batch.lines.length < pageSize) {
       const newest = lines.slice(-count);
       // Every earlier line is dropped from the panel's view: retained lines it omits and retention's.
       return { lines: newest, cursor, droppedLines: droppedLines + lines.length - newest.length };

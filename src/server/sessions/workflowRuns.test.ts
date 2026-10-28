@@ -196,7 +196,10 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
   it("leaves a complete old-stamp transcript byte-identical on cold workflow reads", async () => {
     const ref = { id: (await service.start(root)).id, cwd: root };
     await service.prompt(ref, "Completed history");
-    await until(async () => !(await service.status(ref)).isStreaming);
+    // An idle host flag can precede run_start. Freeze only a completed export,
+    // not a pending run that a later reader can legitimately project.
+    await until(async () => hub.sessionEvents.some(({ sessionId, event }) => sessionId === ref.id
+      && event.type === "pi.event" && event.eventType === "agent_settled") && !(await service.status(ref)).isStreaming);
     await service.dispose();
     const gateway = createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] });
     const file = (await gateway.listAll()).find(session => session.id === ref.id)?.path;

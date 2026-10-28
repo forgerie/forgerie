@@ -1023,6 +1023,36 @@ it.each(["dialog", "streaming"] as const)("retries an inactive open when %s star
 });
 
 
+it.each(["followUp", "steer"] as const)("admits a %s prompt when the native run starts before its host streaming flag updates", async behavior => {
+  const { session, provider, manager, services, directory } = await fixture();
+  const service = new PiSessionService(new SessionEventHub(), { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* Keep this facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  let release!: () => void, entered!: () => void;
+  const reply = new Promise<void>(resolve => { release = resolve; });
+  const requested = new Promise<void>(resolve => { entered = resolve; });
+  provider.setResponses([async () => { entered(); await reply; return fauxAssistantMessage("first answer"); }, fauxAssistantMessage("following answer")]);
+  let prompting: Promise<void> | undefined;
+  try {
+    await service.start(directory);
+    prompting = session.prompt("active input");
+    await requested;
+    // Durable is executing, but its asynchronous host event reader has not
+    // observed run_start yet. Admission must use Durable's own busy state.
+    const streaming = vi.spyOn(session, "isStreaming", "get").mockReturnValue(false);
+    try {
+      const ref = { id: session.sessionId, cwd: directory };
+      await expect(service.prompt(ref, "following input", behavior === "followUp" ? undefined : behavior)).resolves.toBeUndefined();
+      expect(behavior === "followUp" ? session.getFollowUpMessages() : session.getSteeringMessages()).toEqual(["following input"]);
+    } finally { streaming.mockRestore(); }
+    release(); await prompting;
+    await session.journal.conversation.waitForIdle(context);
+    expect(JSON.stringify(await session.journal.conversation.context(context))).toContain("following answer");
+  } finally {
+    release(); await prompting; await service.dispose();
+  }
+});
+
 it("combines native state with the host compaction boundary and following prompts during preparation", async () => {
   const { session, provider, manager, services, directory } = await fixture();
   const hub = new SessionEventHub();

@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import { SERIAL_LANE } from "./scripts/test-serial-lane.mjs";
 
 const include = ["src/**/*.test.ts", "scripts/**/*.test.mjs"];
+const cliIntegration = ["src/deployment.test.ts", "scripts/redeploy-when-idle.test.mjs"];
 
 export default defineConfig({
   test: {
@@ -10,9 +11,14 @@ export default defineConfig({
     maxWorkers: 4,
     setupFiles: ["scripts/test-agent-profile.mjs"],
     // Load-sensitive files run alone, after the parallel lane: they time out when they share the CPU.
+    // Vitest 4.1 defers isolated single-worker group 0 until after numbered groups.
+    // Positive orders preserve this order with --no-file-parallelism too.
     projects: [
-      { extends: true, test: { name: "parallel", include, exclude: ["**/node_modules/**", ...SERIAL_LANE], sequence: { groupOrder: 0 } } },
-      { extends: true, test: { name: "serial", include: [...SERIAL_LANE], fileParallelism: false, sequence: { groupOrder: 1 } } },
+      { extends: true, test: { name: "parallel", include, exclude: ["**/node_modules/**", ...SERIAL_LANE, ...cliIntegration], sequence: { groupOrder: 1 } } },
+      // Real CLI startup, Git validation, HTTP readiness and rollback share one
+      // test body. Keep their budget separate from the five-second unit default.
+      { extends: true, test: { name: "cli", include: cliIntegration, testTimeout: 15_000, sequence: { groupOrder: 1 } } },
+      { extends: true, test: { name: "serial", include: [...SERIAL_LANE], fileParallelism: false, sequence: { groupOrder: 2 } } },
     ],
     coverage: {
       provider: "v8",
