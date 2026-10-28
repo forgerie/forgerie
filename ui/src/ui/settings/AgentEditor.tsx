@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeftIcon, EllipsisIcon, Trash2Icon, XIcon } from "lucide-react";
+import { z } from "zod";
+import type { ModelChains } from "@shared/modelChains";
 import type { SessionModel } from "../../contracts";
-import { modelLabel } from "../../modelChoice";
+import { modelLabel, thinkingLabel } from "../../modelChoice";
 import { thinkingLevelsFor } from "../../newSession";
-import { composeAgentFile, fileIdFor, FORM_FIELDS, NEW_AGENT_TEXT, modelSpecText, parseAgentFile, parseList, parseModelSpec, readFields, setField } from "../../agents/agentFile";
+import { chainNameOf, composeAgentFile, fileIdFor, FORM_FIELDS, NEW_AGENT_TEXT, modelSpecText, parseAgentFile, parseList, parseModelSpec, readFields, setField } from "../../agents/agentFile";
 import { agentDrafts } from "../../agents/agentDrafts";
 import { draftKey, type AgentTarget } from "../../agents/agentPlace";
 import { AgentConflict, agentsApi } from "../../agents/agentsApi";
@@ -39,6 +41,25 @@ function useModels(home: string | undefined) {
   return { models, list };
 }
 
+const chainsSchema = z.object({ modelChains: z.record(z.string(), z.array(z.string())), modelChainsProblem: z.string().nullable() });
+/**
+ * The model chains Forgerie's config holds, read once per editor. Undefined while unknown, so a chain name is not
+ * called missing before the chains are known. Chains the daemon ignores count as none.
+ */
+function useChains(): ModelChains | undefined {
+  const [chains, setChains] = useState<ModelChains>();
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/aui/model-prefs", { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error(`The model settings server answered ${String(response.status)}.`);
+      const value = chainsSchema.parse(await response.json());
+      if (!controller.signal.aborted) setChains(value.modelChainsProblem === null ? value.modelChains : {});
+    }).catch(() => { /* Unknown chains flag nothing; the picker still offers every model. */ });
+    return () => controller.abort();
+  }, []);
+  return chains;
+}
+
 /** A model reference, matched to Pi's list so it shows Pi's name. A bare id matches when only one provider has it. */
 function resolveModel(spec: string | undefined, models: readonly SessionModel[]): SessionModel | undefined {
   const parsed = parseModelSpec(spec);
@@ -70,6 +91,7 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
   const [modelOpen, setModelOpen] = useState<PickerOpen>();
   const modelAnchor = useRef<HTMLDivElement>(null);
   const { models, list: listModels } = useModels(home);
+  const chains = useChains();
 
   const open = useCallback(async (signal?: AbortSignal, ignoreDraft = false) => {
     setLoad({ type: "loading" });
@@ -172,19 +194,37 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const model = resolveModel(fields.model, models);
+  // A model without a provider names a model chain.
+  const chain = chainNameOf(fields.model);
+  const model = chain === undefined ? resolveModel(fields.model, models) : undefined;
   const spec = parseModelSpec(fields.model);
   const thinking = fields.thinking ?? spec?.level;
+  /** A chain's entries in order, by the names Pi gives them, each with its own level. */
+  const chainText = (entries: readonly string[]) => entries.map((entry) => {
+    const parsed = parseModelSpec(entry);
+    return `${modelLabel(resolveModel(parsed ? modelSpecText(parsed) : entry, models))}${parsed?.level ? ` (${thinkingLabel(parsed.level)})` : ""}`;
+  }).join(", then ");
+  const chainEntries = chain !== undefined && chains && Object.hasOwn(chains, chain) ? chains[chain] : undefined;
+  const chainProblem = chain !== undefined && chains && !chainEntries
+    ? `No model chain is named ${chain}. Choose a chain or a model, or create the chain in Settings > Models.` : undefined;
+  const modelHint = chainEntries ? `A model chain. Runs try ${chainText(chainEntries)}, moving on when a model is unavailable.`
+    : model || chain !== undefined ? undefined : "Without a model, the agent runs on whatever model the session uses.";
+  const chooseModel = (value: string) => {
+    // A level written into the old model reference moves to its own field.
+    if (spec?.level && fields.thinking === undefined) update("thinking", spec.level);
+    update("model", value);
+  };
   const modelBinding: ModelBinding = {
     model, thinkingLevel: thinking, disabled: readOnly, emptyLabel: "Same as the session",
     listModels, listThinkingLevels: async () => thinkingLevelsFor(model),
-    onModel: async (provider, id) => {
-      // A level written into the old model reference moves to its own field.
-      if (spec?.level && fields.thinking === undefined) update("thinking", spec.level);
-      update("model", `${provider}/${id}`);
-    },
+    choices: chain !== undefined || (chains && Object.keys(chains).length > 0) ? {
+      label: "Model chains", current: chain,
+      options: Object.entries(chains ?? {}).map(([name, entries]) => ({ id: name, name, detail: chainText(entries) })),
+      onChoose: async (name) => { chooseModel(name); },
+    } : undefined,
+    onModel: async (provider, id) => { chooseModel(`${provider}/${id}`); },
     onThinkingLevel: async (level) => {
-      if (spec?.level) update("model", modelSpecText(spec));
+      if (spec?.level) update("model", chain ?? modelSpecText(spec));
       update("thinking", level);
     },
   };
@@ -237,7 +277,7 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
         value={fields.description ?? ""} onChange={(event) => update("description", event.target.value)} />
 
       <div className="agent-properties">
-        <Field label="Model" hint={model ? undefined : "Without a model, the agent runs on whatever model the session uses."}>
+        <Field label="Model" hint={modelHint} problem={chainProblem}>
           <div ref={modelAnchor} className="agent-model">
             <ModelPicker binding={modelBinding} anchor={modelAnchor} open={modelOpen} onOpenChange={setModelOpen} />
             {fields.model && !readOnly ? <button type="button" className="agent-text-button" onClick={() => { update("model", undefined); }}>Use the session's model</button> : null}
