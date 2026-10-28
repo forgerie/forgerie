@@ -87,15 +87,17 @@ export interface PiWebConfigValues {
    */
   extensionDialogsTimeoutMs?: number;
   /**
-   * `provider/model-id` of the model that writes session titles, for example a
+   * Chain name or `provider/model-id` that writes session titles, for example a
    * small fast model. Omit to use each session's own model. If the model is
    * not available with credentials, the session's own model is used.
    */
   sessionTitleModel?: string;
   /** Write catch-up recaps for unread completed sessions. Defaults to true. */
   autoRecap?: boolean;
-  /** Ordered model lists for Durable child agents. Read fresh at spawn and fallback. */
+  /** Ordered model lists for sessions, child agents, workflow workers and titles. */
   modelChains?: ModelChains;
+  /** New-session default. Pi profile settings retain the chain's concrete first entry. */
+  defaultModelChain?: string;
   /** Desired Pi-compatible agent profile and companion CLI (Pi by default). */
   agent?: PiWebAgentConfig;
 }
@@ -842,7 +844,7 @@ export interface SessionAskCatalogSnapshot {
 /** Display-only Durable transcript entry. Never supplied to Pi as a model message. */
 export const MODEL_CHAIN_SWITCH_KIND = "forgerie.model-chain-switch";
 export interface ModelChainSwitchNotice { from: string; to: string; error: string }
-export interface ModelChainWait { from: string; error: string; until: number }
+export interface ModelChainWait { from: string; error: string; until: number; to?: string }
 
 export interface SessionStatus {
   chainWait?: ModelChainWait;

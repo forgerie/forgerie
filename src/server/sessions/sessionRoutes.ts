@@ -1,4 +1,5 @@
 import { recapRequestSchema } from "../../shared/sessionRecap.js";
+import { sessionModelSelectionSchema, type SessionModelSelection } from "../../shared/sessionModelSelection.js";
 import { sessionEarlierQuerySchema, sessionOpenQuerySchema } from "../../shared/sessionOpen.js";
 import { SessionOpenError } from "./sessionOpen.js";
 import { respondToConnectionChecks } from "../realtime/connectionHealth.js";
@@ -338,10 +339,12 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.post<{ Params: { sessionId: string }; Body: { cwd?: unknown; provider?: unknown; modelId?: unknown } | undefined }>(`${prefix}/sessions/:sessionId/model`, async (request, reply) => {
+  app.post<{ Params: { sessionId: string }; Body: SessionModelSelection | undefined }>(`${prefix}/sessions/:sessionId/model`, async (request, reply) => {
     try {
       const body = optionalRecord(request.body);
-      return await sessions.setModel(sessionRefFromBody(request.params.sessionId, body), requireString(body, "provider"), requireString(body, "modelId"));
+      const selection = sessionModelSelectionSchema.parse(body);
+      const ref = sessionRefFromBody(request.params.sessionId, body);
+      return "modelChain" in selection ? await sessions.setModelChain(ref, selection.modelChain) : await sessions.setModel(ref, selection.provider, selection.modelId);
     } catch (error) {
       return reply.code(mutationErrorStatus(error)).send({ error: errorMessage(error) });
     }

@@ -1,3 +1,4 @@
+import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
 import { endTurnReplyMessage } from "./endTurnReply.js";
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -53,6 +54,7 @@ export interface DurableJournalOptions {
   initializeParentDocuments?: InitializeParentDocuments;
   /** Composition supplies one conversation-aware router for the whole family. */
   familyOptions?: HarnessOptions;
+  now?: () => number;
   summarize?: Parameters<typeof createDurableNativeHistory>[1]["summarize"];
 }
 
@@ -128,6 +130,7 @@ export class DurableSessionJournal {
     const pool = options.pool ?? DurableSessionJournal.pool;
     const harnessOptions: HarnessOptions = options.familyOptions ?? {
       models: options.models, registry: options.registry,
+      ...(options.now === undefined ? {} : { now: options.now }),
       ...(options.settings === undefined ? {} : { settings: options.settings }),
       ...(options.onReport === undefined ? {} : { onReport: options.onReport }),
       ...(options.env === undefined ? {} : { env: options.env }),
@@ -212,9 +215,11 @@ export class DurableSessionJournal {
   }
 
   /** Use native admission and queue boundaries, but project the notification only in its SDK custom form. */
-  submitCustomMessage(content: UserInput, whenBusy: "steer" | "followUp") {
+  async submitCustomMessage(content: UserInput, whenBusy: "steer" | "followUp") {
     this.assertOwned();
-    return this.conversation.submit({ type: "input", content, whenBusy, requestId: `${CUSTOM_INPUT_REQUEST_PREFIX}${randomUUID()}` }, BACKGROUND_CONTEXT);
+    const requestId = `${CUSTOM_INPUT_REQUEST_PREFIX}${randomUUID()}`;
+    if (this.harnessOptions.registry.snapshot().extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(this.harness, this.conversation.id, { content, whenBusy, requestId }, BACKGROUND_CONTEXT);
+    return this.conversation.submit({ type: "input", content, whenBusy, requestId }, BACKGROUND_CONTEXT);
   }
 
   /** Called before tools and after committed events, so extension hooks see committed assistant calls. */

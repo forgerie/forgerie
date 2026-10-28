@@ -1,3 +1,4 @@
+import { SessionChainTurns, SessionModelChain } from "./durableModelChains.js";
 import { Check } from "typebox/value";
 import { AgentDoc, InboxDoc, LiveDoc, UsageDoc, type CommitPublication, type EntryRecord } from "@earendil-works/pi-durable";
 import type { Static } from "typebox";
@@ -13,7 +14,7 @@ interface History {
   envelopes: Envelopes;
   bound: boolean;
 }
-const parentKinds = new Set([LiveDoc.definition.kind, InboxDoc.definition.kind, AgentDoc.definition.kind, UsageDoc.definition.kind,
+const parentKinds = new Set([SessionModelChain.definition.kind, SessionChainTurns.definition.kind, LiveDoc.definition.kind, InboxDoc.definition.kind, AgentDoc.definition.kind, UsageDoc.definition.kind,
   ParentAsks.definition.kind, ParentResponse.definition.kind, SessionName.definition.kind, Presentation.definition.kind]);
 
 /** Only sources consumed by an open cut can invalidate its replacement. Task/alias/family traffic cannot. */

@@ -259,6 +259,11 @@ async function createSessionDaemonRuntime() {
   });
   void sessionSearch.scan().catch((error: unknown) => { app.log.error({ err: error }, "session search startup scan failed"); });
   app.addHook("onClose", async () => { await sessionSearch.close(); });
+  const modelChains = () => {
+    try { return loadPiWebConfig({ env: daemonEnvironment, onWarning: (message) => { app.log.warn(message); } }).config.modelChains ?? {}; }
+    catch (error) { app.log.warn({ err: error }, "Cannot read model chains; ignoring chains"); return {}; }
+  };
+  const modelCooldowns = new ModelCooldownRegistry(join(piWebDataDir(daemonEnvironment), "model-cooldowns.json"), (error) => { app.log.warn({ err: error }, "Cannot read model cooldown registry"); });
   const sessions: PiSessionService = new PiSessionService(eventHub, sessionServiceDependencies({
     decisionHints,
     // Resolved here: the daemon scrubs PI_WEB_DATA_DIR from process.env before sessions open.
@@ -284,11 +289,8 @@ async function createSessionDaemonRuntime() {
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
       childToolsDeny: config.childToolsDeny,
-      modelChains: () => {
-        try { return loadPiWebConfig({ env: daemonEnvironment, onWarning: (message) => { app.log.warn(message); } }).config.modelChains ?? {}; }
-        catch (error) { app.log.warn({ err: error }, "Cannot read model chains; ignoring chains"); return {}; }
-      },
-      modelCooldowns: new ModelCooldownRegistry(join(piWebDataDir(daemonEnvironment), "model-cooldowns.json"), (error) => { app.log.warn({ err: error }, "Cannot read model cooldown registry"); }),
+      modelChains,
+      modelCooldowns,
       // The user's own agent files, shared by every Pi profile.
       homeAgentsDir: join(homedir(), ".agents"),
       // Forgerie's built-in agents (worker, scout, reviewer, researcher, ...).
@@ -335,6 +337,9 @@ async function createSessionDaemonRuntime() {
     extensionDialogsTimeoutMs: config.extensionDialogsTimeoutMs,
     // Settings > Models writes this key while the daemon runs, so read it for each title.
     autoRecap: () => loadPiWebConfig({ env: daemonEnvironment }).config.autoRecap ?? true,
+    modelChains,
+    modelCooldowns,
+    defaultModelChain: () => loadPiWebConfig({ env: daemonEnvironment }).config.defaultModelChain,
     sessionTitleModel: () => loadPiWebConfig({ env: daemonEnvironment }).config.sessionTitleModel,
     notificationStore,
     unreadStore,

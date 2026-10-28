@@ -1,3 +1,4 @@
+import { SessionModelChain } from "./durableModelChains.js";
 import { listChildren, childMessages } from "./durableChildAgents.js";
 import type { StackLatencyContext } from "../../shared/stackLatency.js";
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
@@ -40,6 +41,10 @@ export class DurableSessionReader {
     await Promise.allSettled(this.opening);
     await Promise.all([...this.publishers].map(publisher => publisher.stop()));
     await Promise.all([...this.attachments].map((attachment) => attachment.stop()));
+  }
+
+  modelChain(ref: SessionRef): Promise<string | undefined> {
+    return this.read(ref, async handle => (await handle.harness.snapshot(SessionModelChain, handle.conversation.id, context))?.reference);
   }
 
   async tasks(ref: SessionRef): Promise<TaskActivity> {

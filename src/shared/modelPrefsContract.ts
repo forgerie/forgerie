@@ -19,7 +19,7 @@ import { z } from "zod";
  * session's own model writes it.
  *
  * Model chains are Forgerie's `modelChains` config key: named, ordered model
- * lists for Durable child agents. A save sends the whole map, and the server
+ * lists for sessions, workflow workers and titles. A save sends the whole map, and the server
  * checks it with the same rule the daemon uses.
  */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -31,11 +31,13 @@ export const modelPrefsSchema = z.object({
   favorites: z.array(z.string()),
   /** Forgerie's allow-list of `provider/id` keys, or `null` for "show every model". */
   visible: z.array(z.string()).nullable(),
-  /** Pi's `defaultProvider` and `defaultModel` as one `provider/id` key: what a new session starts on. */
+  /** Effective new-session selection: Forgerie's default chain, or Pi's concrete `provider/id` default. */
   defaultModel: z.string().nullable(),
+  /** Forgerie chain reference; the effective defaultModel above is this name when set. */
+  defaultModelChain: z.string().nullable().optional(),
   /** Pi's `defaultThinkingLevel`. */
   defaultThinkingLevel: z.string().nullable(),
-  /** Forgerie's `sessionTitleModel` as a `provider/id` key, or `null` for "the session's own model". */
+  /** Forgerie's `sessionTitleModel`: a chain, concrete model, or `null` for the session's own model. */
   titleModel: z.string().nullable(),
   /**
    * Forgerie's `modelChains`, in the file's order. A map the daemon would refuse is still read here, as far as it is a
@@ -56,10 +58,10 @@ export const modelPrefsSaveSchema = z.object({
   favorites: z.array(z.string().min(1).max(300)).max(500),
   visible: z.array(z.string().min(1).max(300)).max(5000).nullable(),
   /** Absent: unchanged. There is no "no default": Pi keeps one once it is set. */
-  defaultModel: z.string().regex(/^[^/\s]+\/\S+$/u).max(300).optional(),
+  defaultModel: z.string().regex(/^(?:[^/\s]+\/\S+|[a-z0-9][a-z0-9-]*(?::(?:off|minimal|low|medium|high|xhigh|max))?)$/u).max(300).optional(),
   defaultThinkingLevel: z.enum(THINKING_LEVELS).optional(),
   /** Absent: unchanged. `null`: each session's own model writes its title. */
-  titleModel: z.string().regex(/^[^/\s]+\/\S+$/u).max(300).nullable().optional(),
+  titleModel: z.string().regex(/^(?:[^/\s]+\/\S+|[a-z0-9][a-z0-9-]*(?::(?:off|minimal|low|medium|high|xhigh|max))?)$/u).max(300).nullable().optional(),
   /** Absent: unchanged. The whole map; the server refuses one that breaks the chain rules. An empty map removes the key. */
   modelChains: z.record(z.string().max(100), z.array(z.string().max(300)).max(100)).optional(),
 });

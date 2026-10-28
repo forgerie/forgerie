@@ -220,7 +220,7 @@ describe("PiSessionService", () => {
         await service.start("/workspace");
 
         await expect(service.spawnSession({ spawningCwd: "/workspace", spawningSessionId: "spawner-1", prompt: "go", cwd: "/workspace-feature", modelSpec }))
-          .rejects.toThrow(`Unknown model "${modelSpec}". Pass an exact "provider/model-id".`);
+          .rejects.toThrow(modelSpec.includes("/") ? `Unknown model "${modelSpec}". Pass an exact "provider/model-id".` : `Unknown model chain "${modelSpec}". Known chains: (none).`);
         expect(initialModels).toEqual([undefined]);
         expect(spawned.calls.prompt).toEqual([]);
         expect(service.activeCount()).toBe(1);

@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { modelChainsProblem, type ModelChains } from "../../shared/modelChains.js";
+import { modelChainsProblem, parseModelChoice, resolveModelChain, type ModelChains } from "../../shared/modelChains.js";
 import { modelPrefsSaveSchema, type ModelPrefs, type ModelPrefsSave } from "../../shared/modelPrefsContract.js";
 import { activeForgerieProfile, type Gateway } from "./forgerieProfile.js";
 import { errorMessage, isErrnoCode, readJsonBody, refuseCrossSite, sendJson, SettingsHttpError } from "./http.js";
@@ -98,15 +98,17 @@ export async function readPrefs(paths: ModelPrefsPaths): Promise<ModelPrefs> {
   const [settingsText, visible, configText] = await Promise.all([readText(paths.settings), readVisible(paths.visible), readText(paths.config)]);
   const settings = parseSettings(settingsText, paths.settings);
   const favorites = favoritesOf(settings);
-  const defaultModel = defaultOf(settings);
+  const concreteDefault = defaultOf(settings);
   const defaultThinkingLevel = textOf(settings["defaultThinkingLevel"]);
   const config = parseConfig(configText, paths.config);
   const titleModel = textOf(config["sessionTitleModel"]);
+  const defaultModelChain = textOf(config["defaultModelChain"]);
+  const defaultModel = defaultModelChain ?? concreteDefault;
   const storedChains: unknown = config["modelChains"];
   const { chains: modelChains, problem: modelChainsProblem } = chainsOf(storedChains);
   // The stored value, not the map read from it: an edit to a part the map leaves out still moves the revision.
-  return { revision: revisionOf({ favorites, visible, defaultModel, defaultThinkingLevel, titleModel, chains: storedChains ?? null }),
-    favorites, visible, defaultModel, defaultThinkingLevel, titleModel, modelChains, modelChainsProblem,
+  return { revision: revisionOf({ favorites, visible, defaultModel: concreteDefault, defaultModelChain, defaultThinkingLevel, titleModel, chains: storedChains ?? null }),
+    favorites, visible, defaultModel, defaultModelChain, defaultThinkingLevel, titleModel, modelChains, modelChainsProblem,
     favoritesPath: paths.settings, visiblePath: paths.visible, configPath: paths.config, home: homedir() };
 }
 
@@ -137,20 +139,34 @@ export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): P
   return withSettingsLock(paths.settings, async () => {
     const current = await readPrefs(paths);
     if (current.revision !== save.revision) throw new PrefsError(409, "The model lists changed since this page read them. Reload to see the current lists.");
+    let defaultChoice: ReturnType<typeof parseModelChoice> = null;
+    const defaultChain = save.defaultModel === undefined ? current.defaultModelChain : save.defaultModel.includes("/") ? null : save.defaultModel;
+    let selectedDefault = save.defaultModel;
+    if (selectedDefault === undefined && save.modelChains !== undefined && current.defaultModelChain != null) {
+      // Editing the first entry also updates terminal Pi. Deleting a referenced chain keeps its last concrete default.
+      try { resolveModelChain(current.defaultModelChain, save.modelChains); selectedDefault = current.defaultModelChain; }
+      catch { /* A deleted reference remains visible and fails explicitly on the next new session. */ }
+    }
+    if (selectedDefault !== undefined) {
+      try {
+        const entries = resolveModelChain(selectedDefault, save.modelChains ?? current.modelChains);
+        defaultChoice = parseModelChoice(entries[0] ?? "");
+        if (defaultChoice === null) throw new Error("Invalid default model");
+      } catch (error) { throw new PrefsError(400, error instanceof Error ? error.message : "Invalid default model"); }
+    }
     const favorites = [...new Set(save.favorites)];
     const favoritesChanged = JSON.stringify(favorites) !== JSON.stringify(current.favorites);
-    const defaultChanged = save.defaultModel !== undefined && save.defaultModel !== current.defaultModel;
+    const defaultChanged = selectedDefault !== undefined && (selectedDefault !== current.defaultModel || save.modelChains !== undefined);
     const levelChanged = save.defaultThinkingLevel !== undefined && save.defaultThinkingLevel !== current.defaultThinkingLevel;
     if (favoritesChanged || defaultChanged || levelChanged) {
       const text = await readText(paths.settings);
       const settings = parseSettings(text, paths.settings);
       // Pi drops an empty list rather than store one; an empty list would hide every model in Pi.
       if (favoritesChanged) { if (favorites.length === 0) delete settings["enabledModels"]; else settings["enabledModels"] = favorites; }
-      if (defaultChanged && save.defaultModel !== undefined) {
-        // The schema makes sure there is a slash. The provider ends at the first one; an ID may hold more.
-        const slash = save.defaultModel.indexOf("/");
-        settings["defaultProvider"] = save.defaultModel.slice(0, slash);
-        settings["defaultModel"] = save.defaultModel.slice(slash + 1);
+      if (defaultChanged && selectedDefault !== undefined) {
+        if (defaultChoice === null) throw new PrefsError(400, "Invalid default model");
+        settings["defaultProvider"] = defaultChoice.model.provider;
+        settings["defaultModel"] = defaultChoice.model.modelId;
       }
       if (levelChanged) settings["defaultThinkingLevel"] = save.defaultThinkingLevel;
       await mkdir(dirname(paths.settings), { recursive: true });
@@ -167,9 +183,11 @@ export async function savePrefs(paths: ModelPrefsPaths, save: ModelPrefsSave): P
     }
     const titleChanged = save.titleModel !== undefined && save.titleModel !== current.titleModel;
     const chainsChanged = save.modelChains !== undefined && (current.modelChainsProblem !== null || JSON.stringify(save.modelChains) !== JSON.stringify(current.modelChains));
-    if (titleChanged || chainsChanged) {
+    const defaultChainChanged = defaultChain !== current.defaultModelChain;
+    if (titleChanged || chainsChanged || defaultChainChanged) {
       // Only these keys change. Every other key in Forgerie's config stays as it is.
       const config = parseConfig(await readText(paths.config), paths.config);
+      if (defaultChainChanged) { if (defaultChain == null) delete config["defaultModelChain"]; else config["defaultModelChain"] = defaultChain; }
       if (titleChanged) { if (save.titleModel === null) delete config["sessionTitleModel"]; else config["sessionTitleModel"] = save.titleModel; }
       if (chainsChanged && save.modelChains !== undefined) {
         if (Object.keys(save.modelChains).length === 0) delete config["modelChains"]; else config["modelChains"] = save.modelChains;

@@ -1,4 +1,11 @@
 import { RECAP_ENTRY_KIND } from "../../shared/sessionRecap.js";
+import { MODEL_CHAIN_SWITCH_KIND, type ModelChainSwitchNotice } from "../../shared/apiTypes.js";
+import { z } from "zod";
+const modelSwitchSchema = z.object({ from: z.string(), to: z.string(), error: z.string() });
+function modelSwitchText(data: unknown): string {
+  const notice: ModelChainSwitchNotice = modelSwitchSchema.parse(data);
+  return `Switched to ${notice.to}: ${notice.from} was unavailable (${notice.error})`;
+}
 import { RISK_LABEL_ENTRY_KIND } from "../../shared/riskLabels.js";
 import { PROCESS_EVENTS_KIND, processEventText } from "./durableProcessEvents.js";
 /**
@@ -10,5 +17,5 @@ import { isWorkflowEntryKind, workflowEntryText } from "./durableWorkflowRuns.js
 
 import { GATED_ACTION_ENTRY_KIND } from "../../shared/gatedActions.js";
 
-export const isHostEntryKind = (kind: string): boolean => kind === RECAP_ENTRY_KIND || kind === RISK_LABEL_ENTRY_KIND || kind === PROCESS_EVENTS_KIND || kind === GATED_ACTION_ENTRY_KIND || isChildEntryKind(kind) || isWorkflowEntryKind(kind);
-export const hostEntryText = (kind: string, data: unknown): string => kind === RECAP_ENTRY_KIND ? "While you were away" : kind === RISK_LABEL_ENTRY_KIND ? "Risk opinion (not approval)" : kind === PROCESS_EVENTS_KIND ? processEventText(data) : kind === GATED_ACTION_ENTRY_KIND ? `Gated action: ${JSON.stringify(data)}` : isWorkflowEntryKind(kind) ? workflowEntryText(kind, data) : childEntryText(kind, data);
+export const isHostEntryKind = (kind: string): boolean => kind === RECAP_ENTRY_KIND || kind === MODEL_CHAIN_SWITCH_KIND || kind === RISK_LABEL_ENTRY_KIND || kind === PROCESS_EVENTS_KIND || kind === GATED_ACTION_ENTRY_KIND || isChildEntryKind(kind) || isWorkflowEntryKind(kind);
+export const hostEntryText = (kind: string, data: unknown): string => kind === RECAP_ENTRY_KIND ? "While you were away" : kind === MODEL_CHAIN_SWITCH_KIND ? modelSwitchText(data) : kind === RISK_LABEL_ENTRY_KIND ? "Risk opinion (not approval)" : kind === PROCESS_EVENTS_KIND ? processEventText(data) : kind === GATED_ACTION_ENTRY_KIND ? `Gated action: ${JSON.stringify(data)}` : isWorkflowEntryKind(kind) ? workflowEntryText(kind, data) : childEntryText(kind, data);

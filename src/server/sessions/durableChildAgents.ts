@@ -1,3 +1,4 @@
+import { recordModelChainFailure } from "./modelChainFailures.js";
 import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { readToolRiskIdentity } from "./toolRiskIdentity.js";
 import { withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
@@ -27,7 +28,7 @@ import type { ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { CHILD_MODEL_CONTINUE, childModelDiagnostic, childModelDiagnosticContext, childModelDiagnosticReport, hasUnsafeChildModelDiagnostic } from "../../shared/childModelDiagnostic.js";
 import { childFallbackDiagnostic, ChildFallbackSchema, type ChildFallback } from "../../shared/childFallback.js";
 import { childModelReference, modelKey, parseModelChoice, resolveModelChain, selectChainModel, type ModelChains } from "../../shared/modelChains.js";
-import { assessChildModelFailure, type ChildFailureAssessment, childModelCooldown, planChildModelFailure, unavailableChildModel, type ChainProgress } from "./childModelFailures.js";
+import { assessChildModelFailure, type ChildFailureAssessment, planChildModelFailure, unavailableChildModel, type ChainProgress } from "./childModelFailures.js";
 import type { ModelCooldownRegistry } from "./modelCooldownRegistry.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools, DurableSdkToolsOptions } from "./durableSdkTools.js";
@@ -189,19 +190,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         const current = (settled.reason === "no_model" && detail !== undefined ? unavailableChildModel(detail) : undefined)
           ?? (await runtime.snapshot(Children, runtime.conversationId, context))?.failureModels?.[String(settled.id)]
           ?? (settings?.model === undefined ? undefined : `${settings.model.provider}/${settings.model.modelId}${settings.thinkingLevel === undefined ? "" : `:${settings.thinkingLevel}`}`);
-        const until = detail === undefined ? undefined : childModelCooldown(detail, runtime.now());
-        let marked = false;
-        if (current !== undefined && until !== undefined && selected.modelCooldowns !== undefined) {
-          try { await selected.modelCooldowns.mark(modelKey(current), until, diagnostic ?? "model_error"); marked = true; }
-          catch (error) { runtime.report(error); } // A cooldown disk failure must not hide the child's provider outcome.
-        }
-        const cooldowns = await selected.modelCooldowns?.snapshot() ?? {};
-        // Successful writes (including a refused shorter deadline) make the persisted snapshot authoritative.
-        // Without a write, retain any longer known deadline while adding the local failure.
-        if (!marked && current !== undefined && until !== undefined) {
-          const previous = cooldowns[modelKey(current)];
-          cooldowns[modelKey(current)] = { until: Math.max(previous?.until ?? 0, until), reason: previous !== undefined && previous.until > until ? childModelDiagnostic(previous.reason) : diagnostic ?? "model_error" };
-        }
+        const { cooldowns } = await recordModelChainFailure(selected, current, detail ?? "model_error", runtime.now(), error => { runtime.report(error); });
         const chains = selected.modelChains?.() ?? {};
         const progress = { delegated: false };
         await runtime.commit(async (tx) => {

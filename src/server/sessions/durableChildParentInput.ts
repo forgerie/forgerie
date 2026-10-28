@@ -1,3 +1,4 @@
+import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
 import type { Context } from "@earendil-works/chord";
 import {
   defineDoc, defineExtension, defineTask, InboxDoc,
@@ -50,6 +51,7 @@ const DeliveryTask = defineTask<DeliveryInput, DeliveryState, null>({
     submit: async (task, runtime, context) => {
       const parent = await runtime.conversation(runtime.conversationId, context);
       if (parent === undefined) throw new Error("Child message parent is missing");
+      if (runtime.registry.extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(runtime, runtime.conversationId, { content: task.input.text, whenBusy: "followUp", requestId: task.input.requestId }, context);
       await parent.submit({ type: "input", content: task.input.text, whenBusy: "followUp", requestId: task.input.requestId }, context);
       await runtime.commit(async (tx) => {
         const batches = await tx.doc(Batches, runtime.conversationId);
@@ -96,5 +98,6 @@ export async function submitChildParentInput<I, S, R, H extends object>(runtime:
   const parent = await runtime.conversation(runtime.conversationId, context);
   if (parent === undefined) throw new Error("Child message parent is missing");
   // Re-admission by request ID returns the existing handle without changing or duplicating its content.
+  if (runtime.registry.extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(runtime, runtime.conversationId, { content: text, whenBusy: "followUp", requestId: actualRequestId }, context);
   return parent.submit({ type: "input", content: text, whenBusy: "followUp", requestId: actualRequestId }, context);
 }

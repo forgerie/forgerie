@@ -98,6 +98,8 @@ Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an o
 
 ### Model chains
 
+Model chains also work in main sessions and every model menu. See [main-session model chains](config.md#main-session-model-chains) for selection, status and API behavior. Main sessions, children and title generation share the cooldown registry.
+
 Define ordered lists once in the active [Forgerie config](config.md), not in each agent file. Edit them in **Settings > Models > Model chains**, or by hand in the file. A chain holds 1 to 16 entries:
 
 ```json
@@ -125,7 +127,7 @@ Names must match `[a-z0-9][a-z0-9-]*`. Every chain needs at least one valid mode
 
 In **Settings > Models > Model chains** you can create, rename, and delete a chain. You can add an entry with the model menu, set the entry's own thinking level or leave it on **Agent's level** (the level from the agent's chain reference or `thinking`), reorder entries by drag or with the Move up and Move down buttons, and remove an entry. A chain must keep one entry: to remove the last one, delete the chain. Each save sends the whole map. The server checks it with the same rule as the daemon, keeps every other config key, and writes the file through a temporary file. A save made from an older read gets a 409 and changes nothing. Each chain says which agents name it. Settings asks before it renames or deletes a chain that an agent names, because that agent stops finding the chain. If the file's map breaks a rule, the page shows the problem and changes nothing until you fix the file.
 
-In **Settings > Agents**, the agent's **Model** menu lists the chains as their own group, above the models. Each chain shows its entries in order. An agent that names a chain that does not exist shows an error under the field.
+In **Settings > Agents**, the agent's **Model** menu lists the chains as their own group, above the models. The composer, new-session dialog, triggers, backlog suggestions, workflow worker menus and default/title model fields use the same group. Each chain shows its entries in order. An agent that names a chain that does not exist shows an error under the field.
 
 Agent files use the pi-subagents format, and older files name pi-subagents tools. `src/server/sessions/durableChildRuntime.ts` translates each one, in one place, and never drops a capability silently:
 

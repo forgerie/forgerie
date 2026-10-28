@@ -1552,6 +1552,7 @@ class CapturingRouteSessionService implements SessionRouteService {
     const model = { provider: "anthropic", id: "claude-opus-5", reasoning: true };
     return Promise.resolve({ models: [model], model, thinkingLevel: "high" as const });
   }
+  setModelChain(): never { throw unusedRouteMethod("setModelChain"); }
   setModel(): never { throw unusedRouteMethod("setModel"); }
   cycleModel(): never { throw unusedRouteMethod("cycleModel"); }
   availableThinkingLevels(): Promise<[]> { return Promise.resolve([]); }

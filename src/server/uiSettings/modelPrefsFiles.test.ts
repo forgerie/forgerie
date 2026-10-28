@@ -49,6 +49,30 @@ describe("model list files", () => {
     expect(JSON.parse(await readFile(files.settings, "utf8"))).toMatchObject({ defaultProvider: "openrouter", defaultThinkingLevel: "low" });
   });
 
+  it("round-trips default and title chains without inventing a provider", async () => {
+    const files = await paths({ defaultProvider: "proxy", defaultModel: "a" });
+    const before = await readPrefs(files);
+    const after = await savePrefs(files, { revision: before.revision, favorites: [], visible: null, defaultModel: "worker", titleModel: "titles", modelChains: { worker: ["new/model:high", "other/backup"], titles: ["title/small"] } });
+    expect(after).toMatchObject({ defaultModel: "worker", defaultModelChain: "worker", titleModel: "titles" });
+    expect(JSON.parse(await readFile(files.settings, "utf8"))).toEqual({ defaultProvider: "new", defaultModel: "model" });
+    expect(JSON.parse(await readFile(files.config, "utf8"))).toMatchObject({ defaultModelChain: "worker", sessionTitleModel: "titles" });
+    await writeFile(files.config, JSON.stringify({ defaultModelChain: "titles", modelChains: { worker: ["new/model"], titles: ["title/small"] } }));
+    await expect(savePrefs(files, { revision: after.revision, favorites: [], visible: null, defaultModel: "plain/model" })).rejects.toMatchObject({ status: 409 });
+    const reread = await readPrefs(files);
+    const plain = await savePrefs(files, { revision: reread.revision, favorites: [], visible: null, defaultModel: "plain/model" });
+    expect(plain).toMatchObject({ defaultModel: "plain/model", defaultModelChain: null });
+    expect(JSON.parse(await readFile(files.config, "utf8"))).not.toHaveProperty("defaultModelChain");
+  });
+
+  it("keeps terminal Pi on the first concrete entry when a default chain is edited", async () => {
+    const files = await paths();
+    const before = await readPrefs(files);
+    const chosen = await savePrefs(files, { revision: before.revision, favorites: [], visible: null, defaultModel: "worker", modelChains: { worker: ["one/a", "two/b"] } });
+    await savePrefs(files, { revision: chosen.revision, favorites: [], visible: null, modelChains: { worker: ["two/b:high", "one/a"] } });
+    expect(JSON.parse(await readFile(files.settings, "utf8"))).toEqual({ defaultProvider: "two", defaultModel: "b" });
+    expect(await readPrefs(files)).toMatchObject({ defaultModel: "worker", defaultModelChain: "worker" });
+  });
+
   it("drops enabledModels when no favorite is left, and the shown list when every model is shown again", async () => {
     const files = await paths({ enabledModels: ["proxy/a"] });
     await writeFile(files.visible, JSON.stringify({ visible: ["proxy/a"] }));

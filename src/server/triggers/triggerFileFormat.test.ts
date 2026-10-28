@@ -4,6 +4,11 @@ import { lateMinutes, lateText, TriggerFileStateSchema, type TriggerFileState } 
 import { editScheduleBlock, parseScheduledWorkflow } from "./triggerFileFormat.js";
 
 const file = (schedule: string) => `---\n# keep this\ndescription: Night\nworkflow: { version: 1, inputs: { scope: { type: string, default: ready } } }\nschedule:\n${schedule}\n---\nReview.\n`;
+it("keeps a coordinator chain and parses its thinking suffix", () => {
+  const parsed = parseScheduledWorkflow("night", "/night.md", file('  at: "03:00"\n  projects: all\n  model: worker:high'), "UTC");
+  expect(parsed?.input.action).toMatchObject({ model: "worker", thinkingLevel: "high" });
+});
+
 it("parses defaults, selected days, late and a model thinking suffix", () => {
   const parsed = parseScheduledWorkflow("night", "/night.md", file('  at: "03:00"\n  days: [mon, fri]\n  projects: all\n  late: 1d\n  model: provider/model:high'), "UTC");
   expect(parsed?.input).toMatchObject({ id: "night", name: "night", schedule: { kind: "weekly", on: ["mon", "fri"], timezone: "UTC" }, missedGraceMinutes: 1440, action: { model: "provider/model", thinkingLevel: "high", inputs: { scope: "ready" } } });

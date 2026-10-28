@@ -1,3 +1,4 @@
+import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
 import { workflowChildDiagnostic } from "../../shared/workflowChildDiagnostic.js";
 import { childModelDiagnostic } from "../../shared/childModelDiagnostic.js";
 import { waitingStops, workflowGlance, type WorkflowGlance } from "../../shared/workflowGlance.js";
@@ -62,7 +63,9 @@ const Launch = defineTask<{ runId: string; prompt: string; requestId?: string },
       await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
       return;
     }
-    await parent.submit({ type: "input", content: task.input.prompt, whenBusy: "followUp", requestId: task.input.requestId ?? `workflow:${task.input.runId}` }, context);
+    const requestId = task.input.requestId ?? `workflow:${task.input.runId}`;
+    if (runtime.registry.extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(runtime, runtime.conversationId, { content: task.input.prompt, whenBusy: "followUp", requestId }, context);
+    await parent.submit({ type: "input", content: task.input.prompt, whenBusy: "followUp", requestId }, context);
     await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
   } },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),

@@ -1,4 +1,4 @@
-import { ModelChainsSchema } from "./shared/modelChains.js";
+import { ModelChainsSchema, ModelChainReferenceSchema } from "./shared/modelChains.js";
 import { Check } from "typebox/value";
 import { AzureDevopsGlobalConfigSchema, type AzureDevopsGlobalConfig } from "./shared/azureDevopsConfig.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -222,6 +222,7 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
   return {
     ...(config.autoRecap !== undefined ? { autoRecap: config.autoRecap } : {}),
     ...(config.modelChains !== undefined ? { modelChains: config.modelChains } : {}),
+    ...(config.defaultModelChain === undefined ? {} : { defaultModelChain: config.defaultModelChain }),
     ...(config.azureDevops !== undefined ? { azureDevops: config.azureDevops } : {}),
     ...(config.host !== undefined ? { host: config.host } : {}),
     ...(config.port !== undefined ? { port: config.port } : {}),
@@ -240,11 +241,14 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
 
 function parsePiWebConfig(value: Record<string, unknown>, path: string, onWarning?: (message: string) => void): PiWebConfig {
   const chains = value["modelChains"];
+  const defaultChain = value["defaultModelChain"];
+  if (defaultChain !== undefined && !Check(ModelChainReferenceSchema, defaultChain)) throw new Error(`Forgerie config defaultModelChain must be a model chain name: ${path}`);
   const validChains = chains !== undefined && Check(ModelChainsSchema, chains);
   if (chains !== undefined && !validChains) (onWarning ?? ((message) => { process.emitWarning(message, { code: "FORGERIE_MODEL_CHAINS" }); }))(`Invalid Forgerie config modelChains in ${path}; ignoring all model chains. Names must match [a-z0-9][a-z0-9-]* and each list must contain provider/model-id[:thinking] entries.`);
   return {
     ...(value["autoRecap"] !== undefined ? { autoRecap: parseAutoRecap(value["autoRecap"], path) } : {}),
     ...(validChains ? { modelChains: chains } : {}),
+    ...(typeof defaultChain === "string" ? { defaultModelChain: defaultChain } : {}),
     ...(value["azureDevops"] !== undefined ? { azureDevops: parseAzureDevopsConfig(value["azureDevops"], path) } : {}),
     ...(value["host"] !== undefined ? { host: parseString(value["host"], "host", path) } : {}),
     ...(value["port"] !== undefined ? { port: parsePort(value["port"], "port", path) } : {}),
@@ -293,8 +297,8 @@ function parseAskUser(value: unknown, path: string): boolean {
 
 function parseSessionTitleModel(value: unknown, path: string): string {
   const slash = typeof value === "string" ? value.indexOf("/") : -1;
-  if (typeof value !== "string" || slash <= 0 || slash === value.length - 1) {
-    throw new Error(`Forgerie config sessionTitleModel must be "provider/model-id": ${path}`);
+  if (typeof value !== "string" || !(/^[a-z0-9][a-z0-9-]*(?::(?:off|minimal|low|medium|high|xhigh|max))?$/.test(value) || (slash > 0 && slash < value.length - 1 && !/\s/.test(value)))) {
+    throw new Error(`Forgerie config sessionTitleModel must be "provider/model-id" or a model chain name: ${path}`);
   }
   return value;
 }

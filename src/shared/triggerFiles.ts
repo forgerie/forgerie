@@ -36,7 +36,7 @@ export const WorkflowScheduleBlockSchema = Type.Object({
   /** Registered project names, absolute workspace paths, or "all". */
   projects: Type.Union([Type.Literal("all"), Type.Array(Type.String({ minLength: 1 }), { minItems: 1 })]),
   /** The coordinator's model, `provider/model-id`, optionally `:thinking-level`. Omitted: new-session default. */
-  model: Type.Optional(Type.String({ minLength: 3, maxLength: MAX_MODEL_REFERENCE_LENGTH, pattern: `^(?=.{3,${String(TRIGGER_MODEL_MAX_LENGTH)}}(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?$)[^/\\s]+/\\S+$` })),
+  model: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_MODEL_REFERENCE_LENGTH, pattern: `^(?=.{1,${String(TRIGGER_MODEL_MAX_LENGTH)}}(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?$)(?:[^/\\s]+/\\S+|[a-z0-9][a-z0-9-]*(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?)$` })),
   /** True stops future runs without removing the schedule. */
   paused: Type.Optional(Type.Boolean()),
   /** Values that replace the workflow's input defaults for scheduled runs only. */

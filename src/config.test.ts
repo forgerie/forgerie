@@ -77,8 +77,22 @@ describe("Forgerie config persistence", () => {
     expect(effectivePiWebConfig(testOptions()).config.sessionTitleModel).toBe("cliproxyapi/claude-haiku-5-5");
   });
 
-  it("rejects a sessionTitleModel that is not provider/model-id", async () => {
-    for (const value of ["claude-haiku-5-5", "/claude-haiku-5-5", "cliproxyapi/", 5, null]) {
+  it("keeps the configured default chain across settings saves", async () => {
+    await writeFile(configPath, JSON.stringify({ defaultModelChain: "worker", modelChains: { worker: ["faux/a"] } }));
+    expect(loadPiWebConfig(testOptions()).config.defaultModelChain).toBe("worker");
+    savePiWebConfig({ port: 9000 }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.defaultModelChain).toBe("worker");
+    await writeFile(configPath, JSON.stringify({ defaultModelChain: "provider/model" }));
+    expect(() => loadPiWebConfig(testOptions())).toThrow("defaultModelChain must be a model chain name");
+  });
+
+  it("reads a model chain as the title model", async () => {
+    await writeFile(configPath, JSON.stringify({ sessionTitleModel: "titles:low" }));
+    expect(loadPiWebConfig(testOptions()).config.sessionTitleModel).toBe("titles:low");
+  });
+
+  it("rejects a sessionTitleModel that is neither provider/model-id nor a chain", async () => {
+    for (const value of ["Bad chain", "/claude-haiku-5-5", "cliproxyapi/", 5, null]) {
       await writeFile(configPath, `${JSON.stringify({ sessionTitleModel: value }, null, 2)}\n`, "utf8");
 
       expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config sessionTitleModel must be \"provider/model-id\"");

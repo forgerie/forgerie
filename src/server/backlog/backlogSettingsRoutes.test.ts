@@ -116,8 +116,8 @@ it("saves global and project suggestion models without a settings migration", as
     await writeFile(path, JSON.stringify({ version: 2, projects: {}, sources: {}, githubLogin: "octocat" }));
     registerBacklogSettingsRoutes(app, store, { list: () => Promise.resolve([project]), requireProject: () => Promise.resolve(project) });
     const url = "/backlog/settings/suggestions-default";
-    expect((await app.inject({ method: "PUT", url, payload: { suggestionsDefault: { modelSpec: "provider/cheap", thinkingLevel: "low" } } })).json()).toEqual({ saved: true });
-    expect((await app.inject({ url: "/backlog/settings" })).json()).toMatchObject({ githubLogin: "octocat", suggestionsDefault: { modelSpec: "provider/cheap", thinkingLevel: "low" } });
+    expect((await app.inject({ method: "PUT", url, payload: { suggestionsDefault: { modelSpec: "worker", thinkingLevel: "low" } } })).json()).toEqual({ saved: true });
+    expect((await app.inject({ url: "/backlog/settings" })).json()).toMatchObject({ githubLogin: "octocat", suggestionsDefault: { modelSpec: "worker", thinkingLevel: "low" } });
     expect((await store.read()).version).toBe(2);
     const invalid = await app.inject({ method: "PUT", url, payload: { suggestionsDefault: { unexpected: "no" } } });
     expect(invalid.statusCode).toBe(400); expect(invalid.json()).toEqual({ error: "Invalid suggestions model." });

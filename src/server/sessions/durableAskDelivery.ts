@@ -1,3 +1,4 @@
+import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
 import { copyJson } from "@earendil-works/chord";
 import { awaitWithContext, withAbortSignal } from "@earendil-works/chord/context";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
@@ -24,6 +25,7 @@ const Delivery = defineTask<{ askId: string }, { phase: "deliver"; attempt: numb
       if (message?.role !== "user") throw new Error("Parent answer must convert to a custom-message model input");
       let submission: Submission;
       try {
+        if (runtime.registry.extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(runtime, runtime.conversationId, { content: message.content, whenBusy: "followUp", requestId }, context);
         submission = await parent.submit({ type: "input", content: message.content, whenBusy: "followUp", requestId }, context);
       } catch (error) {
         runtime.report(error);

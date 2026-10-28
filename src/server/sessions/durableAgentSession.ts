@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { SessionChainTurns, SessionModelChain, modelChainExtension, prepareChainTurn, chainTurnSubmission, cancelChainTurns } from "./durableModelChains.js";
+import type { ModelChainRuntime } from "./modelChainFailures.js";
+import { parseModelChoice, resolveModelChain, selectChainModel } from "../../shared/modelChains.js";
+import type { ModelChainWait } from "../../shared/apiTypes.js";
 import { remoteDefaultBranchReader, REMOTE_HEAD_TIMEOUT_MS } from "./gatedGitRemote.js";
 import type { WorkflowGlance } from "../../shared/workflowGlance.js";
 import { readTaskActivity, watchTaskActivity } from "./durableTaskActivity.js";
@@ -22,7 +27,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { clampThinkingLevel, getSupportedThinkingLevels, type AssistantMessage, type ImageContent, type Message } from "@earendil-works/pi-ai";
 import { ExtensionRunner, ModelRegistry, collectEntriesForBranchSummary, generateBranchSummary, convertToLlm, createLocalBashOperations, createSyntheticSourceInfo, estimateTokens, type AgentSessionServices, type BuildSystemPromptOptions, type ExtensionUIContext, type PromptOptions, type SessionManager, type SessionStartEvent, type ToolDefinition, type SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
-import { GenerationTask, ToolTask, InboxDoc, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission, type Harness, type ConversationId, type Conversation, type EntryId, type Registry } from "@earendil-works/pi-durable";
+import { GenerationTask, ToolTask, InboxDoc, configure, createRegistry, defineExtension, hook, section, watchEvents, type AgentEvent, type AgentEventStream, type InboxItem, type MessageChange, type TaskId, type CompactionResult, type Submission, type Harness, type ConversationId, type Conversation, type EntryId, type Registry } from "@earendil-works/pi-durable";
 import type { DurableSessionAddress, DurableSessionHandle } from "./durableSessionAddress.js";
 import type { DurableNativeHistory } from "./durableNativeHistory.js";
 import { createDurableParentState, type DurableParentState } from "./durableParentState.js";
@@ -58,7 +63,8 @@ import { applySdkCommit } from "./durableMessageChanges.js";
 import type { WorktreeActionResult } from "../../shared/sessionWorktree.js";
 import type { WorkflowModels, WorkflowInputs, WorkflowOutcome, WorkflowRun, WorkflowStopDecision } from "../../shared/workflowRuns.js";
 
-export interface DurableAgentSessionOptions {
+export interface DurableAgentSessionOptions extends ModelChainRuntime {
+  now?: () => number;
   processTools?: ManagedProcessTools;
   gatedIssueLabels?: GatedActionReads["issueLabels"];
   /** Read at each workflow stop. Omitted: every stop waits for the user. */
@@ -138,6 +144,8 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private runner: ExtensionRunner;
   readonly agent;
   model: PiAgentSession["model"];
+  modelChain: string | undefined;
+  chainWait: ModelChainWait | undefined;
   thinkingLevel: PiAgentSession["thinkingLevel"];
   private registry = createRegistry();
   private tools: DurableSdkTools;
@@ -160,6 +168,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private branchTargetId: string | undefined;
   private queued: readonly InboxItem[] = [];
   private mutation: Promise<void> = Promise.resolve();
+  private selectionReads: Promise<void> = Promise.resolve();
   private systemPrompt = "";
   private modelContext: readonly Message[] | undefined;
   private preparedContextTokens: number | undefined;
@@ -181,6 +190,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private waitingGates = 0;
   private gateOptions: GatedActionsExtensionOptions | undefined;
   private scratchGit: ReturnType<typeof scratchGitTool> | undefined;
+  private chainUnsubscribe: (() => void) | undefined;
   private gateUnsubscribe: (() => void) | undefined;
   private flaggedCount = 0;
   readonly processTools: ManagedProcessTools | undefined;
@@ -243,6 +253,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await session.taskWatch?.stop();
       await session.childWatch?.stop();
       await session.stream?.stop();
+      session.chainUnsubscribe?.();
       await session.parentAppWatch?.stop();
       session.sdkView?.close();
       session.unbindConversation();
@@ -296,7 +307,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   get promptTemplates() { return this.resourceLoader.getPrompts().prompts; }
   get state(): { streamingMessage?: AssistantMessage } { return this.partial === undefined ? {} : { streamingMessage: this.partial }; }
-  get isStreaming(): boolean { return this.streaming; }
+  get isStreaming(): boolean { return this.streaming || this.chainWait !== undefined; }
   getActiveRunStartedAt(): string | undefined { return this.runStartedAt; }
   get isCompacting(): boolean { return this.compacting; }
   get isBashRunning(): boolean { return this.bashController !== undefined; }
@@ -324,6 +335,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     this.installSdkTools();
     // Register delivery before a family can schedule a persisted accepted answer.
+    this.registry.install(modelChainExtension(id => this.dispatch(id).options));
     this.registry.install(askDeliveryExtension());
     this.registry.install(processEventsExtension());
     this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", (input) => this.dispatch(input.conversationId).systemPrompt, { tag: false })],
@@ -355,6 +367,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       initializeParentDocuments: createDurableParentInitializer(this.sessionManager),
       summarize: (source, cut, instructions) => this.summarizeBranch(source, cut, instructions),
       manager: this.sessionManager, models: this.modelRuntime, registry: this.registry,
+      ...(this.options.now === undefined ? {} : { now: this.options.now }),
       agent: { ...(this.model === undefined ? {} : { model: { provider: this.model.provider, modelId: this.model.id } }), thinkingLevel: this.thinkingLevel, cwd: this.options.services.cwd },
       settings: { contextRetentionMs: 0, retry: this.settingsManager.getRetrySettings(), steeringMode: this.settingsManager.getSteeringMode(), followUpMode: this.settingsManager.getFollowUpMode(),
         compaction: { enabled: this.settingsManager.getCompactionEnabled(), reserveTokens: this.settingsManager.getCompactionReserveTokens(this.model), keepRecentTokens: this.settingsManager.getCompactionKeepRecentTokens(this.model) } },
@@ -378,6 +391,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     await this.startChildAgents();
     await this.startTaskObservation();
     await this.startEventStream();
+    this.startModelChainObservation();
     this.detachProcessEvents = await this.processTools?.attach(summary => acceptProcessEvents(this.journal.conversation, summary, context));
   }
 
@@ -831,8 +845,20 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       // An extension's sendUserMessage is not the user answering a card.
       if (options?.source !== "extension") await closeProposalsOnReply(tx, this.journal.conversation.id);
     }, context);
-    const submission = await this.journal.conversation.submit({ type: "input", content, ...(options?.requestId === undefined ? {} : { requestId: options.requestId }), ...(options?.streamingBehavior === undefined ? { whenBusy: "reject" as const } : { whenBusy: options.streamingBehavior }) }, context);
+    if (this.chainWait !== undefined) throw new Error("Stop the pending model-chain wait before sending another message");
+    const requestId = options?.requestId ?? randomUUID();
+    const turn = this.modelChain === undefined ? undefined : await prepareChainTurn(this.journal.conversation, this.modelChain,
+      { requestId, content, whenBusy: options?.streamingBehavior ?? "reject" });
+    const submission = turn?.ownsInput === true
+      ? await chainTurnSubmission(this.journal.harness, this.journal.conversation, requestId, turn.id)
+      : await this.journal.conversation.submit({ type: "input", content, requestId, whenBusy: options?.streamingBehavior ?? "reject" }, context);
+    const queued = (await submission.status(context)).status === "queued";
     await this.receivePromptSubmission(submission, options?.preflightResult);
+    if (turn !== undefined && !queued) {
+      await this.journal.harness.waitForTask(turn.id, context);
+      await this.journal.project();
+      await this.restoreAgentSelection();
+    }
   }
 
   async hasPromptRequest(requestId: string): Promise<boolean> {
@@ -904,7 +930,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   abortCompaction(): void { if (this.compactionTask !== undefined) void this.journal.harness.abortTask(this.compactionTask, context).catch((error: unknown) => { this.report(error); }); }
   abortBranchSummary(): void { this.branchSummaryController?.abort(); }
-  async abort(): Promise<void> { this.bashController?.abort(); await this.mutation; await this.journal.conversation.abort(context); }
+  async abort(): Promise<void> { this.bashController?.abort(); await this.mutation; await cancelChainTurns(this.journal.harness, this.journal.conversation.id, context); this.chainWait = undefined; await this.journal.conversation.abort(context); }
 
   clearQueue(): { steering: string[]; followUp: string[] } {
     const result = { steering: [...this.getSteeringMessages()], followUp: [...this.getFollowUpMessages()] };
@@ -921,10 +947,37 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
 
   async setModel(model: NonNullable<PiAgentSession["model"]>): Promise<void> {
     await this.mutation;
-    await this.journal.conversation.configure({ model: { provider: model.provider, modelId: model.id } }, context);
+    await cancelChainTurns(this.journal.harness, this.journal.conversation.id, context);
+    await this.journal.conversation.commit(async tx => {
+      await configure(tx, this.journal.conversation.id, { model: { provider: model.provider, modelId: model.id } });
+      delete (await tx.doc(SessionModelChain, this.journal.conversation.id)).reference;
+    }, context);
+    this.modelChain = undefined;
+    this.chainWait = undefined;
     this.model = model;
     this.sessionManager.appendModelChange(model.provider, model.id);
     this.setThinkingLevel(clampThinkingLevel(model, this.thinkingLevel));
+    await this.mutation;
+    await this.restoreAgentSelection();
+  }
+  async setModelChain(reference: string): Promise<void> {
+    const entries = resolveModelChain(reference, this.options.modelChains?.() ?? {}, this.thinkingLevel);
+    const selected = selectChainModel(entries, await this.options.modelCooldowns?.snapshot() ?? {}, this.options.now?.() ?? Date.now());
+    const choice = parseModelChoice(selected.model);
+    if (choice === null) throw new Error("Invalid chain model");
+    const model = this.modelRuntime.getModel(choice.model.provider, choice.model.modelId);
+    // Unknown catalog entries remain valid: Durable settles no_model and the chain advances.
+    await cancelChainTurns(this.journal.harness, this.journal.conversation.id, context);
+    await this.journal.conversation.commit(async tx => {
+      await configure(tx, this.journal.conversation.id, { model: choice.model, thinkingLevel: model === undefined ? "off" : clampThinkingLevel(model, choice.thinkingLevel ?? this.thinkingLevel) });
+      (await tx.doc(SessionModelChain, this.journal.conversation.id)).reference = reference;
+    }, context);
+    this.modelChain = reference;
+    this.chainWait = undefined;
+    this.model = model;
+    this.sessionManager.appendModelChange(choice.model.provider, choice.model.modelId);
+    await this.restoreAgentSelection();
+    this.emit({ type: "model_chain_changed" });
   }
   async cycleModel(direction: "forward" | "backward" = "forward") {
     const models = this.scopedModels.length === 0 ? this.modelRuntime.getAvailableSnapshot() : this.scopedModels.map((scoped) => scoped.model);
@@ -1026,6 +1079,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (selected.cancelled) return { cancelled: true };
     await this.stream?.stop();
     this.gateUnsubscribe?.();
+    this.chainUnsubscribe?.();
     await this.taskWatch?.stop();
     await this.childWatch?.stop();
     await this.childRunRecords?.close();
@@ -1042,6 +1096,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       await this.startChildAgents();
       await this.startTaskObservation();
       await this.startEventStream();
+      this.startModelChainObservation();
     } catch (error) { this.bindConversation(); throw error; }
     this.preparedContextTokens = undefined;
     await this.extensionRunner.emit({ type: "session_tree", newLeafId: this.sessionManager.getLeafId(), oldLeafId });
@@ -1092,6 +1147,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.bashController?.abort();
     this.branchSummaryController?.abort();
     this.gateUnsubscribe?.();
+    this.chainUnsubscribe?.();
     await this.taskWatch?.stop();
     await this.childWatch?.stop();
     await this.parentAppWatch?.stop();
@@ -1110,6 +1166,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private async applyEvent(event: AgentEvent): Promise<void> {
     await this.journal.project();
     await this.refreshDurableReads();
+    if (this.modelChain !== undefined && event.type === "agent_changed") await this.restoreAgentSelection();
     if (event.type === "snapshot" || event.type === "run_start") {
       const input = (event.type === "snapshot" ? event.run?.inputs : event.inputs)?.[0];
       this.runStartedAt = undefined;
@@ -1192,9 +1249,26 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     }
   }
 
-  private async restoreAgentSelection(): Promise<void> {
+  private startModelChainObservation(): void {
+    this.chainUnsubscribe?.();
+    this.chainUnsubscribe = this.journal.harness.subscribeCommits(publication => {
+      if (!publication.changes.some(change => change.type === "document" && change.conversationId === this.journal.conversation.id && (change.record.kind === SessionModelChain.definition.kind || change.record.kind === SessionChainTurns.definition.kind))) return;
+      void this.restoreAgentSelection().then(() => { this.emit({ type: "model_chain_changed" }); }).catch((error: unknown) => { this.report(error); });
+    });
+  }
+
+  private restoreAgentSelection(): Promise<void> {
+    const reading = this.selectionReads.then(() => this.readAgentSelection());
+    this.selectionReads = reading.catch(() => undefined);
+    return reading;
+  }
+
+  private async readAgentSelection(): Promise<void> {
     // A reopened root ignores creation options. Its native state, not the JSONL projection, owns the selection.
     const agent = await this.journal.conversation.agent(context);
+    const chain = await this.journal.harness.snapshot(SessionModelChain, this.journal.conversation.id, context);
+    this.modelChain = chain?.reference;
+    this.chainWait = (await this.journal.harness.snapshot(SessionChainTurns, this.journal.conversation.id, context))?.wait;
     this.model = agent.model === undefined ? undefined : this.modelRuntime.getModel(agent.model.provider, agent.model.modelId);
     this.thinkingLevel = agent.thinkingLevel;
     const saved = this.sessionManager.buildSessionContext();

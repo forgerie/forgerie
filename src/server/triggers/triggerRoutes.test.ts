@@ -95,6 +95,12 @@ it("creates, detects revision conflicts, re-arms edits, pauses, resumes, acknowl
   expect(changes).toBeGreaterThanOrEqual(5);
 });
 
+it("accepts a chain name as the coordinator model", async () => {
+  const input = create();
+  const result = await http("POST", "", { ...input, action: { ...input.action, model: "worker" } });
+  expect(result).toMatchObject({ status: 201, value: { action: { model: "worker" } } });
+});
+
 it.each([
   ["name", { name: "" }], ["name", { name: "   " }], ["schedule.at", { schedule: { kind: "daily", at: "25:00", timezone: "UTC" } }],
   ["schedule.at", { schedule: { kind: "weekly", on: ["mon"], at: "25:00", timezone: "UTC" } }],
@@ -103,7 +109,7 @@ it.each([
   ["action.workflow", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "script", inputs: {} } }],
   ["action.workflow", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "missing", inputs: {} } }],
   ["action.inputs", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "nightly", inputs: { task: 9 } } }],
-  ["action.model", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "nightly", inputs: {}, model: "not-a-model" } }],
+  ["action.model", { action: { kind: "workflow", targets: { kind: "projects", cwds: ["CURRENT"] }, workflow: "nightly", inputs: {}, model: "not a model" } }],
 ])("returns a field error for %s", async (field, invalid) => {
   const input: unknown = JSON.parse(JSON.stringify({ ...create(), ...invalid }).replaceAll("CURRENT", cwd));
   const result = await http("POST", "", input);

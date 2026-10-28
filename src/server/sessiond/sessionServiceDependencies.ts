@@ -8,6 +8,9 @@ import type { PiSessionServiceDependencies } from "../sessions/piSessionService.
  * session service.
  */
 export interface SessionServiceDependencyInput {
+  defaultModelChain?: PiSessionServiceDependencies["defaultModelChain"];
+  modelChains?: PiSessionServiceDependencies["modelChains"];
+  modelCooldowns?: PiSessionServiceDependencies["modelCooldowns"];
   agentDir: string;
   /** Where discarded worktrees are backed up, resolved against the captured daemon environment. */
   worktreeBackupDirectory: string;
@@ -70,6 +73,9 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
   return {
     modelRuntime: input.modelRuntime,
     ...(input.autoRecap === undefined ? {} : { autoRecap: input.autoRecap }),
+    ...(input.defaultModelChain === undefined ? {} : { defaultModelChain: input.defaultModelChain }),
+    ...(input.modelChains === undefined ? {} : { modelChains: input.modelChains }),
+    ...(input.modelCooldowns === undefined ? {} : { modelCooldowns: input.modelCooldowns }),
     durableReader: input.durableReader,
     agentDir: input.agentDir,
     worktreeBackupDirectory: input.worktreeBackupDirectory,

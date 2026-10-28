@@ -92,6 +92,7 @@ export interface SessionRouteService {
   availableModels(ref: SessionRouteRef): Promise<ClientSessionModel[]>;
   /** Models and effective Pi defaults for a destination before a session exists. */
   availableModelsForNewSession(cwd: string): Promise<ClientNewSessionModelSelection>;
+  setModelChain(ref: SessionRouteRef, reference: string): Promise<ClientSessionStatus>;
   setModel(ref: SessionRouteRef, provider: string, modelId: string): Promise<ClientSessionStatus>;
   cycleModel(ref: SessionRouteRef, direction: "forward" | "backward"): Promise<ClientSessionStatus>;
   availableThinkingLevels(ref: SessionRouteRef): Promise<ClientThinkingLevel[]>;

@@ -1,3 +1,4 @@
+import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
 import type { Context } from "@earendil-works/chord";
 import type { ConversationId, EntryId, Submission, TaskRuntime, Tx } from "@earendil-works/pi-durable";
 
@@ -45,6 +46,7 @@ export async function deliverInputUntilPlaced<I>(runtime: TaskRuntime<I, InputPl
   if (progress.rerouted) return;
   const conversation = await runtime.conversation(recipient, context);
   if (conversation === undefined) throw new Error("Input delivery target is missing");
+  if (runtime.registry.extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(runtime, recipient, { content: options.content, whenBusy: "followUp", requestId }, context);
   const submission = await (options.submit?.(requestId) ?? conversation.submit({ type: "input", content: options.content, whenBusy: "followUp", requestId }, context));
   for (;;) {
     const receipt = await submission.status(context);

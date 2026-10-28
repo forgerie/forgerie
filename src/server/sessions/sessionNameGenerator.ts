@@ -55,10 +55,10 @@ export function deterministicSessionName(firstMessage: unknown): string | undefi
   return skillCommandSessionName(input) ?? relayHandoffSessionName(input);
 }
 
-export async function generateShortSessionName<TApi extends Api>(streamFn: StreamFn, model: Model<TApi>, firstMessage: string, cancellationSignal?: AbortSignal, onFailure?: (kind: SessionNameFailureKind) => void): Promise<string | undefined> {
+export async function generateShortSessionName<TApi extends Api>(streamFn: StreamFn, model: Model<TApi>, firstMessage: string, cancellationSignal?: AbortSignal, onFailure?: (kind: SessionNameFailureKind, error?: string) => void): Promise<string | undefined> {
   const signal = titleGenerationSignal(cancellationSignal);
-  const reportFailure = (kind: SessionNameFailureKind): void => {
-    if (cancellationSignal?.aborted !== true) onFailure?.(signal.aborted ? "timeout" : kind);
+  const reportFailure = (kind: SessionNameFailureKind, error?: string): void => {
+    if (cancellationSignal?.aborted !== true) onFailure?.(signal.aborted ? "timeout" : kind, error);
   };
   try {
     const stream = await streamFn(
@@ -84,7 +84,7 @@ export async function generateShortSessionName<TApi extends Api>(streamFn: Strea
       if (event.type === "text_delta") streamedText += event.delta;
       if (event.type === "done") finalMessage = event.message;
       if (event.type === "error") {
-        reportFailure("stream_error");
+        reportFailure("stream_error", event.error.errorMessage);
         return undefined;
       }
     }
@@ -93,10 +93,10 @@ export async function generateShortSessionName<TApi extends Api>(streamFn: Strea
     const name = cleanSessionName(text);
     if (name === undefined) reportFailure(text.trim() === "" ? "empty" : "rejected_format");
     return name;
-  } catch {
-    // Provider exceptions can contain request data or secrets. Report only a
-    // bounded category at the service boundary, never the raw response/error.
-    reportFailure("exception");
+  } catch (error) {
+    // The internal chain boundary classifies before sanitizing. Callers must
+    // not log or persist this provider text directly.
+    reportFailure("exception", String(error));
     return undefined;
   }
 }

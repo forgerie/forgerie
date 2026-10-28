@@ -2,6 +2,9 @@ import { RECAP_DELAY_MS, type RecapResult, type RecapTrigger } from "../../share
 import { SessionRecapScheduler, canWriteRecap } from "./sessionRecapScheduler.js";
 import { buildRecapPrompt, generateSessionRecap } from "./sessionRecapGenerator.js";
 import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
+import { generateChainSessionName } from "./modelChainTitles.js";
+import type { ModelChainRuntime } from "./modelChainFailures.js";
+import { parseModelChoice, resolveModelChain, selectChainModel } from "../../shared/modelChains.js";
 import { DurableDecisionWriter, issueDecision } from "./durableDecisionWriter.js";
 import { durableSessionPaths } from "./durableSessionJournal.js";
 import { readDurableSessionLocator } from "./durableSessionLocator.js";
@@ -363,6 +366,7 @@ interface StartSessionOptions {
   initialModel?: AgentModel;
   /** Strict `provider/model-id` chosen before the session existed. */
   initialModelSpec?: string;
+  initialModelChain?: string;
   /**
    * Thinking level for the brand new session; omit to resolve from settings
    * and pi defaults. Pi clamps it to the initial model's capabilities.
@@ -555,6 +559,9 @@ export interface PiAgentSession {
    */
   readonly state: { readonly streamingMessage?: unknown };
   model: AgentModel | undefined;
+  modelChain?: string | undefined;
+  chainWait?: import("../../shared/apiTypes.js").ModelChainWait | undefined;
+  setModelChain?(reference: string): Promise<void>;
   thinkingLevel: ClientThinkingLevel;
   isStreaming: boolean;
   isCompacting: boolean;
@@ -631,7 +638,7 @@ interface PendingSessionOpen {
   promise: Promise<ActiveSession<PiSessionRuntime>>;
 }
 
-interface CreateSessionRuntimeOptions extends Pick<InternalStartSessionOptions, "initialModel" | "initialThinkingLevel" | "creationProvenance" | "startupToken"> {
+interface CreateSessionRuntimeOptions extends Pick<InternalStartSessionOptions, "initialModel" | "initialModelChain" | "initialThinkingLevel" | "creationProvenance" | "startupToken"> {
   notificationGeneration?: SessionNotificationGeneration;
   notifications?: "enabled" | "disabled";
   /**
@@ -911,6 +918,7 @@ function createDefaultRuntimeFactory(
   workflowAutonomy?: () => WorkflowAutonomy,
   backlogSuggestions?: BacklogSuggestionToolDeps,
   worktreeBackupDirectory?: string,
+  modelChains: ModelChainRuntime = {},
 ): PiWebCreateAgentSessionRuntimeFactory {
   return async ({ cwd, agentDir, sessionManager, sessionStartEvent, initialModel, initialThinkingLevel, delegationToolsEnabled, scopedModels, handle }) => {
     const sessionTitleBridgeSlot = createSessionTitleBridgeSlot();
@@ -954,6 +962,7 @@ function createDefaultRuntimeFactory(
     if (azurePr !== undefined) customTools.push(...await createAzurePrTools(cwd, azurePr));
     const managedTools = await processTools?.({ id: sessionManager.getSessionId(), cwd }, sessionManager.getSessionDir());
     const session = await DurableAgentSession.open({
+      ...modelChains,
       ...(worktreeBackupDirectory === undefined ? {} : { worktreeBackupDirectory }),
       ...(decisionHints === undefined ? {} : {decisionHints}),
       ...(workflowAutonomy === undefined ? {} : {workflowAutonomy}),
@@ -1009,7 +1018,7 @@ function createPiWebEditToolDefinition(cwd: string) {
   });
 }
 
-export interface PiSessionServiceDependencies {
+export interface PiSessionServiceDependencies extends ModelChainRuntime {
   /** Where discarded worktrees are backed up. Omitted: the data folder of this process's environment. */
   worktreeBackupDirectory?: string;
   /** Optional background-only hint client and live settings; never used for authorization. */
@@ -1202,6 +1211,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly spawnTargets: SpawnTargetResolver | undefined;
   private readonly projectWorkspaces: ProjectWorkspaceCwds | undefined;
   private readonly logger: PiSessionLogger;
+  private readonly chainRuntime: ModelChainRuntime;
   private readonly sessionTitleModel: (() => string | undefined) | undefined;
   private readonly now: () => Date;
   private readonly notificationStore: SessionNotificationStore;
@@ -1261,6 +1271,7 @@ export class PiSessionService implements SessionRouteService {
       },
       onError: (error, sessionId) => { this.logger.info({ err: error, sessionId }, "managed process maintenance failed"); } });
     this.sessionTitleModel = deps.sessionTitleModel;
+    this.chainRuntime = { ...(deps.defaultModelChain === undefined ? {} : { defaultModelChain: deps.defaultModelChain }), ...(deps.modelChains === undefined ? {} : { modelChains: deps.modelChains }), ...(deps.modelCooldowns === undefined ? {} : { modelCooldowns: deps.modelCooldowns }) };
     this.now = deps.now ?? (() => new Date());
     this.notificationStore = deps.notificationStore ?? new SessionNotificationStore();
     this.unreadStore = deps.unreadStore ?? new SessionUnreadStore();
@@ -1309,6 +1320,7 @@ export class PiSessionService implements SessionRouteService {
       deps.workflowAutonomy,
       deps.backlogSuggestions,
       deps.worktreeBackupDirectory,
+      this.chainRuntime,
     );
     this.createAgentRuntime = deps.createAgentRuntime ?? defaultCreateAgentRuntime;
     this.workspaceActivity = deps.workspaceActivity;
@@ -1775,6 +1787,17 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async withSessionWorktrees(sessions: readonly ClientSession[], cwd?: string, options: { counts: boolean } = { counts: true }): Promise<ClientSession[]> {
+    const enriched: ClientSession[] = [];
+    const batchSize = 16;
+    // Cold catalog reads must not acquire one SQLite lease per retained session at once.
+    for (let offset = 0; offset < sessions.length; offset += batchSize) {
+      enriched.push(...await Promise.all(sessions.slice(offset, offset + batchSize).map(async session => {
+        const active = this.activeForRef(session);
+        const modelChain = active === undefined ? await this.durableReader?.modelChain(session) : active.runtime.session.modelChain;
+        return modelChain === undefined ? session : { ...session, modelChain };
+      })));
+    }
+    sessions = enriched;
     const worktrees = this.sessionWorktrees;
     if (worktrees === undefined) return [...sessions];
     const records = await worktrees.store.list();
@@ -1897,11 +1920,20 @@ export class PiSessionService implements SessionRouteService {
   async start(cwd: string, options: StartSessionOptions = {}): Promise<ClientSession> {
     const modelSpec = options.initialModelSpec;
     if (modelSpec === undefined) return this.startSession(cwd, options);
+    if (!modelSpec.includes("/")) {
+      resolveModelChain(modelSpec, this.chainRuntime.modelChains?.() ?? {});
+      return this.startSession(cwd, { ...options, initialModelChain: modelSpec });
+    }
     const initialModel = await this.resolveNewSessionModel(modelSpec);
     return this.startSession(cwd, { ...options, initialModel });
   }
 
   private async startSession(cwd: string, options: InternalStartSessionOptions): Promise<ClientSession> {
+    const reference = options.initialModel === undefined && options.initialModelChain === undefined ? this.chainRuntime.defaultModelChain?.() : undefined;
+    if (reference !== undefined) {
+      resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {});
+      options = { ...options, initialModelChain: reference };
+    }
     if (this.sessionWorktrees !== undefined) {
       const blocking = (await this.sessionWorktrees.store.list()).find((record) => pathInside(record.path, cwd) && (record.operation !== undefined || record.state.kind !== "active"));
       if (blocking !== undefined) throw new Error("This workspace is closed or a worktree lifecycle action is running");
@@ -1916,6 +1948,7 @@ export class PiSessionService implements SessionRouteService {
         startupIntent: "create",
         ...(options.startupToken === undefined ? {} : { startupToken: options.startupToken }),
         ...(options.initialModel === undefined ? {} : { initialModel: options.initialModel }),
+        ...(options.initialModelChain === undefined ? {} : { initialModelChain: options.initialModelChain }),
         ...(options.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
         ...(options.creationProvenance === undefined ? {} : { creationProvenance: options.creationProvenance }),
       },
@@ -1923,6 +1956,7 @@ export class PiSessionService implements SessionRouteService {
     const { session } = active.runtime;
     const created: ClientSession = {
       id: session.sessionId,
+      ...(session.modelChain === undefined ? {} : { modelChain: session.modelChain }),
       path: session.sessionFile ?? "",
       cwd,
       persisted: sessionFileExists(session.sessionFile),
@@ -1950,12 +1984,14 @@ export class PiSessionService implements SessionRouteService {
     const initialModel = hasModel || action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
     const options = {
       ...(initialModel === undefined ? {} : { initialModel }),
+      ...(!hasModel && action.model !== undefined && !action.model.includes("/") ? { initialModelChain: action.model } : {}),
       ...(hasThinking || action.thinkingLevel === undefined ? {} : { initialThinkingLevel: action.thinkingLevel }),
     };
     if (existing === undefined) { await this.startSession(ref.cwd, { ...options, sessionId: ref.id }); return; }
     const active = this.activeForRef(ref);
     if (active !== undefined) {
-      if (initialModel !== undefined) await active.runtime.session.setModel(initialModel);
+      if (options.initialModelChain !== undefined) await active.runtime.session.setModelChain?.(options.initialModelChain);
+      else if (initialModel !== undefined) await active.runtime.session.setModel(initialModel);
       if (options.initialThinkingLevel !== undefined) active.runtime.session.setThinkingLevel(options.initialThinkingLevel);
       return;
     }
@@ -2003,6 +2039,7 @@ export class PiSessionService implements SessionRouteService {
       : await this.resolveSpawnModel({ id: input.spawningSessionId, cwd: input.spawningCwd }, input.modelSpec);
     const created = await this.start(decision.cwd, {
       ...(model === undefined ? {} : { initialModel: model }),
+      ...(input.modelSpec === undefined || input.modelSpec.includes("/") ? {} : { initialModelChain: input.modelSpec }),
       ...(input.thinkingLevel === undefined ? {} : { initialThinkingLevel: input.thinkingLevel }),
     });
     const modelUsed = this.active.get(created.id)?.runtime.session.model;
@@ -2053,6 +2090,7 @@ export class PiSessionService implements SessionRouteService {
         : await this.resolveSpawnModel({ id: input.sourceSessionId, cwd: input.spawningCwd }, input.modelSpec);
       created = await this.startSession(decision.cwd, {
         ...(model === undefined ? {} : { initialModel: model }),
+        ...(input.modelSpec === undefined || input.modelSpec.includes("/") ? {} : { initialModelChain: input.modelSpec }),
         ...(input.thinkingLevel === undefined ? {} : { initialThinkingLevel: input.thinkingLevel }),
         creationProvenance: "detached-handoff",
       });
@@ -2344,9 +2382,18 @@ export class PiSessionService implements SessionRouteService {
    * result the spawning agent can retry from.
    */
   /** Resolve `provider/model-id` against the shared runtime, with no session. */
+  private async concreteModelSpec(reference: string): Promise<string> {
+    if (reference.includes("/")) return reference;
+    const selected = selectChainModel(resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {}), await this.chainRuntime.modelCooldowns?.snapshot() ?? {}, Date.now()).model;
+    const parsed = parseModelChoice(selected);
+    if (parsed === null) throw new Error("Invalid model-chain entry");
+    return `${parsed.model.provider}/${parsed.model.modelId}`;
+  }
+
   private async resolveNewSessionModel(modelSpec: string): Promise<AgentModel> {
     await this.modelRuntime.refresh();
-    const parsed = parseModelSpec(modelSpec);
+    const concrete = await this.concreteModelSpec(modelSpec);
+    const parsed = parseModelSpec(concrete);
     const model = parsed === undefined
       ? undefined
       : this.modelRuntime.getAvailableSnapshot().find((candidate) => candidate.provider === parsed.provider && candidate.id === parsed.modelId)
@@ -2357,7 +2404,8 @@ export class PiSessionService implements SessionRouteService {
 
   private async resolveSpawnModel(spawningRef: PiSessionRef, modelSpec: string): Promise<AgentModel> {
     const session = await this.getOrOpen(spawningRef);
-    const parsed = parseModelSpec(modelSpec);
+    const concrete = await this.concreteModelSpec(modelSpec);
+    const parsed = parseModelSpec(concrete);
     const candidates = await this.sessionModelCandidates(session);
     const model = parsed === undefined
       ? undefined
@@ -3241,17 +3289,23 @@ export class PiSessionService implements SessionRouteService {
     const settings = SettingsManager.create(cwd, this.agentDir);
     const scopedModels = await resolveEnabledModels(settings, this.modelRuntime);
     const orderedModels = modelsWithScopeFirst(candidates, scopedModels);
-    const selected = resolveNewSessionDefaultModel(
+    const reference = this.chainRuntime.defaultModelChain?.();
+    const chain = reference === undefined ? undefined : await this.concreteModelSpec(reference);
+    const chainModel = chain === undefined ? undefined : parseModelSpec(chain);
+    const selected: { model: AgentModel | undefined; thinkingLevel?: ClientThinkingLevel } | undefined = chainModel === undefined ? resolveNewSessionDefaultModel(
       orderedModels,
       scopedModels,
       settings.getDefaultProvider(),
       settings.getDefaultModel(),
-    );
-    const requestedThinkingLevel = selected?.thinkingLevel ?? settings.getDefaultThinkingLevel() ?? "medium";
+    ) : { model: this.modelRuntime.getModel(chainModel.provider, chainModel.modelId) };
+    const chainEntries = reference === undefined ? undefined : resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {});
+    const chainChoice = chainEntries === undefined ? null : parseModelChoice(selectChainModel(chainEntries, await this.chainRuntime.modelCooldowns?.snapshot() ?? {}, Date.now()).model);
+    const requestedThinkingLevel = chainChoice?.thinkingLevel ?? selected?.thinkingLevel ?? settings.getDefaultThinkingLevel() ?? "medium";
     const model = selected?.model;
     const thinkingLevel = model === undefined ? "off" : clampThinkingLevel(model, requestedThinkingLevel);
     return {
       models: clientModelsWithScope(orderedModels, scopedModels),
+      ...(reference === undefined ? {} : { modelChain: reference }),
       ...(model === undefined ? {} : { model: modelToClientModel(model) }),
       thinkingLevel,
     };
@@ -3261,6 +3315,18 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     const models = await this.sessionModelCandidates(session);
     return clientModelsWithScope(models, session.scopedModels);
+  }
+
+  async setModelChain(ref: PiSessionRef, reference: string): Promise<ClientSessionStatus> {
+    resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {});
+    await this.assertWritable(ref);
+    const session = await this.getOrOpen(ref);
+    this.assertHandoffDestinationAcceptsInput(session);
+    const setChain = session.setModelChain?.bind(session);
+    if (setChain === undefined) throw new Error("Session runtime does not support model chains");
+    await this.runSessionEntryMutation(session, "change models", () => setChain(reference));
+    this.publishStatus(session);
+    return this.statusFromSession(session);
   }
 
   async setModel(ref: PiSessionRef, provider: string, modelId: string): Promise<ClientSessionStatus> {
@@ -4644,7 +4710,7 @@ export class PiSessionService implements SessionRouteService {
     sessionId: string,
     cwd: string,
     openSessionManager: () => PiSessionManager,
-    options: Pick<CreateSessionRuntimeOptions, "notificationGeneration" | "notifications" | "initialModel" | "initialThinkingLevel"> = {},
+    options: Pick<CreateSessionRuntimeOptions, "notificationGeneration" | "notifications" | "initialModel" | "initialModelChain" | "initialThinkingLevel"> = {},
   ): Promise<ActiveSession<PiSessionRuntime>> {
     if (this.stopping) return Promise.reject(new Error("Session service is shutting down"));
     const active = this.activeForRef({ id: sessionId, cwd });
@@ -4780,6 +4846,10 @@ export class PiSessionService implements SessionRouteService {
       ...(options.initialModel === undefined ? {} : { initialModel: options.initialModel }),
       ...(options.initialThinkingLevel === undefined ? {} : { initialThinkingLevel: options.initialThinkingLevel }),
     });
+    if (options.initialModelChain !== undefined) {
+      if (runtime.session.setModelChain === undefined) throw new Error("Session runtime does not support model chains");
+      await runtime.session.setModelChain(options.initialModelChain);
+    }
     const active: ActiveSession<PiSessionRuntime> = { runtime, unsubscribe: noop };
     this.bindProcessPanel(runtime.session);
     this.bindSessionTitleBridge(runtime, runtime.session);
@@ -5395,17 +5465,24 @@ export class PiSessionService implements SessionRouteService {
       return;
     }
 
-    const model = this.titleModelFor(session);
-    if (model === undefined) {
+    let titleReference: string | undefined;
+    try { titleReference = this.sessionTitleModel?.(); } catch { /* titleModelFor logs the read failure below. */ }
+    const titleChain = titleReference !== undefined && !titleReference.includes("/") ? titleReference : undefined;
+    const model = titleChain === undefined ? this.titleModelFor(session) : session.model;
+    if (model === undefined && titleChain === undefined) {
       this.applyGeneratedSessionName(session, fallbackSessionName(titleInput));
       return;
     }
 
     const controller = new AbortController();
     this.sessionTitleGenerationControllers.set(session, controller);
-    void generateShortSessionName(session.agent.streamFunction, model, titleInput, controller.signal, (failureKind) => {
-      this.logger.info({ sessionId: session.sessionId, outcome: "fallback", failureKind }, "session title generation returned no usable name");
-    }).then((name) => {
+    const generate = titleChain === undefined
+      ? model === undefined ? Promise.resolve(undefined) : generateShortSessionName(session.agent.streamFunction, model, titleInput, controller.signal, (failureKind) => {
+        this.logger.info({ sessionId: session.sessionId, outcome: "fallback", failureKind }, "session title generation returned no usable name");
+      })
+      : generateChainSessionName(titleChain, this.chainRuntime, this.modelRuntime, session.agent.streamFunction, titleInput, controller.signal,
+        error => { this.logger.info({ err: error }, "Title chain failure"); });
+    void generate.then((name) => {
       this.applyGeneratedSessionName(session, name ?? fallbackSessionName(titleInput), controller);
     }).catch(() => {
       if (!controller.signal.aborted) {
@@ -5791,6 +5868,8 @@ export class PiSessionService implements SessionRouteService {
       sessionId: session.sessionId,
       persisted: sessionFileExists(session.sessionFile),
       ...(model === undefined ? {} : { model }),
+      ...(session.modelChain === undefined ? {} : { modelChain: session.modelChain }),
+      ...(session.chainWait === undefined ? {} : { chainWait: session.chainWait }),
       thinkingLevel: session.thinkingLevel,
       isStreaming: session.isStreaming,
       isCompacting: this.isCompactionRunning(session),

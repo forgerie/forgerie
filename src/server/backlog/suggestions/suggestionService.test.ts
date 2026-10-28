@@ -74,6 +74,18 @@ async function fixture() {
 }
 
 describe("backlog suggestions", () => {
+  it.each([false, true])("passes a suggestion chain to its background session (explicit choice: %s)", async (explicit) => {
+    const f = await fixture();
+    try {
+      await f.settings.setSuggestionsDefault({ modelSpec: "suggestion-chain", thinkingLevel: "low" });
+      const record = await f.service.suggest(f.root, "chat", input);
+      expect(record.defaultModel).toEqual({ modelSpec: "suggestion-chain", thinkingLevel: "low" });
+      const modelSpec = explicit ? "override-chain" : "suggestion-chain";
+      const started = await f.service.file(record.id, "file-and-act", { requestId: "chain", ...(explicit ? { modelSpec } : {}) });
+      expect(started.state).toMatchObject({ kind: "started", modelSpec });
+      expect(f.starts[0]).toMatchObject({ modelSpec });
+    } finally { await f.dispose(); }
+  });
   it("resolves the first project-owned provider and model defaults once, and notes routed Azure sources", async () => {
     const f = await fixture();
     try {

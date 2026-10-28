@@ -1,3 +1,4 @@
+import { SessionChainTurns, SessionModelChain } from "./durableModelChains.js";
 import { decisionAnnotations, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { z } from "zod";
 import type { StackLatencyContext } from "../../shared/stackLatency.js";
@@ -118,6 +119,8 @@ export class DurableParentReadModel {
         finishPreparation = trace?.start("storage-read");
         const membershipRevision = retiredRequired;
         const cached = this.liveHistory?.value;
+        const hasChain = (await handle.harness.snapshot(SessionModelChain, id, context)) !== undefined;
+        const hasTurns = (await handle.harness.snapshot(SessionChainTurns, id, context)) !== undefined;
         const required = cached === undefined ? await Promise.all([
           handle.harness.snapshot(LiveDoc, id, context), handle.harness.snapshot(InboxDoc, id, context),
           handle.harness.snapshot(AgentDoc, id, context), handle.harness.snapshot(UsageDoc, id, context),
@@ -164,6 +167,8 @@ export class DurableParentReadModel {
           }
           const live = await tx.doc(LiveDoc, id), inbox = await tx.doc(InboxDoc, id);
           const agent = await tx.doc(AgentDoc, id), usage = await tx.doc(UsageDoc, id);
+          const chain = hasChain ? await tx.doc(SessionModelChain, id) : undefined;
+          const turns = hasTurns ? await tx.doc(SessionChainTurns, id) : undefined;
           const asks = copyJson(await tx.doc(ParentAsks, id)), response = await tx.doc(ParentResponse, id), name = await tx.doc(SessionName, id);
           if (!Check(ParentAsksSchema, asks) || !Check(ParentResponseSchema, response) || !Check(SessionNameSchema, name)) throw new Error("Invalid native parent documents");
           const envelopes = cached?.envelopes ?? new Map<string, Static<typeof PresentationSchema>>();
@@ -190,7 +195,9 @@ export class DurableParentReadModel {
             text: typeof item.content === "string" ? item.content : item.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") }]), ...(host.compaction?.queuedMessages ?? [])];
           hub.savedHostOutput(handle.address.sessionId, messages);
           const status: SessionStatus = { ...host.status, sessionId: handle.address.sessionId, persisted: true,
-            isStreaming: live.run !== undefined, isCompacting: host.compaction?.isRunning === true || (live.compactions?.length ?? 0) > 0,
+            isStreaming: live.run !== undefined || turns?.wait !== undefined,
+            ...(chain?.reference === undefined ? {} : { modelChain: chain.reference }),
+            ...(turns?.wait === undefined ? {} : { chainWait: { from: turns.wait.from, error: turns.wait.error, until: turns.wait.until, ...(turns.wait.to === undefined ? {} : { to: turns.wait.to }) } }), isCompacting: host.compaction?.isRunning === true || (live.compactions?.length ?? 0) > 0,
             isBashRunning: hub.transientEvents(handle.address.sessionId).reverse().find(event => event.type === "shell.start" || event.type === "shell.end")?.type === "shell.start",
             pendingMessageCount: queuedMessages.length, queuedMessages, messageCount: messages.length, ...durableUsageTotals(usage),
             ...(agent.model === undefined ? {} : { model: { provider: agent.model.provider, id: agent.model.modelId, name: agent.model.modelId } }),
