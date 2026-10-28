@@ -13,6 +13,12 @@ export function classifyChildModelError(error: string): ChildModelFailure {
   if (SWITCH.test(error) || (requested !== null && Number(requested[1]) > 60)) return "switch-now";
   return STATUS.test(error) || TRANSIENT.test(error) ? "wait-then-switch" : "fatal";
 }
+// Serialized with reporter checkpoints so redaction/truncation cannot change a replayed decision.
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+export type ChildFailureAssessment = { kind: ChildModelFailure; retryLegacy: boolean };
+export function assessChildModelFailure(error: string): ChildFailureAssessment {
+  return { kind: classifyChildModelError(error), retryLegacy: !LEGACY_PERMANENT.test(error) && LEGACY_TRANSIENT.test(error) };
+}
 /** Durable settles missing catalog models as no_model, keeping the actual text only on its task receipt. */
 export function unavailableChildModel(error: string): string | undefined {
   const spec = /^Model (\S+) is not available$/.exec(error)?.[1];
@@ -40,16 +46,17 @@ export type ChainProgress = { failed: string[]; waited: string[]; budget: number
 export type ChildFailurePlan = { kind: "report" } | { kind: "retry"; delay: number; progress: ChainProgress; retryAttempt: number }
   | { kind: "switch"; to: string; progress: ChainProgress; delay?: number; retryAttempt?: number };
 /** One-model chains deliberately retain the old transient-only retry policy. */
-export function planChildModelFailure(input: { models: string[]; current: string; error: string; now: number; cooldowns: ModelCooldowns; progress?: ChainProgress }): ChildFailurePlan {
+export function planChildModelFailure(input: { models: string[]; current: string; error: string; now: number; cooldowns: ModelCooldowns; progress?: ChainProgress; assessment?: ChildFailureAssessment }): ChildFailurePlan {
   const { models, current, error, now, cooldowns } = input;
   const progress = structuredClone(input.progress ?? { failed: [], waited: [], budget: 0 });
+  const assessment = input.assessment ?? assessChildModelFailure(error);
   // This predicate intentionally predates fallback classification, including its historical text matching.
   if (models.length === 1) {
-    if (LEGACY_PERMANENT.test(error) || !LEGACY_TRANSIENT.test(error)) return { kind: "report" };
+    if (!assessment.retryLegacy) return { kind: "report" };
     const delay = CHILD_RETRY_DELAYS[progress.budget++];
     return delay === undefined ? { kind: "report" } : { kind: "retry", delay, progress, retryAttempt: progress.budget };
   }
-  const failure = classifyChildModelError(error);
+  const failure = assessment.kind;
   if (failure === "fatal") return { kind: "report" };
   if (models.length > 1 && progress.exhausted !== true) {
     if (failure === "wait-then-switch" && !progress.waited.includes(modelKey(current))) {

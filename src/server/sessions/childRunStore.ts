@@ -1,3 +1,4 @@
+import { childFallbackDiagnostic } from "../../shared/childFallback.js";
 import { randomUUID } from "node:crypto";
 import type { SubmissionId, TaskId } from "@earendil-works/pi-durable";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
@@ -41,7 +42,7 @@ export class ChildRunStore {
   }
 
   save(run: ChildRun, checkpoint?: ChildRunCheckpoint): Promise<void> {
-    const input: StoredRun = structuredClone({ run, ...(checkpoint === undefined ? {} : { checkpoint }) });
+    const input: StoredRun = structuredClone({ run: { ...run, ...(run.fallbacks === undefined ? {} : { fallbacks: run.fallbacks.map(childFallbackDiagnostic) }) }, ...(checkpoint === undefined ? {} : { checkpoint }) });
     return this.exclusive(async () => {
       const run = input.run;
       if (!Check(itemSchema, input)) throw new Error("Invalid child run record");
@@ -93,7 +94,7 @@ export class ChildRunStore {
       if (ids.has(item.run.id)) throw new Error("Duplicate child run ID");
       ids.add(item.run.id);
     }
-    return value.records;
+    return value.records.map((record) => ({ ...record, run: { ...record.run, ...(record.run.fallbacks === undefined ? {} : { fallbacks: record.run.fallbacks.map(childFallbackDiagnostic) }) } }));
   }
   /** Memory follows the file: records are replaced only after the rename succeeds. */
   private async persist(records: StoredRun[]): Promise<void> {

@@ -1,4 +1,4 @@
-import { ChildFallbackSchema } from "../../shared/childFallback.js";
+import { childFallbackDiagnostic, ChildFallbackSchema } from "../../shared/childFallback.js";
 import { createHash } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { LiveDoc, UsageDoc, UserEntry, type CommitPublication, type ConversationId, type Cursor, type Harness,
@@ -162,7 +162,7 @@ export class DurableChildRunRecords {
     const metadata = child.metadata;
     const id = createHash("sha256").update(`${this.ref.id}/${String(metadata.conversationId)}/${String(submissionId)}`).digest("hex");
     child.active = { run: { id, ...(this.workflowRunId === undefined ? {} : { workflowRunId: this.workflowRunId }), session: { ...this.ref }, child: { name: metadata.name, conversationId: metadata.conversationId, agent: metadata.agent,
-      ...(metadata.agentFile === undefined ? {} : { agentFile: metadata.agentFile }) }, model: null, ...(metadata.fallbacks === undefined ? {} : { fallbacks: structuredClone(metadata.fallbacks) }), startedAt,
+      ...(metadata.agentFile === undefined ? {} : { agentFile: metadata.agentFile }) }, model: null, ...(metadata.fallbacks === undefined ? {} : { fallbacks: metadata.fallbacks.map(childFallbackDiagnostic) }), startedAt,
       state: { kind: "running" }, turns: 0, usage: baseline === null ? null : { models: {}, tools: {} } },
       checkpoint: { submissionId, rootTaskId, generationTaskId: rootTaskId, baseline } };
     this.persist(child.active);

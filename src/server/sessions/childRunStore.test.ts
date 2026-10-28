@@ -110,3 +110,13 @@ describe("child run records on disk", () => {
     await expect(f.store.save(invalid)).rejects.toThrow("timing");
   });
 });
+
+it("redacts fallback diagnostics on save and when reopening older records", async () => {
+  const f = await fixture(); const secret = "sk-review-fixture-SECRET";
+  const record = { ...run("redaction", now), fallbacks: [{ from: "a/one", to: "b/two", reason: `Incorrect API key provided: ${secret}` }] };
+  await f.store.save(record);
+  expect(await readFile(f.path, "utf8")).not.toContain(secret);
+  await writeFile(f.path, JSON.stringify({ version: 1, records: [{ run: record }] }));
+  expect(JSON.stringify(await new ChildRunStore(f.path, () => now).list())).not.toContain(secret);
+  expect(record.fallbacks[0]?.reason).toContain(secret);
+});

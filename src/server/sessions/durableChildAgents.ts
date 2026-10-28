@@ -18,15 +18,16 @@ import { Type, type AssistantMessage, type Message } from "@earendil-works/pi-ai
 import {
   AgentDoc, AssistantEntry, CompactionTask, GenerationTask, LiveDoc, configure, defineDoc, defineExtension, defineTask, defineTool, hook, section, wrapTool,
   type Conversation, type ConversationId, type EntryId, type Extension, type Harness, type TaskGraph, type TaskId,
-  type ToolRegistration, type Tx, type Storage, type EntryRecord, type Cursor,
+  type ToolRegistration, type SubmissionRecord, type Tx, type Storage, type EntryRecord, type Cursor,
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
 import { Type as Schema } from "typebox";
 import type { ThinkingLevel } from "../../shared/thinkingLevels.js";
-import { ChildFallbackSchema, type ChildFallback } from "../../shared/childFallback.js";
+import { CHILD_MODEL_CONTINUE, childModelDiagnostic, childModelDiagnosticContext, childModelDiagnosticReport, hasUnsafeChildModelDiagnostic } from "../../shared/childModelDiagnostic.js";
+import { childFallbackDiagnostic, ChildFallbackSchema, type ChildFallback } from "../../shared/childFallback.js";
 import { childModelReference, modelKey, parseModelChoice, resolveModelChain, selectChainModel, type ModelChains } from "../../shared/modelChains.js";
-import { childModelCooldown, planChildModelFailure, unavailableChildModel, type ChainProgress } from "./childModelFailures.js";
+import { assessChildModelFailure, type ChildFailureAssessment, childModelCooldown, planChildModelFailure, unavailableChildModel, type ChainProgress } from "./childModelFailures.js";
 import type { ModelCooldownRegistry } from "./modelCooldownRegistry.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools, DurableSdkToolsOptions } from "./durableSdkTools.js";
@@ -60,10 +61,10 @@ type QuestionRouting = { kind: "parent" } | { kind: "user"; escalation: "irrever
 // No routing field means a user-facing question created before parent-first routing.
 type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number; closed?: boolean; routing?: QuestionRouting; resolvedBy?: string };
 type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string; workflowSend?: boolean; initialRetry?: { error: string; until: number } };
-type ReporterPolicy = { firstDelivery?: boolean; progress?: ChainProgress };
+type ReporterPolicy = { firstDelivery?: boolean; progress?: ChainProgress; failure?: ChildFailureAssessment };
 type ReporterState = ReporterPolicy & ({ phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string; retryAttempt?: number }
   | { phase: "switch"; attempt: number; error: string; to: string; run: string; until?: number; retryAttempt?: number }
-  | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" });
+  | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; diagnosticsSafe?: boolean; suppressed?: "duplicate" | "aborted" });
 type ChildRetryOwner = { owner: TaskId; conversationId: ConversationId; requestId: string };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
 
@@ -96,8 +97,13 @@ function chainModels(reference: string | undefined, chains: ModelChains, parent:
   const spec = reference ?? (parent.model === undefined ? undefined : `${parent.model.provider}/${parent.model.modelId}`);
   return spec === undefined ? [] : resolveModelChain(spec, chains, thinking ?? parent.thinkingLevel);
 }
+function diagnosticSubmission(submission: SubmissionRecord): SubmissionRecord {
+  return submission.status !== "unanswered" ? submission : { ...submission, reason: childModelDiagnostic(submission.reason),
+    ...(submission.detail === undefined ? {} : { detail: childModelDiagnostic(typeof submission.detail === "string" ? submission.detail : JSON.stringify(submission.detail)) }) };
+}
+
 function fallbackNote(fallbacks: readonly ChildFallback[]): string {
-  return fallbacks.length === 0 ? "" : ` (ran on ${fallbacks.at(-1)?.to ?? ""} after ${fallbacks.map((item) => `${item.from}: ${item.reason}`).join("; ")})`;
+  return fallbacks.length === 0 ? "" : ` (ran on ${fallbacks.at(-1)?.to ?? ""} after ${fallbacks.map((item) => `${item.from}: ${childModelDiagnostic(item.reason)}`).join("; ")})`;
 }
 /** Apply a declared model only between turns. The caller may wait, or keep a user steer in the current turn. */
 async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childId: ConversationId, name: string, selected: DurableChildExtensionOptions = {}): Promise<TaskId | undefined> {
@@ -132,7 +138,7 @@ async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childI
   if (!unchanged) await configure(tx, childId, { model: model ?? null, thinkingLevel });
   if (record !== undefined) {
     if (reference === undefined) delete record.modelReference; else record.modelReference = reference;
-    record.fallbacks = chosen === undefined || models[0] === chosen.model ? [] : [{ from: modelKey(models[0] ?? chosen.model), to: modelKey(chosen.model), reason: cooldowns[modelKey(models[0] ?? chosen.model)]?.reason ?? "model cooling" }];
+    record.fallbacks = chosen === undefined || models[0] === chosen.model ? [] : [{ from: modelKey(models[0] ?? chosen.model), to: modelKey(chosen.model), reason: childModelDiagnostic(cooldowns[modelKey(models[0] ?? chosen.model)]?.reason ?? "model cooling") }];
   }
   return undefined;
 }
@@ -140,14 +146,14 @@ async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childI
 const REPORTER_KIND = "forgerie.child-reporter";
 function childReporter(resolve: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensionOptions>) {
   return defineTask<ReporterInput, ReporterState, null>({
-  name: REPORTER_KIND, version: 1, initial: (input) => input.initialRetry === undefined ? { phase: "deliver" } : { phase: "retry", attempt: 1, retryAttempt: 1, ...input.initialRetry, firstDelivery: true, progress: { failed: [], waited: [], budget: 1, exhausted: true } },
+  name: REPORTER_KIND, version: 1, initial: (input) => input.initialRetry === undefined ? { phase: "deliver" } : { phase: "retry", attempt: 1, retryAttempt: 1, ...input.initialRetry, error: childModelDiagnostic(input.initialRetry.error), firstDelivery: true, progress: { failed: [], waited: [], budget: 1, exhausted: true } },
   phases: {
     deliver: async (reporter, runtime, context) => {
       const { name, conversationId, message, followUp } = reporter.input;
       const child = await runtime.conversation(conversationId, context);
       if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
       const attempt = reporter.state.checkpoint.attempt ?? 0;
-      const content = attempt === 0 || reporter.state.checkpoint.firstDelivery === true ? message : `Continue where you stopped; the last request failed with: ${reporter.state.checkpoint.error ?? "model_error"}`;
+      const content = attempt === 0 || reporter.state.checkpoint.firstDelivery === true ? message : CHILD_MODEL_CONTINUE;
       if (reporter.input.workflowSend === true && attempt === 0) {
         const selected = await resolve(runtime.conversationId, context);
         // A model switch must not affect later tool rounds of an already running turn. Wait for that turn,
@@ -180,6 +186,8 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           }
         }, context);
       }
+      const diagnostic = detail === undefined ? undefined : childModelDiagnostic(detail);
+      const failure = detail === undefined ? undefined : assessChildModelFailure(detail);
       if (settled.status === "unanswered" && (settled.reason === "model_error" || settled.reason === "no_model")) {
         const settings = await runtime.snapshot(AgentDoc, conversationId, context);
         const current = (settled.reason === "no_model" && detail !== undefined ? unavailableChildModel(detail) : undefined)
@@ -188,7 +196,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         const until = detail === undefined ? undefined : childModelCooldown(detail, runtime.now());
         let marked = false;
         if (current !== undefined && until !== undefined && selected.modelCooldowns !== undefined) {
-          try { await selected.modelCooldowns.mark(modelKey(current), until, detail ?? "model_error"); marked = true; }
+          try { await selected.modelCooldowns.mark(modelKey(current), until, diagnostic ?? "model_error"); marked = true; }
           catch (error) { runtime.report(error); } // A cooldown disk failure must not hide the child's provider outcome.
         }
         const cooldowns = await selected.modelCooldowns?.snapshot() ?? {};
@@ -196,7 +204,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         // Without a write, retain any longer known deadline while adding the local failure.
         if (!marked && current !== undefined && until !== undefined) {
           const previous = cooldowns[modelKey(current)];
-          cooldowns[modelKey(current)] = { until: Math.max(previous?.until ?? 0, until), reason: previous !== undefined && previous.until > until ? previous.reason : detail ?? "model_error" };
+          cooldowns[modelKey(current)] = { until: Math.max(previous?.until ?? 0, until), reason: previous !== undefined && previous.until > until ? childModelDiagnostic(previous.reason) : diagnostic ?? "model_error" };
         }
         const chains = selected.modelChains?.() ?? {};
         const progress = { delegated: false };
@@ -216,10 +224,10 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           const checkpoint = reporter.state.checkpoint;
           const plan = current === undefined || detail === undefined || models.length === 0 ? { kind: "report" as const }
             : planChildModelFailure({ models, current, error: detail, now: runtime.now(), cooldowns,
-              progress: checkpoint.progress ?? { failed: [], waited: [], budget: attempt } });
+              progress: checkpoint.progress ?? { failed: [], waited: [], budget: attempt }, ...(failure === undefined ? {} : { assessment: failure }) });
           if (plan.kind !== "report") {
             progress.delegated = true;
-            const common = { attempt: attempt + 1, error: detail ?? "model_error", run, progress: plan.progress };
+            const common = { attempt: attempt + 1, error: diagnostic ?? "model_error", run, progress: plan.progress, ...(failure === undefined ? {} : { failure }) };
             return { status: "running", checkpoint: plan.kind === "retry"
               ? { ...common, phase: "retry", retryAttempt: plan.retryAttempt, until: runtime.now() + plan.delay }
               : { ...common, phase: "switch", to: plan.to, ...(plan.delay === undefined ? {} : { until: runtime.now() + plan.delay }), ...(plan.retryAttempt === undefined ? {} : { retryAttempt: plan.retryAttempt }) } };
@@ -229,18 +237,18 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         if (progress.delegated) return;
       }
       // Ancillary accounting/reporting must not replace the child's durable submission outcome.
-      await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled); }, context);
+      await runtime.commit(async (tx) => { await settleWorkflowChild(tx, runtime.conversationId, reporter.id, diagnosticSubmission(settled)); }, context);
       const worktreeReport = settled.status !== "unanswered" && reporter.input.worktreeId !== undefined
         ? await requireWorktrees(selected.worktrees).report(reporter.input.worktreeId) : undefined;
       await runtime.commit(async (tx) => {
-        const next = (report?: string, suppressed: "duplicate" | "aborted" = "aborted"): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report", suppressed } : { phase: "report", report } });
+        const next = (report?: string, suppressed: "duplicate" | "aborted" = "aborted"): { status: "running"; checkpoint: ReporterState } => ({ status: "running", checkpoint: report === undefined ? { phase: "report", suppressed } : { phase: "report", report, diagnosticsSafe: true } });
         if (settled.status === "unanswered") {
           if (settled.reason === "aborted") return next();
           // A failed input is not a dead child: a later steer or retry can still be running. Say so, or the parent
           // starts a replacement that edits the same files.
           const stillRunning = (await tx.doc(LiveDoc, conversationId)).run !== undefined;
           const fallbacks = (await tx.doc(Children, runtime.conversationId)).agents[name]?.fallbacks ?? [];
-          return next(`[subagent ${name} failed: ${settled.reason}${detail === undefined ? "" : `: ${detail}`}${stillRunning ? `. ${childStillRunningNote(name)}` : ""}]${fallbackNote(fallbacks)}`);
+          return next(`[subagent ${name} failed: ${childModelDiagnostic(settled.reason)}${diagnostic === undefined ? "" : `: ${diagnostic}`}${stillRunning ? `. ${childStillRunningNote(name)}` : ""}]${fallbackNote(fallbacks)}`);
         }
         if (settled.type !== "input") return next();
         const agent = (await tx.doc(Children, runtime.conversationId)).agents[name];
@@ -251,7 +259,9 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       }, context);
     },
     switch: async (reporter, runtime, context) => {
-      const { attempt, error, to, run, until, retryAttempt, progress } = reporter.state.checkpoint;
+      const { attempt, to, run, until, retryAttempt, progress } = reporter.state.checkpoint;
+      const failure = reporter.state.checkpoint.failure ?? assessChildModelFailure(reporter.state.checkpoint.error);
+      const error = childModelDiagnostic(reporter.state.checkpoint.error);
       const { conversationId, name } = reporter.input;
       for (;;) {
         const selected = await resolve(runtime.conversationId, context);
@@ -275,14 +285,14 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
             let models: string[];
             try { models = chainModels(record?.modelReference, chains, settings); }
             catch (cause) { runtime.report(cause); models = [from]; }
-            const plan = planChildModelFailure({ models, current: from, error, now: runtime.now(), cooldowns, ...(progress === undefined ? {} : { progress }) });
+            const plan = planChildModelFailure({ models, current: from, error, assessment: failure, now: runtime.now(), cooldowns, ...(progress === undefined ? {} : { progress }) });
             if (plan.kind === "report") {
               const claim = doc.retryOwners?.[run];
               const settled = claim === undefined ? undefined : await tx.submissionByRequest(conversationId, claim.requestId);
-              if (settled !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled);
-              return { status: "running", checkpoint: { phase: "report", report: `[subagent ${name} failed: model_error: ${error}]${fallbackNote(record?.fallbacks ?? [])}` } };
+              if (settled !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, diagnosticSubmission(settled));
+              return { status: "running", checkpoint: { phase: "report", diagnosticsSafe: true, report: `[subagent ${name} failed: model_error: ${error}]${fallbackNote(record?.fallbacks ?? [])}` } };
             }
-            if (plan.kind === "retry") return { status: "running", checkpoint: { phase: "retry", attempt, error, run,
+            if (plan.kind === "retry") return { status: "running", checkpoint: { phase: "retry", attempt, error, run, failure,
               progress: plan.progress, until: runtime.now() + plan.delay, retryAttempt: plan.retryAttempt } };
             target = plan.to; nextProgress = plan.progress; nextAttempt = plan.retryAttempt;
             deadline = plan.delay === undefined ? undefined : runtime.now() + plan.delay;
@@ -297,7 +307,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           }
           const claim = doc.retryOwners?.[run];
           if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
-          const common = { attempt, error, ...(nextProgress === undefined ? {} : { progress: nextProgress }) };
+          const common = { attempt, error, failure, ...(nextProgress === undefined ? {} : { progress: nextProgress }) };
           return { status: "running", checkpoint: deadline === undefined ? { ...common, phase: "deliver" }
             : { ...common, phase: "retry", until: deadline, run, ...(nextAttempt === undefined ? {} : { retryAttempt: nextAttempt }) } };
         }, context);
@@ -306,13 +316,14 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       }
     },
     retry: async (reporter, runtime, context) => {
-      const { attempt, error, until, run, progress, firstDelivery } = reporter.state.checkpoint;
+      const { attempt, until, run, progress, firstDelivery, failure } = reporter.state.checkpoint;
+      const error = childModelDiagnostic(reporter.state.checkpoint.error);
       await runtime.sleep(until, context);
       await runtime.commit(async (tx) => {
         const claim = run === undefined ? undefined : (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
         // Publish the next receipt before admission. A steer joining that retry inherits this owner and budget.
         if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
-        return { status: "running", checkpoint: { phase: "deliver", attempt, error, ...(firstDelivery === undefined ? {} : { firstDelivery }), ...(progress === undefined ? {} : { progress }) } };
+        return { status: "running", checkpoint: { phase: "deliver", attempt, error, ...(failure === undefined ? {} : { failure }), ...(firstDelivery === undefined ? {} : { firstDelivery }), ...(progress === undefined ? {} : { progress }) } };
       }, context);
     },
     observe: async (reporter, runtime, context) => {
@@ -331,7 +342,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           }
           // An ancillary reporter failure need not have stopped its admitted child input.
           if (submission?.status === "queued" || submission?.status === "placed") { progress.pending = true; return undefined; }
-          if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, submission);
+          if (submission !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, diagnosticSubmission(submission));
           return { status: "running", checkpoint: { phase: "report", suppressed: accepted === undefined ? "aborted" : "duplicate" } };
         }, context);
         if (!progress.pending) return;
@@ -340,7 +351,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     },
     report: async (reporter, runtime, context) => {
       const checkpoint = reporter.state.checkpoint;
-      const report = "report" in checkpoint ? checkpoint.report : undefined;
+      const report = checkpoint.report === undefined ? undefined : checkpoint.diagnosticsSafe === true ? checkpoint.report : childModelDiagnosticReport(checkpoint.report);
       if (report !== undefined) {
         await submitChildParentInput(runtime, `child-report:${String(reporter.id)}`, report, context);
       }
@@ -357,7 +368,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     if (task.state.checkpoint.phase === "deliver") {
       const attempt = task.state.checkpoint.attempt ?? 0;
       const submission = await tx.submissionByRequest(task.input.conversationId, attempt === 0 ? `child:${String(task.id)}` : `child:${String(task.id)}:retry:${String(attempt)}`);
-      if (submission !== undefined && submission.status !== "queued" && submission.status !== "placed") await settleWorkflowChild(tx, runtime.conversationId, task.id, submission);
+      if (submission !== undefined && submission.status !== "queued" && submission.status !== "placed") await settleWorkflowChild(tx, runtime.conversationId, task.id, diagnosticSubmission(submission));
     }
     if (accepted !== undefined) await deliveredWorkflowChild(tx, runtime.conversationId, task.id);
     else await undeliveredWorkflowChild(tx, runtime.conversationId, task.id, "aborted");
@@ -530,7 +541,11 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
     // Save the accounting boundary before any generation or compaction can spend money.
     hooks: [
       hook(GenerationTask, {
-        beforeRequest: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; },
+        beforeRequest: async (request, api, ctx) => {
+          await (await resolve(api.conversationId, ctx)).flushRunRecords?.();
+          const messages = childModelDiagnosticContext(request.messages);
+          return messages.some((message, index) => message !== request.messages[index]) ? { messages } : undefined;
+        },
         afterResponse: async (message, api, ctx) => {
           if (message.stopReason !== "error") return;
           // Submission IDs differ for spawn and steer, but Durable settles all inputs of one failed generation together.
@@ -556,7 +571,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           }, ctx);
         },
       }),
-      hook(CompactionTask, { beforeCompact: async (_request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return undefined; } }),
+      hook(CompactionTask, { beforeCompact: async (request, api, ctx) => { await (await resolve(api.conversationId, ctx)).flushRunRecords?.(); return hasUnsafeChildModelDiagnostic(request.messages) ? { decline: true } : undefined; } }),
     ],
     tools: [askHumanTool, ...codingTools, watchdogDiffTool, ...extraTools, ...sharedTools],
     wraps: [
@@ -708,7 +723,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
               ...(profile === undefined ? {} : { agentFile: profile.source }),
               ...(reference === undefined ? {} : { modelReference: reference }),
-              ...(chosen === undefined || models[0] === chosen.model ? {} : { fallbacks: [{ from: modelKey(models[0] ?? chosen.model), to: modelKey(chosen.model), reason: cooldowns[modelKey(models[0] ?? chosen.model)]?.reason ?? "model cooling" }] }),
+              ...(chosen === undefined || models[0] === chosen.model ? {} : { fallbacks: [{ from: modelKey(models[0] ?? chosen.model), to: modelKey(chosen.model), reason: childModelDiagnostic(cooldowns[modelKey(models[0] ?? chosen.model)]?.reason ?? "model cooling") }] }),
               ...(checkout === undefined ? {} : { worktreeId: checkout.id }) };
           } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
           const agent = state.agents[name];
@@ -725,7 +740,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
           const configuredModels = action === "spawn" ? chainModels(agent.modelReference, chains, configured) : [];
           const exhausted = action === "spawn" && configuredModels.length > 1 && selectChainModel(configuredModels, cooldowns, selected.now?.() ?? Date.now()).exhausted;
           const earliest = exhausted ? selectChainModel(configuredModels, cooldowns, selected.now?.() ?? Date.now()).model : undefined;
-          const initialRetry = earliest === undefined ? undefined : { error: cooldowns[modelKey(earliest)]?.reason ?? "All models are cooling", until: (selected.now?.() ?? Date.now()) + 30_000 };
+          const initialRetry = earliest === undefined ? undefined : { error: childModelDiagnostic(cooldowns[modelKey(earliest)]?.reason ?? "All models are cooling"), until: (selected.now?.() ?? Date.now()) + 30_000 };
           const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(initialRetry === undefined ? {} : { initialRetry }), ...(action === "send" ? { workflowSend: true } : {}), ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
           state.reporters[String(api.taskId)] = reporter;
           await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
@@ -853,7 +868,8 @@ async function childRows(state: ChildRowsState | undefined, questionState: { ite
   const questions = Object.entries(questionState?.items ?? {});
   const children = await Promise.all(Object.entries(agents).map(async ([name, agent]) => {
     const retry = retries.get(agent.conversationId);
-    const fallback = agent.fallbacks?.at(-1);
+    const latestFallback = agent.fallbacks?.at(-1);
+    const fallback = latestFallback === undefined ? undefined : childFallbackDiagnostic(latestFallback);
     return {
       name, conversationId: Number(agent.conversationId), agent: agent.agent, createdAt: agent.createdAt,
       ...await read.activity(agent.conversationId),
@@ -1119,7 +1135,7 @@ function reporterRetry(task: Awaited<ReturnType<Harness["getTask"]>>): ChildRetr
   if (task === undefined || task.state.status === "terminal" || !("checkpoint" in task.state)) return undefined;
   const checkpoint = task.state.checkpoint;
   if (typeof checkpoint !== "object" || checkpoint === null || Array.isArray(checkpoint) || checkpoint["phase"] !== "retry") return undefined;
-  const retry = { attempt: checkpoint["retryAttempt"] ?? checkpoint["attempt"], max: 3, error: checkpoint["error"], until: checkpoint["until"] };
+  const retry = { attempt: checkpoint["retryAttempt"] ?? checkpoint["attempt"], max: 3, error: typeof checkpoint["error"] === "string" ? childModelDiagnostic(checkpoint["error"]) : checkpoint["error"], until: checkpoint["until"] };
   return Check(ChildRetrySchema, retry) ? retry : undefined;
 }
 

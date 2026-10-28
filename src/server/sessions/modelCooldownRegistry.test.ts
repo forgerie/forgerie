@@ -28,3 +28,15 @@ it.each(["not JSON", '{"a/one":{"until":"tomorrow","reason":"quota"}}'])("logs a
     expect(await new ModelCooldownRegistry(path, (error) => { errors.push(error); }).snapshot()).toEqual({ "b/two": { until: 3000, reason: "429" } });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+it("redacts new cooldown reasons and old on-disk reasons before another session can read them", async () => {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-model-cooldowns-"));
+  try {
+    const path = join(root, "cooldowns.json"); const secret = "sk-review-fixture-SECRET";
+    const registry = new ModelCooldownRegistry(path, () => undefined);
+    await registry.mark("a/one", 2000, `Incorrect API key provided: ${secret}`);
+    expect(await readFile(path, "utf8")).not.toContain(secret);
+    await writeFile(path, JSON.stringify({ "a/one": { until: 3000, reason: `Incorrect API key provided: ${secret}` } }));
+    expect(JSON.stringify(await new ModelCooldownRegistry(path, () => undefined).snapshot())).not.toContain(secret);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
