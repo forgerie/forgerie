@@ -98,7 +98,7 @@ Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an o
 
 ### Model chains
 
-Define ordered lists once in the active [Forgerie config](config.md), not in each agent file. A chain holds 1 to 16 entries:
+Define ordered lists once in the active [Forgerie config](config.md), not in each agent file. Edit them in **Settings > Models > Model chains**, or by hand in the file. A chain holds 1 to 16 entries:
 
 ```json
 {
@@ -121,7 +121,11 @@ Complete the assigned task.
 
 `model` in an agent file, the spawn argument, and workflow worker declarations each accept a chain name or `provider/model-id[:thinking]`. A single model is a chain of one. Precedence stays **workflow declaration > spawn argument > agent file > session model**. A workflow's explicit `null` restores the agent-file default and ignores the spawn argument. A chain-reference suffix applies only to entries that have no thinking level of their own. In this example, `openai/gpt-5` gets `medium`; the other two entries keep `high` and `low`.
 
-Names must match `[a-z0-9][a-z0-9-]*`. Every chain needs at least one valid model spec. An invalid map logs a warning and disables all chains, without stopping the daemon. Unknown chain names refuse the spawn and list the known names. Forgerie reads the config again at each spawn or switch. Config edits do not change a model that is still running. This phase has no Settings editor for chains. The old `fallbackModels` agent-file key stays unsupported: files that contain it are skipped.
+Names must match `[a-z0-9][a-z0-9-]*`. Every chain needs at least one valid model spec. An invalid map logs a warning and disables all chains, without stopping the daemon. Unknown chain names refuse the spawn and list the known names. Forgerie reads the config again at each spawn or switch, so a save in Settings applies to the next spawn without a restart. Config edits do not change a model that is still running. The old `fallbackModels` agent-file key stays unsupported: files that contain it are skipped.
+
+In **Settings > Models > Model chains** you can create, rename, and delete a chain. You can add an entry with the model menu, set the entry's own thinking level or leave it on **Inherit**, reorder entries by drag or with the Move up and Move down buttons, and remove an entry. A chain must keep one entry: to remove the last one, delete the chain. Each save sends the whole map. The server checks it with the same rule as the daemon, keeps every other config key, and writes the file through a temporary file. A save made from an older read gets a 409 and changes nothing. Each chain says which agents name it. Settings asks before it renames or deletes a chain that an agent names, because that agent stops finding the chain. If the file's map breaks a rule, the page shows the problem and changes nothing until you fix the file.
+
+In **Settings > Agents**, the agent's **Model** menu lists the chains as their own group, above the models. Each chain shows its entries in order. An agent that names a chain that does not exist shows an error under the field.
 
 Agent files use the pi-subagents format, and older files name pi-subagents tools. `src/server/sessions/durableChildRuntime.ts` translates each one, in one place, and never drops a capability silently:
 
