@@ -58,8 +58,8 @@ describe("Model chains", () => {
     await click(byLabel("GPT-5 mini, change model and thinking level"));
     await click(button("High"));
     expect(saves.at(-1)?.fast).toEqual(["anthropic/claude-haiku-4-5", "openai/gpt-5-mini:high"]);
-    expect(button("Inherit").getAttribute("aria-pressed")).toBe("false");
-    await click(button("Inherit"));
+    expect(button("Agent's level").getAttribute("aria-pressed")).toBe("false");
+    await click(button("Agent's level"));
     expect(saves.at(-1)?.fast).toEqual(["anthropic/claude-haiku-4-5", "openai/gpt-5-mini"]);
     // Every chain keeps its place in the file.
     expect(Object.keys(saves.at(-1)!)).toEqual(["worker", "fast"]);
@@ -203,4 +203,13 @@ describe("Model chains", () => {
     expect(focused.disabled).toBe(false);
   });
 
+  it("offers Move up, Move down and Remove in each row's menu too, for a narrow list", async () => {
+    await render({ start: CHAINS });
+    await click(byLabel("Move or remove GPT-5 mini"));
+    await click([...document.querySelectorAll<HTMLButtonElement>("[role='menuitem']")].find((node) => node.textContent === "Move up")!);
+    expect(saves.at(-1)?.worker).toEqual(["anthropic/claude-opus-5-5:high", "openai/gpt-5-mini:low", "openai/gpt-5"]);
+    await click(byLabel("Move or remove Claude Haiku 4.5"));
+    const remove = [...document.querySelectorAll<HTMLButtonElement>("[role='menuitem']")].find((node) => node.textContent === "Remove")!;
+    expect(remove.disabled).toBe(true);
+  });
 });

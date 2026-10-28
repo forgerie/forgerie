@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, XIcon } from "lucide-react";
+import { MenuButton } from "./MenuButton";
 import "./ReorderList.css";
 
 /** One row of an ordered list. `label` names the row in its controls and in what a screen reader hears after a move. */
@@ -13,11 +14,12 @@ export interface ReorderRow {
 
 type Control = "handle" | "up" | "down" | "remove";
 /**
- * Where focus goes after an action, first choice first: the same control, then its partner when a move to an end
- * turned it off. A focus that does not take moves on to the next.
+ * Where focus goes after an action, first choice first: the same control, its partner when a move to an end turned it
+ * off, then the row's menu when a narrow list draws the buttons there. A focus that does not take, on a control the
+ * list does not draw at this width, moves on to the next.
  */
 const FOCUS_ORDER: Record<Control, readonly string[]> = {
-  up: ["up", "down", "handle"], down: ["down", "up", "handle"], handle: ["handle"], remove: ["remove"],
+  up: ["up", "down", "more", "handle"], down: ["down", "up", "more", "handle"], handle: ["handle"], remove: ["remove", "more"],
 };
 interface Drag { pointer: number; from: number; startY: number; centers: number[]; shift: number }
 
@@ -30,8 +32,8 @@ const dropIndex = (centers: readonly number[], from: number, center: number) =>
  * a handle, its content, and Move up, Move down and Remove named for it. A row moves by its handle (mouse, pen or
  * touch: the rows between make room, and the row lands where it is let go; Escape puts it back), by the move buttons,
  * or by the arrow keys on its handle. Focus follows the moved row, and a live region says where it landed; after a
- * removal it goes to the row that takes its place, else to the foot. Under its least width the row's buttons wrap
- * under its content as one group. With no rows the empty text takes their place.
+ * removal it goes to the row that takes its place, else to the foot. In a narrow list the three buttons move into one
+ * menu per row, so each row keeps one line and its content the room. With no rows the empty text takes their place.
  */
 export function ReorderList({ label, rows, empty, foot, note, disabled = false, removeBlocked, onMove, onRemove }: {
   /** The list's accessible name. */
@@ -61,7 +63,8 @@ export function ReorderList({ label, rows, empty, foot, note, disabled = false, 
     if (!target || !root.current) return;
     const row = target.key === undefined ? undefined : [...(list.current?.children ?? [])].find((node) => node.getAttribute("data-key") === target.key);
     const candidates = [
-      ...FOCUS_ORDER[target.control].map((control) => row?.querySelector<HTMLElement>(`button[data-control="${control}"]:not(:disabled)`)),
+      ...FOCUS_ORDER[target.control].map((control) => row?.querySelector<HTMLElement>(control === "more"
+        ? `[data-control="more"] button:not(:disabled)` : `button[data-control="${control}"]:not(:disabled)`)),
       // A row whose own buttons are all off, such as the last one left, still has its content.
       ...row?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [],
       ...root.current.querySelectorAll<HTMLElement>(".reorder-list-foot button:not(:disabled)"),
@@ -145,6 +148,13 @@ export function ReorderList({ label, rows, empty, foot, note, disabled = false, 
             onKeyDown={(event) => keys(event, index)}><GripVerticalIcon aria-hidden /></button>
           <div className="reorder-list-content">{row.content}</div>
           <span className="reorder-list-actions">
+            <span className="reorder-list-more" data-control="more">
+              <MenuButton label={`Move or remove ${row.label}`} layer="window" commands={[
+                { label: "Move up", icon: <ArrowUpIcon aria-hidden />, disabled: disabled || index === 0, onSelect: () => move(index, index - 1, "up") },
+                { label: "Move down", icon: <ArrowDownIcon aria-hidden />, disabled: disabled || index === rows.length - 1, onSelect: () => move(index, index + 1, "down") },
+                { label: "Remove", icon: <XIcon aria-hidden />, tone: "danger", disabled: disabled || removeBlocked !== undefined, onSelect: () => remove(index) },
+              ]} />
+            </span>
             <button type="button" className="reorder-list-button" data-control="up" disabled={disabled || index === 0}
               aria-label={`Move ${row.label} up`} title="Move up" onClick={() => move(index, index - 1, "up")}><ArrowUpIcon aria-hidden /></button>
             <button type="button" className="reorder-list-button" data-control="down" disabled={disabled || index === rows.length - 1}

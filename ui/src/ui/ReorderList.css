@@ -1,7 +1,7 @@
 /* An ordered list inside a hairline frame. Each row: its place, a handle, the content, then its move and remove
    buttons as one group. The group keeps its size and wraps under the content, whole, when the row is narrow; the
    content gives way first. Nothing keys off the viewport. */
-.reorder-list { display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
+.reorder-list { container: reorder-list / inline-size; display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
 .reorder-list-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none;
   border: var(--hairline) solid var(--line); border-radius: var(--radius-control); }
 .reorder-list-row { position: relative; display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-1);
@@ -15,6 +15,8 @@
   font-variant-numeric: tabular-nums; text-align: end; }
 .reorder-list-content { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); flex: 1 1 9rem; min-inline-size: 0; }
 .reorder-list-actions { display: flex; flex: none; margin-inline-start: auto; }
+/* Wide: three buttons. Narrow: one menu with the same three commands, so the row keeps one line. */
+.reorder-list-more { display: none; }
 /* Every button is drawn at the control size, so neighbouring targets never overlap. */
 .reorder-list-handle, .reorder-list-button { display: grid; place-items: center; flex: none; inline-size: var(--control-size); block-size: var(--control-size);
   padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground);
@@ -38,4 +40,11 @@
 .reorder-list-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-inline-size: 0; }
 .reorder-list-limit { margin: 0; color: var(--muted-foreground); font-size: var(--label-text); line-height: 1.45; }
 .reorder-list-said { position: absolute; inline-size: var(--hairline); block-size: var(--hairline); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Last, so it wins over the buttons' own display. */
+/* The threshold is where the place, the handle, the three buttons and a 9rem model name stop fitting on one line. */
+@container reorder-list (width < 22rem) {
+  .reorder-list-button { display: none; }
+  .reorder-list-more { display: flex; align-items: center; justify-content: center; inline-size: var(--control-size); block-size: var(--control-size); }
+  .reorder-list-content { flex-basis: 0; }
+}
 @media (prefers-reduced-motion: reduce) { .reorder-list-row, .reorder-list-handle, .reorder-list-button { transition: none; } }

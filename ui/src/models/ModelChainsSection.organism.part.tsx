@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { StateChecks } from "@simonwjackson/caliper/checks";
 import type { ModelChains } from "@shared/modelChains";
+import { SettingsFrame } from "../ui/settings/SettingsFrame";
 import { ModelChainsSection } from "./ModelChainsSection";
 import { AGENTS, CHAINS, FULL_CHAIN, LONG_NAME, MODELS, WHERE } from "./fixtures/chains";
 
@@ -33,7 +34,10 @@ function Stateful({ start, agentsUnknown = false, problem = null, locked = false
   start: ModelChains; agentsUnknown?: boolean; problem?: string | null; locked?: boolean;
 }) {
   const [chains, setChains] = useState(start);
-  return <ModelChainsSection chains={chains} problem={problem} models={MODELS} agents={agentsUnknown ? undefined : AGENTS} locked={locked} generation={1} where={WHERE} onChange={setChains} />;
+  // The page's frame gives the section its real column, with the gutters its document placement hangs into.
+  return <SettingsFrame title="Models">
+    <ModelChainsSection chains={chains} problem={problem} models={MODELS} agents={agentsUnknown ? undefined : AGENTS} locked={locked} generation={1} where={WHERE} onChange={setChains} />
+  </SettingsFrame>;
 }
 export default function Chains() { return <Stateful start={CHAINS} />; }
 export function Empty() { return <Stateful start={{}} />; }

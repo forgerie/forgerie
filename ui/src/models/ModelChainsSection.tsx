@@ -42,7 +42,7 @@ const COPY = {
   lastEntry: "A chain keeps at least one model. Delete the chain instead.",
   unavailable: "No signed-in provider offers this model, so runs skip it.",
   nameHint: "Agents name the chain by it: lower-case letters, digits and hyphens.",
-  inherit: { id: "inherit", label: "Inherit" },
+  inherit: { id: "inherit", label: "Agent's level" },
 } as const;
 const plural = (count: number, one: string, many: string) => `${String(count)} ${count === 1 ? one : many}`;
 /** One key per entry that survives a move: the entry, and which of its repeats it is. */
@@ -169,7 +169,7 @@ export function ModelChainsSection({ chains, problem, models, agents, locked, ge
       cancel={{ label: "Cancel", onPress: () => setCreating(undefined) }} onSubmit={create} />
     : <TextButton label="New chain" icon={<PlusIcon aria-hidden />} disabled={frozen} onPress={() => setCreating({})} />;
 
-  return <ListSection title={COPY.title} lede={lede} empty={COPY.empty} foot={foot}
+  return <ListSection title={COPY.title} placement="document" lede={lede} empty={COPY.empty} foot={foot}
     note={<>Saved in Forgerie's config, <code>{where}</code>, as <code>modelChains</code>.</>}>
     {names.map((name) => {
       const saved = Object.hasOwn(chains, name);
