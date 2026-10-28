@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDownIcon } from "lucide-react";
 import { FloatingPanel } from "./FloatingPanel";
 import { OptionRow, type OptionDetail } from "./OptionRow";
 import { useMenu } from "./useMenu";
 import { usePanelPlacement } from "./usePanelPlacement";
+import { usePortalTarget } from "./portalLayer";
 import "./SplitButton.css";
 
 export interface SplitChoice<T extends string> {
@@ -34,7 +36,7 @@ const MENU_CAP = 320;
  * does under its name. Without a setting the chip is the action alone.
  * `compact` draws the action as its icon only; the label stays its name.
  */
-export function SplitButton<T extends string>({ icon, label, title, disabled = false, compact = false, onPress, setting }: {
+export function SplitButton<T extends string>({ icon, label, title, disabled = false, compact = false, onPress, setting, returnFocus }: {
   icon: ReactNode;
   label: string;
   title?: string | undefined;
@@ -42,10 +44,13 @@ export function SplitButton<T extends string>({ icon, label, title, disabled = f
   compact?: boolean;
   onPress: () => void;
   setting?: SplitSetting<T> | undefined;
+  /** Restore focus to a visible control when this button has moved into overflow. */
+  returnFocus?: (() => void) | undefined;
 }) {
-  const menu = useMenu();
-  const { open, setOpen } = menu;
   const panel = useRef<HTMLDivElement>(null);
+  const menu = useMenu(panel);
+  const { open, setOpen } = menu;
+  const target = usePortalTarget();
   const trigger = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const current = setting?.options.find((option) => option.value === setting.value);
@@ -58,9 +63,9 @@ export function SplitButton<T extends string>({ icon, label, title, disabled = f
     (checked ?? rows?.[0])?.focus({ preventScroll: true });
   }, [open]);
   usePanelPlacement(panel, menu.anchor, MENU_CAP, MENU_MIN_REM, open);
-  const close = () => { setOpen(false); trigger.current?.focus({ preventScroll: true }); };
+  const close = () => { setOpen(false); if (returnFocus) returnFocus(); else trigger.current?.focus({ preventScroll: true }); };
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
     const rows = [...(panel.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])];
@@ -76,11 +81,12 @@ export function SplitButton<T extends string>({ icon, label, title, disabled = f
       disabled={setting.disabled} onClick={() => setOpen(!open)}>
       <span>{current?.label ?? setting.value}</span><ChevronDownIcon aria-hidden size={14} />
     </button>}
-    {open && setting && <FloatingPanel ref={panel} role="menu" aria-labelledby={titleId} onKeyDown={move}>
+    {/* Escape the hidden overflow slot as well as any clipping ancestor. */}
+    {open && setting && createPortal(<FloatingPanel ref={panel} role="menu" aria-labelledby={titleId} onKeyDown={move}>
       <p id={titleId} className="split-button-title">{setting.label}</p>
       {setting.options.map((option) => <OptionRow key={option.value} role="menuitemradio" aria-checked={option.value === setting.value}
         name={option.label} details={option.details} current={option.value === setting.value}
         onClick={() => { setting.onChange(option.value); close(); }} />)}
-    </FloatingPanel>}
+    </FloatingPanel>, target)}
   </div>;
 }

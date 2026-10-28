@@ -81,8 +81,8 @@ export function UserMessageAttachments() {
  * "Inline" or "As files" while the draft holds an image that choice decides.
  * `compact` draws the action as a plus, for the chat bar.
  */
-export function AttachButton({ disabled, compact = false, offerSetting = true, settingDisabled = false, title }: {
-  disabled: boolean; compact?: boolean; offerSetting?: boolean; settingDisabled?: boolean; title?: string;
+export function AttachButton({ disabled, compact = false, offerSetting = true, settingDisabled = false, settingReturnFocus, title }: {
+  disabled: boolean; compact?: boolean; offerSetting?: boolean; settingDisabled?: boolean; settingReturnFocus?: (() => void) | undefined; title?: string;
 }) {
   const aui = useAui();
   const editing = useAuiState((s) => s.composer.isEditing);
@@ -93,7 +93,7 @@ export function AttachButton({ disabled, compact = false, offerSetting = true, s
   const label = compact ? "Add attachment" : "Attach";
   return <>
     <SplitButton icon={compact ? <PlusIcon aria-hidden size={16} /> : <PaperclipIcon aria-hidden size={14} />} label={label} title={title ?? label}
-      compact={compact} disabled={disabled || !editing} onPress={() => input.current?.click()}
+      compact={compact} disabled={disabled || !editing} onPress={() => input.current?.click()} returnFocus={settingReturnFocus}
       setting={offerSetting && offered ? { label: DELIVERY_WORDS.setting, value: delivery, options: DELIVERY_WORDS.options,
         disabled: settingDisabled, onChange: (value) => attachmentDelivery.set(value) } : undefined} />
     <input ref={input} type="file" multiple hidden tabIndex={-1} accept={accept === "*" ? undefined : accept} onChange={(event) => {

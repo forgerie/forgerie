@@ -10,7 +10,7 @@ import { ComposerDictation } from "./ComposerDictation";
 import { useAskMode, type AskBinding, type AskControl } from "./useAskMode";
 import { SlashCommands, type CommandBinding } from "./SlashCommands";
 import { AttachButton, AttachmentErrors, ComposerAttachments, useAttachmentDelivery } from "./Attachments";
-import { MAX_ATTACHMENTS, sendsInline } from "../attachments";
+import { MAX_ATTACHMENTS, offersDeliveryChoice, sendsInline } from "../attachments";
 import { DELIVERY_WORDS, attachmentDelivery } from "../attachmentDelivery";
 import { isCompactCommand } from "../compaction";
 import type { CompactionBinding } from "./CompactionNotice";
@@ -97,6 +97,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
   const count = useAuiState((s) => s.composer.attachments.length);
   const tooMany = count > MAX_ATTACHMENTS;
   const delivery = useAttachmentDelivery();
+  const offersDelivery = useAuiState((s) => offersDeliveryChoice(s.composer.attachments));
   const inlineCount = useAuiState((s) => s.composer.attachments.filter((attachment) => sendsInline(attachment, delivery)).length);
   const dictating = useAuiState((s) => s.composer.dictation != null);
   const { state } = useDictation();
@@ -233,6 +234,7 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
   const slot = (name: BarSlot, children: ReactNode) => <span className="composer-slot" data-slot={name}
     data-overflow={shown.has(name) ? undefined : true} aria-hidden={shown.has(name) ? undefined : true}>{children}</span>;
   const attachBlocked = disabled || preparing || !!control?.sending || dialogInput || count >= MAX_ATTACHMENTS;
+  const deliveryDisabled = disabled || preparing || !!control?.sending;
   const press = (name: BarSlot, selector: string) => anchor.current?.querySelector<HTMLElement>(`[data-slot="${name}"] ${selector}`)?.click();
   const focusMore = useCallback(() => anchor.current?.querySelector<HTMLElement>('[data-slot="more"] [aria-haspopup]')?.focus({ preventScroll: true }), []);
   const modelWords = model ? `${modelLabel(model.model)}${model.thinkingLevel && model.model ? `, ${thinkingLabel(model.thinkingLevel)}` : ""}` : "";
@@ -294,13 +296,15 @@ function ComposerBar({ ask, mentions, commands, compaction, shell, sessionKeys, 
       <div className="composer-actions" style={{ "--bar-gap": `${String(plan.gap)}px` }}>
         {context && slot("context", context)}
         {attachments && slot("attach", <AttachButton compact disabled={attachBlocked}
-          offerSetting={!dialogInput} settingDisabled={disabled || preparing || !!control?.sending} />)}
+          offerSetting={!dialogInput} settingDisabled={deliveryDisabled} settingReturnFocus={shown.has("attach") ? undefined : focusMore} />)}
         {handle && slot("handle", <FoldHandle counts={handle.counts} form={plan.handle} folded={handle.folded} fresh={handle.fresh}
           label={handle.label} onToggle={handle.onToggle} />)}
         {model && slot("model", <ModelPicker binding={model} anchor={anchor} open={picker} onOpenChange={setPicker}
           returnFocus={shown.has("model") ? undefined : focusMore} />)}
         {slot("dictate", <ComposerDictation disabled={disabled || preparing || !!control?.sending} />)}
-        {slot("more", <MenuButton label="More input controls" layer="window" commands={plan.overflow.map((name) => moved[name])} />)}
+        {slot("more", <MenuButton label="More input controls" layer="window" commands={plan.overflow.flatMap((name) => name === "attach" && !dialogInput && offersDelivery
+          ? [moved[name], { label: "Attachment delivery…", disabled: deliveryDisabled, onSelect: () => press("attach", ".split-button-setting") }]
+          : [moved[name]])} />)}
         {steering && slot("steer", <button type="button" className="steer-send" disabled={queueBlocked} onClick={() => sendWhileWorking(true)}
           aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
           title="Send now. The agent reads it after its current step. Ctrl or Cmd+Shift+Enter">Steer</button>)}

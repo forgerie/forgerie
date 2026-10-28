@@ -1,17 +1,20 @@
 // @vitest-environment happy-dom
 // The bar's overflow in the one composer: a measured row moves whole controls into More, and More's rows act for them.
 // happy-dom has no layout, so each test gives the row and its controls the widths a browser would.
-import { act } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionModel } from "../contracts";
 import type { ModelBinding } from "./ModelPicker";
 import { Thread } from "./Thread";
 import { useThreadMessages } from "../useThreadMessages";
 import type { ComposerInputElement } from "./ComposerEditor";
+import { createAttachmentAdapter } from "../attachments";
+import { attachmentDelivery } from "../attachmentDelivery";
 
 let root: Root;
+let runtime: AssistantRuntime;
 const opus: SessionModel = { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5" };
 const model: ModelBinding = { model: opus, thinkingLevel: "high", disabled: false, listModels: async () => [opus],
   listThinkingLevels: async () => ["high"], onModel: async () => {}, onThinkingLevel: async () => {} };
@@ -26,12 +29,16 @@ function layout() {
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const name = this.dataset.slot ?? this.dataset.measure;
-    const measured = name === undefined ? undefined : WIDTHS[name];
+    // An image adds the delivery half to Attach. happy-dom cannot measure that wider chip.
+    const measured = name === "attach" && this.querySelector(".split-button-setting") ? 112 : name === undefined ? undefined : WIDTHS[name];
     return measured === undefined ? rect.call(this) : ({ ...rect.call(this).toJSON(), width: measured } as DOMRect);
   });
 }
 function Fixture({ onNew = async () => {} }: { onNew?: (message: AppendMessage) => Promise<void> }) {
-  const runtime = useExternalStoreRuntime({ messages: useThreadMessages([], true), onNew, onCancel: async () => {}, isRunning: true });
+  const [adapter] = useState(() => createAttachmentAdapter(async () => { throw new Error("This fixture must not upload files"); }));
+  useEffect(() => () => adapter.dispose(), [adapter]);
+  runtime = useExternalStoreRuntime({ messages: useThreadMessages([], true), onNew, onCancel: async () => {}, isRunning: true,
+    adapters: { attachments: adapter } });
   return <AssistantRuntimeProvider runtime={runtime}><Thread model={model} working={{ queue: true, steer: true }}
     queue={{ items: [{ kind: "followUp", text: "add tests" }], disabled: false, onClear: () => {} }}
     ledge={{ count: 3, noun: "proposals", keys: ["a", "b", "c"], content: <div data-ledge-band>three</div> }} /></AssistantRuntimeProvider>;
@@ -47,8 +54,9 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   root = createRoot(document.body.appendChild(document.createElement("div")));
   layout();
+  attachmentDelivery.set("inline");
 });
-afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); row = 600; });
+afterEach(async () => { await act(async () => root.unmount()); attachmentDelivery.set("inline"); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); row = 600; });
 
 describe("the bar's overflow", () => {
   it("keeps everything inline with the handle in words while it fits, and draws no More", async () => {
@@ -81,6 +89,43 @@ describe("the bar's overflow", () => {
     await act(async () => menuItem("Steer")!.click());
     expect(sent).toHaveBeenCalledOnce();
     expect(sent.mock.calls[0]![0].steer).toBe(true);
+  });
+
+  it("keeps attachment delivery reachable in More at 280px while running", async () => {
+    row = 280;
+    await render();
+    await act(async () => runtime.thread.composer.addAttachment(new File(["image"], "picture.png", { type: "image/png" })));
+    expect(slot("attach").hasAttribute("data-overflow")).toBe(true);
+    await act(async () => button("More input controls")!.click());
+    expect(menuItem("Attach files")).toBeDefined();
+    expect(menuItem("Attachment delivery…")).toBeDefined();
+    await act(async () => menuItem("Attachment delivery…")!.click());
+    const setting = document.querySelector<HTMLElement>('[role="menu"][aria-labelledby]');
+    expect(setting?.textContent).toContain("Send images");
+    // The setting must escape the hidden, aria-hidden overflow slot, not just mount inside it.
+    expect(setting?.closest('[aria-hidden="true"]')).toBeNull();
+    const asFiles = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith("As files"));
+    await act(async () => asFiles!.click());
+    expect(attachmentDelivery.get()).toBe("folder");
+    expect(document.querySelector('[role="menuitemradio"]')).toBeNull();
+    expect(document.activeElement).toBe(button("More input controls"));
+    // Reopen and dismiss with the keyboard. Focus must not return to hidden Attach.
+    await act(async () => button("More input controls")!.click());
+    await act(async () => menuItem("Attachment delivery…")!.click());
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(document.querySelector('[role="menuitemradio"]')).toBeNull();
+    expect(document.activeElement).toBe(button("More input controls"));
+  });
+
+  it.each([400, 800])("keeps delivery out of More when Attach is inline at %ipx", async (width) => {
+    row = width;
+    await render();
+    await act(async () => runtime.thread.composer.addAttachment(new File(["image"], "picture.png", { type: "image/png" })));
+    expect(slot("attach").hasAttribute("data-overflow")).toBe(false);
+    expect(button("Send images: Inline")).toBeDefined();
+    // At 400px Model still overflows, so check a populated More as well as the wide, empty menu.
+    await act(async () => button("More input controls")!.click());
+    expect(menuItem("Attachment delivery…")).toBeUndefined();
   });
 
   it("never moves the handle or the sends, even when nothing else fits", async () => {
