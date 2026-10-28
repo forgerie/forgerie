@@ -17,7 +17,7 @@ const storage = () => { try { return window.localStorage; } catch { return undef
 
 /** Binding: the only hook that reads or writes the machine catalog. Views get a PickerView. */
 /** A session this browser is starting, before Pi has saved it. */
-export interface StartingSession { id: string; cwd: string; title: string; startedAt: string; sessionId?: string | undefined }
+export interface StartingSession { id: string; cwd: string; title: string; startedAt: string; sessionId?: string | undefined; failed?: boolean | undefined }
 
 /**
  * `titleFilter` narrows the list to sessions whose title holds it, archived ones included,
@@ -48,7 +48,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
     return boardRows({
       sessions: [...state.sessions, ...pending.map((item) => ({ id: item.id, cwd: item.cwd, name: item.title, modified: item.startedAt, starting: true }))],
       statuses: state.statuses, unread: state.unread, locate, now,
-      activities: { ...state.activities, ...Object.fromEntries(pending.map((item) => [item.id, { phase: "active" as const, activeSince: item.startedAt }])) },
+      activities: { ...state.activities, ...Object.fromEntries(pending.map((item) => [item.id, { phase: item.failed ? "error" as const : "active" as const, activeSince: item.startedAt }])) },
     });
   }, [state.sessions, state.statuses, state.activities, state.unread, starting, locate, now]);
   const scopedRows = useMemo(() => options.projectScope === undefined ? rows : rows.filter((row) => options.projectScope?.includes(row.location.projectKey)), [rows, options.projectScope]);

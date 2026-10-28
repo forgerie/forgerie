@@ -35,8 +35,12 @@ try {
     .then((found) => assert.equal(found, true, `no ${selector} "${text}"`));
   async function navigate(scenario, openDestination = false) {
     await cdp.send("Page.navigate", { url: `${origin}/verification/preview.html?scenario=${scenario}` });
+    if (scenario === "new-session-failed-pending") {
+      await until("!!document.querySelector('.session-shell .wt-exit') && [...document.querySelectorAll('button')].some(node => node.textContent === 'Retry setup')");
+      return;
+    }
     if (scenario === "new-session-rapidfire") await sleep(800);
-    await until("document.querySelector('.ns-dialog .model-trigger')?.textContent.includes('Claude Opus 5.5') && document.querySelector('.destination-value')?.textContent === 'forgerie · new-ui-mvp'");
+    await until("document.querySelector('.ns-dialog .model-trigger')?.textContent.includes('Claude Opus 5.5') && document.querySelector('.destination-value')?.textContent === 'forgerie'");
     if (openDestination) {
       await evaluate(cdp, "document.querySelector('.destination-trigger').click()");
       await until("!!document.querySelector('.floating-panel .option-row')");
@@ -86,8 +90,8 @@ try {
   // Pick a workspace, a model, and a level; Send starts the session there.
   await navigate("new-session", true);
   assert.equal(await evaluate(cdp, "document.activeElement?.classList.contains('floating-panel')"), true);
-  await click(".option-row", "forgerie");
-  await until("document.querySelectorAll('.floating-panel .option-row').length === 3");
+  await click(".option-row", "Choose branch or worktree in forgerie");
+  await until("!!document.querySelector('.destination-back')");
   await click(".option-row", "main checkout");
   await until("!document.querySelector('.floating-panel') && document.querySelector('.destination-value').textContent === 'forgerie'");
   await evaluate(cdp, "document.querySelector('.ns-dialog .model-trigger').click()");
@@ -98,14 +102,14 @@ try {
   await pressCombo(cdp, "ctrl+enter");
   await until("!document.querySelector('.ns-dialog')?.open && document.querySelector('.session-shell .ns-status')?.textContent === 'Starting…'");
   assert.equal(await evaluate(cdp, "document.querySelector('.session-shell .message-text')?.textContent"), "Fix the build");
-  assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').disabled || document.querySelector('.ns-dialog .model-trigger').disabled"), true);
+  assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog')"), null);
   await until("!!document.documentElement.dataset.started");
   assert.deepEqual(JSON.parse(await evaluate(cdp, "document.documentElement.dataset.started")), { cwd: "/home/simon/code/sandbox/forgerie", text: "Fix the build" });
   result.flows.startHere = true;
 
   // Escape steps back from workspaces to projects, then closes.
   await navigate("new-session", true);
-  await click(".option-row", "forgerie");
+  await click(".option-row", "Choose branch or worktree in forgerie");
   await until("!!document.querySelector('.destination-back')");
   await pressCombo(cdp, "escape");
   await until("!document.querySelector('.destination-back') && !!document.querySelector('.floating-panel')");
@@ -113,13 +117,30 @@ try {
   await until("!document.querySelector('.floating-panel')");
   result.flows.escape = true;
 
-  // A refused start keeps the message and says why.
+  // A refused start stays on the pending page; recovery requires an explicit action.
   await navigate("new-session-error");
   await type("Fix the build"); await pressCombo(cdp, "ctrl+enter");
   await until("!!document.querySelector('.ns-error')");
   assert.match(await evaluate(cdp, "document.querySelector('.ns-error').textContent"), /The session did not start: Folder not found/);
+  assert.equal(await evaluate(cdp, "document.querySelector('.ns-dialog')"), null);
+  await click("button", "Restore draft");
+  await until("document.querySelector('.ns-dialog')?.open");
   assert.equal(await draft(), "Fix the build");
   result.flows.refusal = true;
+
+  // Failed setup recovery lives on the pending page, not in a new-session tray.
+  await navigate("new-session-failed-pending");
+  await click("button", "Retry setup");
+  await until("[...document.querySelectorAll('button')].some(node => node.textContent === 'Retry setup')");
+  assert.equal(await evaluate(cdp, "!!document.querySelector('.ns-dialog')"), false);
+  await click("button", "Discard worktree…");
+  await until("!!document.querySelector('.wt-dialog .wt-primary:not(:disabled)')");
+  await click(".wt-dialog button", "Discard worktree");
+  await until("!document.querySelector('.wt-dialog') && !document.querySelector('.wt-exit')");
+  await click("button", "Restore draft");
+  await until("document.querySelector('.ns-dialog')?.open");
+  assert.equal(await draft(), "Fix the login form and add regression tests.");
+  result.flows.failedSetupRecovery = true;
 
   // The draft and the open destination panel survive fold, unfold, and rotation.
   await navigate("new-session");
@@ -140,5 +161,5 @@ try {
 } finally {
   cdp?.close(); chrome.kill("SIGTERM"); await sleep(200);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

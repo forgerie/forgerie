@@ -31,7 +31,7 @@
   ".changes-message in ui/ChangesReview.tsx, ui/PullRequestReview.tsx",
   ".changes-write in ui/ChangesReview.tsx, ui/PullRequestReview.tsx",
   ".composer in ui/Composer.tsx, ui/NewSessionDialog.tsx",
-  ".icon-button in NewSession.tsx, ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/Thread.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
+  ".icon-button in ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/Thread.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
   ".markdown-content in ui/MarkdownText.tsx, ui/backlog/BacklogView.tsx",
   ".message in ui/Messages.tsx, ui/PullNoticeRow.tsx",
   ".picker-chevron in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
@@ -46,8 +46,8 @@
   ".picker-more in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   ".picker-time in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   ".plugin-empty in ui/settings/ModelsView.tsx, ui/settings/PluginsView.tsx",
-  ".primary in NewSession.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ConfirmDialog.tsx, ui/DialogLayer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/WorktreeActions.tsx",
-  ".quiet-button in NewSession.tsx, ui/ArchiveNext.tsx, ui/Attachments.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
+  ".primary in ui/ChangesReview.tsx, ui/Composer.tsx, ui/ConfirmDialog.tsx, ui/DialogLayer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/WorktreeActions.tsx",
+  ".quiet-button in ui/ArchiveNext.tsx, ui/Attachments.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/WorktreeActions.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
   ".session-header in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
   ".session-heading in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
   ".session-shell in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
@@ -75,8 +75,8 @@
   ".wt-lead in ui/WorktreeActions.tsx, ui/settings/PluginsView.tsx",
   ".wt-mark in ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
   ".wt-note in ui/WorktreeActions.tsx, ui/settings/PluginsView.tsx",
-  ".wt-primary in NewSession.tsx, ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
-  ".wt-secondary in NewSession.tsx, ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx, ui/WorktreeSetupCard.tsx"
+  ".wt-primary in ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
+  ".wt-secondary in ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx, ui/WorktreeSetupCard.tsx"
  ],
  "class selector in two stylesheets": [
   ".agent-field-hint in ui/settings/models.css, ui/settings/settings.css",
@@ -126,7 +126,7 @@
   "\"bl-text-button\" in ui/backlog/BacklogView.tsx, ui/backlog/GitHubConnect.tsx",
   "\"bl-warning-text\" in ui/backlog/BacklogView.tsx, ui/backlog/GitHubConnect.tsx",
   "\"changes-message\" in ui/ChangesReview.tsx, ui/PullRequestReview.tsx",
-  "\"icon-button quiet-button\" in ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/NewSessionDialog.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
+  "\"icon-button quiet-button\" in ui/ArchiveNext.tsx, ui/ChangesReview.tsx, ui/Composer.tsx, ui/ComposerDictation.tsx, ui/CopyButton.tsx, ui/ImageViewer.tsx, ui/PullRequestReview.tsx, ui/SessionTreeNavigator.tsx, ui/backlog/BacklogCarry.tsx, ui/backlog/BacklogView.tsx",
   "\"markdown-content\" in ui/MarkdownText.tsx, ui/backlog/BacklogView.tsx",
   "\"picker-chevron\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   "\"picker-count\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
@@ -139,7 +139,7 @@
   "\"picker-more\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   "\"picker-time\" in ui/Picker.tsx, ui/backlog/BacklogView.tsx",
   "\"primary changes-write\" in ui/ChangesReview.tsx, ui/PullRequestReview.tsx",
-  "\"primary wt-primary\" in NewSession.tsx, ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
+  "\"primary wt-primary\" in ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
   "\"session-header\" in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
   "\"session-heading\" in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
   "\"session-title\" in ui/SessionFrame.tsx, ui/settings/SettingsFrame.tsx",
@@ -166,7 +166,7 @@
   "\"wt-lead\" in ui/WorktreeActions.tsx, ui/settings/PluginsView.tsx",
   "\"wt-mark\" in ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx",
   "\"wt-note\" in ui/WorktreeActions.tsx, ui/settings/PluginsView.tsx",
-  "\"wt-secondary\" in NewSession.tsx, ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx, ui/WorktreeSetupCard.tsx"
+  "\"wt-secondary\" in ui/ConfirmDialog.tsx, ui/WorktreeActions.tsx, ui/WorktreeSetupCard.tsx"
  ],
  "component reads state": [
   "App.tsx: fetch",
@@ -182,7 +182,6 @@
   "ForgerieSession.tsx: useThreadMessages",
   "NewSession.tsx: fetch",
   "NewSession.tsx: useExternalStoreRuntime",
-  "NewSession.tsx: useSyncExternalStore",
   "NewSession.tsx: useThreadMessages",
   "ui/Attachments.tsx: ComposerPrimitive",
   "ui/Attachments.tsx: MessagePrimitive",
@@ -313,7 +312,7 @@
   "ui/MentionPopover.tsx: MentionPopover, MentionInsertion, MentionResults",
   "ui/Messages.tsx: ResponseCopy, UserMessage, AssistantMessage, SummaryCopy, HistorySummary, SystemMessage",
   "ui/ModelPicker.tsx: ModelPicker, ModelPanel",
-  "ui/NewSessionDialog.tsx: NewSessionDialog, Window, LaunchTray",
+  "ui/NewSessionDialog.tsx: NewSessionDialog, Window",
   "ui/Picker.tsx: PickerRow, RowMenu, PickerToast, Picker",
   "ui/PullRequestReview.tsx: PullRequestOpener, PullRequestRowMark, PullRequestReview, Review, PullStrip, UnlinkRow, LinkForm, PullBody, WatchRow, Checks, CheckRow, LogTail, Reviews, Comments, Comment, MergeFoot",
   "ui/SessionDoor.tsx: SessionDoorsContext, SessionDoorsProvider, SessionDoorCall",
@@ -403,7 +402,6 @@
  ],
  "shape with its own styling": [
   "App.tsx: <div className>",
-  "NewSession.tsx: <button className>",
   "NewSession.tsx: <p className>"
  ],
  "shared space imports a feature": [
@@ -438,7 +436,6 @@
   "ui/ModelPicker.tsx -> ../models/modelPrefs",
   "ui/ModelPicker.tsx -> ../models/modelPrefsApi",
   "ui/NewSessionDialog.tsx -> ../attachments",
-  "ui/NewSessionDialog.tsx -> ../launches",
   "ui/NoteTray.tsx -> ../changes/diffNotes",
   "ui/Picker.tsx -> ../picker/board",
   "ui/Picker.tsx -> ../picker/commands",

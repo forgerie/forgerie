@@ -1,9 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useTriggerPopoverRootContext, useAuiState } from "@assistant-ui/react";
-import { ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, LoaderIcon, XIcon, ZapIcon } from "lucide-react";
-import { setupFailureText, type Launch } from "../launches";
-import type { WorktreeRecord } from "../worktrees/worktreeApi";
+import { ChevronRightIcon, XIcon, ZapIcon } from "lucide-react";
 import type { MentionSource } from "../mentionSource";
 import { MAX_ATTACHMENTS } from "../attachments";
 import { PortalLayerProvider } from "./portalLayer";
@@ -40,20 +38,16 @@ export interface Carry {
   blocked?: boolean | undefined;
 }
 
-export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, tray, setup, carry, onRapidfire, onDiscard, onClose, hidden = false }: {
+export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, carry, onRapidfire, onDiscard, onClose, hidden = false }: {
   hidden?: boolean;
   /** The destination chip and its picker. */
   destination: ReactNode;
   carry?: Carry | undefined;
-  /** A worktree being set up, or one whose setup failed. It takes the progress line's place. */
-  setup?: ReactNode;
   model: ModelBinding;
   mentions: MentionSource;
   commands: CommandBinding;
   rapidfire: boolean;
   phase: StartPhase;
-  /** Sessions started from here in Rapidfire. */
-  tray?: ReactNode;
   onRapidfire: () => void;
   onDiscard: () => void;
   onClose: () => void;
@@ -91,15 +85,15 @@ export function NewSessionDialog({ destination, model, mentions, commands, rapid
     <PortalLayerProvider value={dialog}>
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <Window titleId={titleId} destination={destination} model={model} mentions={mentions} commands={commands}
-          rapidfire={rapidfire} phase={phase} tray={tray} setup={setup} carry={carry} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
+          rapidfire={rapidfire} phase={phase} carry={carry} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </PortalLayerProvider>
   </dialog>, document.body);
 }
 
-function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, tray, setup, carry, onRapidfire, onDiscard, onClose }: {
-  titleId: string; destination: ReactNode; setup?: ReactNode; carry?: Carry | undefined; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
-  rapidfire: boolean; phase: StartPhase; tray?: ReactNode; onRapidfire: () => void; onDiscard: () => void; onClose: () => void;
+function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, carry, onRapidfire, onDiscard, onClose }: {
+  titleId: string; destination: ReactNode; carry?: Carry | undefined; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
+  rapidfire: boolean; phase: StartPhase; onRapidfire: () => void; onDiscard: () => void; onClose: () => void;
 }) {
   const [picker, setPicker] = useState<PickerOpen>();
   const context = useRef<HTMLDivElement>(null);
@@ -164,17 +158,15 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       <ComposerAttachments />
       <AttachmentErrors />
     </ComposerPrimitive.AttachmentDropzone>
-    {tray}
     <div className="ns-chips" role="group" aria-label="What the first message carries">
       <AttachButton disabled={busy} settingDisabled={busy} title={`Attach up to ${MAX_ATTACHMENTS} files`} />
       <button type="button" className="ns-chip" aria-pressed={rapidfire} disabled={busy} onClick={onRapidfire}
-        title={rapidfire ? "Rapidfire: each start runs in the background and this stays open" : "Rapidfire: start several sessions without leaving"}>
+        title={rapidfire ? "Rapidfire: each start opens its pending session" : "Rapidfire: start in background and show progress"}>
         <ZapIcon aria-hidden size={14} />Rapidfire</button>
       <ComposerDictation disabled={busy} />
     </div>
     {carry?.note}
-    {setup ? <div className="ns-setup">{setup}</div>
-      : phase.type === "starting" && phase.progress && <p className="ns-status" role="status">{phase.progress}</p>}
+
     {phase.type === "failed" && <p className="ns-error" role="alert">{phase.message}</p>}
     </div>
     <footer className="ns-foot">
@@ -190,49 +182,4 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
     {(["@", "!@", "#"] as const).map((char) => <MentionPopover key={`${mentions.key}:${char}`}
       source={mentions} char={char} input={input} snapshot={snapshot} enabled={!busy} />)}
   </ComposerPrimitive.Root>;
-}
-
-/** The sessions started from this window, newest first. Each one says how it went and what you can do next. */
-export function LaunchTray<D>({ launches, failedSetups = [], onOpen, onRestore, onInspect, onInspectSetup, onDismiss }: {
-  launches: readonly Launch<D>[];
-  /** Failed worktree setups the server still holds, from this browser or an earlier one. */
-  failedSetups?: readonly WorktreeRecord[] | undefined;
-  onOpen: (launch: Launch<D>) => void;
-  onRestore: (launch: Launch<D>) => void;
-  /** Show a failed start's worktree setup: its steps, log, and what to do next. */
-  onInspect?: ((launch: Launch<D>) => void) | undefined;
-  onInspectSetup?: ((record: WorktreeRecord) => void) | undefined;
-  onDismiss: (launch: Launch<D>) => void;
-}) {
-  if (launches.length === 0 && failedSetups.length === 0) return null;
-  return <section className="ns-tray" aria-label="Sessions started here">
-    <ul>{failedSetups.map((record) => <li key={record.id} className="ns-launch" data-state="failed">
-      <span className="ns-launch-mark" aria-hidden><CircleAlertIcon size={14} /></span>
-      <span className="ns-launch-text">
-        <span className="ns-launch-title">{record.branch}</span>
-        <span className="ns-launch-status">{setupFailureText(record)}</span>
-      </span>
-      {onInspectSetup && <span className="ns-launch-actions"><button type="button" onClick={() => onInspectSetup(record)}>View setup</button></span>}
-    </li>)}{[...launches].reverse().map((launch) => {
-      const failedSetup = launch.state.type === "failed" && launch.worktree?.setup.phase === "failed" && onInspect;
-      const { state } = launch;
-      return <li key={launch.id} className="ns-launch" data-state={state.type}>
-        <span className="ns-launch-mark" aria-hidden>
-          {state.type === "starting" ? <LoaderIcon size={14} /> : state.type === "started" ? <CircleCheckIcon size={14} /> : <CircleAlertIcon size={14} />}
-        </span>
-        <span className="ns-launch-text">
-          <span className="ns-launch-title">{launch.title}</span>
-          <span className="ns-launch-status" role={state.type === "failed" || state.type === "unsent" ? "alert" : "status"}>
-            {state.type === "starting" ? state.progress ?? "Starting…" : state.type === "started" ? "Started" : state.error}</span>
-        </span>
-        <span className="ns-launch-actions">
-          {(state.type === "started" || state.type === "unsent") && <button type="button" onClick={() => onOpen(launch)}>Open</button>}
-          {failedSetup ? <button type="button" onClick={() => onInspect(launch)}>View setup</button>
-            : state.type === "failed" && <button type="button" onClick={() => onRestore(launch)}>Put back</button>}
-          {state.type !== "starting" && <button type="button" className="icon-button quiet-button" aria-label={`Dismiss ${launch.title}`}
-            onClick={() => onDismiss(launch)}><XIcon aria-hidden size={14} /></button>}
-        </span>
-      </li>;
-    })}</ul>
-  </section>;
 }

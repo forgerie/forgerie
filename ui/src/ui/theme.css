@@ -1102,25 +1102,6 @@ summary.trace-line:hover { color: var(--foreground); }
 .ns-discard { min-block-size: var(--control-size); padding-inline: var(--space-2); margin-inline-start: calc(-1 * var(--space-2)); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--text-size); }
 .ns-discard:not(:disabled):hover { color: var(--foreground); background: var(--hover-surface); }
 .ns-start { min-block-size: var(--control-size); padding-inline: clamp(1rem, 4vmin, 1.75rem); border: 0; border-radius: var(--radius-control); font-size: var(--text-size); font-weight: 500; white-space: nowrap; }
-/* Sessions started from here: one line each, the newest first, inside the window. */
-.ns-tray { flex: none; margin: 0 var(--ns-pad) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--tint-surface); }
-.ns-tray ul { margin: 0; padding: var(--space-1); list-style: none; max-block-size: min(9rem, 22dvh); overflow-y: auto; }
-.ns-launch { display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-size); padding-inline: var(--space-2); font-size: var(--small-text); }
-.ns-launch + .ns-launch { border-block-start: 1px solid color-mix(in oklab, var(--foreground) 5%, transparent); }
-.ns-launch-mark { flex: none; display: grid; place-items: center; color: var(--muted-foreground); }
-.ns-launch[data-state="starting"] .ns-launch-mark { color: var(--live); }
-.ns-launch[data-state="starting"] .ns-launch-mark svg { animation: ns-spin 1.2s linear infinite; }
-.ns-launch[data-state="failed"] .ns-launch-mark, .ns-launch[data-state="unsent"] .ns-launch-mark { color: var(--destructive); }
-@keyframes ns-spin { to { rotate: 1turn; } }
-.ns-launch-text { flex: 1; min-inline-size: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); }
-.ns-launch-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ns-launch-status { flex: 1 1 10rem; min-inline-size: 0; color: var(--muted-foreground); overflow-wrap: anywhere; }
-.ns-launch[data-state="failed"] .ns-launch-status, .ns-launch[data-state="unsent"] .ns-launch-status { color: var(--destructive); }
-.ns-launch-actions { flex: none; display: flex; align-items: center; gap: var(--space-1); }
-.ns-launch-actions > button:not(.icon-button) { min-block-size: 2rem; padding-inline: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; font-size: var(--small-text); }
-.ns-launch-actions > button:not(.icon-button):hover { border-color: var(--line-focus); }
-@media (prefers-reduced-motion: reduce) { .ns-launch[data-state="starting"] .ns-launch-mark svg { animation: none; } }
-
 /* Changes review: a tree of the changed files beside one file's diff. The
    tree docks at the left when the review is as wide as the app's docked
    sidebar needs, and is a sheet over the file in every Fold posture, with the

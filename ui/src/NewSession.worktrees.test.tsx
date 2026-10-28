@@ -42,7 +42,7 @@ function harness(outcome: (args: StartArgs) => StartResult | Promise<StartResult
     discard: async () => ({ kind: "discarded", cleanup: { kind: "done" } }),
   };
   let emit: WorktreeListener = () => {};
-  const launches = createLaunchStore<LaunchDraft>(api, { onWorktree: (listener) => { emit = listener; return () => {}; } });
+  const launches = createLaunchStore<LaunchDraft>(api, { setupDraft: () => ({ text: "", attachments: [] }), onWorktree: (listener) => { emit = listener; return () => {}; } });
   return { api, worktrees, launches, starts, emit: (record: WorktreeRecord) => emit(record) };
 }
 const settle = () => act(async () => { for (let index = 0; index < 6; index++) await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -120,7 +120,7 @@ describe("a new session's worktree", () => {
     await render(h);
     expect(options).toHaveBeenCalledTimes(1);
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="specific:p1"]')!);
     expect(options).toHaveBeenCalledTimes(1);
     expect(button("New worktreefrom main")).toBeDefined();
   });
@@ -132,7 +132,7 @@ describe("a new session's worktree", () => {
     h.worktrees.options = (cwd, signal) => cwd === "/code/notes" ? new Promise((done) => { resolve = done; }) : original(cwd, signal);
     await render(h);
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p2"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="specific:p2"]')!);
     expect(document.querySelector('[data-option-id="w3"]')).toBeNull();
     expect(document.querySelector('[aria-label="Workspaces of notes"]')?.textContent).toContain("Loading workspaces");
     await act(async () => resolve({ kind: "git", repo: "/code/notes", defaultBranch: "trunk", defaultCwd: "/code/notes", defaultDestination: "existing-workspace" }));
@@ -146,7 +146,7 @@ describe("a new session's worktree", () => {
     h.api.workspaces = async () => { throw new Error("Workspace list unavailable"); };
     await render(h);
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="specific:p1"]')!);
     expect(document.querySelector('[aria-label="Workspaces of forgerie"]')?.textContent).toContain("Workspaces unavailable: Workspace list unavailable");
     expect(document.querySelector('[data-option-id="w1"]')).toBeNull();
     await click(button("New worktreefrom main"));
@@ -161,7 +161,7 @@ describe("a new session's worktree", () => {
     const onDestination = vi.fn();
     await render(h, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="specific:p1"]')!);
     expect(button("New worktreefrom main")?.getAttribute("aria-current")).not.toBe("true");
     expect(document.querySelector('[data-option-id="w1"]')?.getAttribute("aria-current")).toBe("true");
     await click(button("New worktreefrom main"));
@@ -184,7 +184,7 @@ describe("a new session's worktree", () => {
     const onDestination = vi.fn();
     await render(h, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
-    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="specific:p1"]')!);
     expect(document.querySelector('[data-option-id="w1"]')?.getAttribute("aria-current")).toBe("true");
     await click([...document.querySelectorAll<HTMLButtonElement>(".option-row")].find((row) => row.textContent?.startsWith("feat/ui")));
     expect(label()).toBe("forgerie · feat/ui");
@@ -219,44 +219,24 @@ describe("a new session's worktree", () => {
     expect(h.starts[0]![3]).toMatchObject({ destination: { kind: "existing-workspace" } });
   });
 
-  it("shows setup steps while the worktree is prepared", async () => {
-    let finish!: (result: StartResult) => void;
-    const h = harness(() => new Promise((done) => { finish = done; }));
-    await render(h, { placement: "fresh" });
-    await type("Fix it");
-    await send();
-    const token = (h.starts[0]![3] as { startupToken: string }).startupToken;
-    await act(async () => h.emit(failedRecord({ startupToken: token, setup: { phase: "hook", log: "added 3 packages" } })));
-    expect(document.querySelector(".wt-setup-title")?.textContent).toBe("Preparing worktree");
-    expect([...document.querySelectorAll(".wt-steps li")].map((step) => step.getAttribute("data-state"))).toEqual(["done", "running", "waiting"]);
-    expect(document.querySelector(".wt-log-tail")?.textContent).toBe("added 3 packages");
-    await act(async () => finish({ type: "started", session: { id: "s1", cwd: "/x" } }));
-  });
-
-  it("keeps a failed setup with its exit code and log, and retries it in the same worktree", async () => {
-    const h = harness(([, , , options]) => {
-      h.emit(failedRecord({ startupToken: options?.startupToken }));
-      return { type: "failed", failure: { stage: "start", message: "Post-create hook exited with 1", maybeStarted: true } };
-    });
-    await render(h, { placement: "fresh" });
-    await type("Fix it");
-    await send();
-    expect(document.querySelector(".wt-setup-title")?.textContent).toBe("Worktree setup failed");
-    expect(document.querySelector(".wt-exit")?.textContent).toBe("exit 1");
-    expect(document.querySelector(".wt-log pre")?.textContent).toBe("npm ERR! missing script");
-    // The message is back in the bar for the retry.
-    expect(textarea().value).toBe("Fix it");
-    await click(button("Retry setup"));
-    expect(h.starts[1]![3]).toMatchObject({ setupId: "wt1", destination: { kind: "fresh-worktree" } });
-  });
-
-  it("finds a failed setup from an earlier visit in the server's inventory", async () => {
+  it("recovers failed setup inventory into the session list without putting it in the dialog", async () => {
     const h = harness(undefined, [failedRecord()]);
     await render(h);
-    expect(document.querySelector(".ns-tray")?.textContent).toContain("worktree-post-create exited with 1");
-    await click(button("View setup"));
-    expect(document.querySelector(".wt-setup-title")?.textContent).toBe("Worktree setup failed");
+    expect(document.querySelector(".ns-tray")).toBeNull();
+    expect(document.querySelector(".wt-setup")).toBeNull();
+    expect(h.launches.getSnapshot()).toMatchObject([{ worktree: { id: "wt1" }, state: { type: "failed" } }]);
   });
+
+  it("chooses a project's default without opening its branch list", async () => {
+    const h = harness(); await render(h);
+    await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
+    await click(document.querySelector<HTMLButtonElement>('[data-option-id="p1"]')!);
+    expect(document.querySelector(".floating-panel")).toBeNull();
+    await type("Default project start"); await send();
+    expect(h.starts[0]?.[0]).toBe("/code/forgerie");
+    expect(h.starts[0]?.[3]?.destination).toBeUndefined();
+  });
+
 });
 
 describe("Land and Discard", () => {

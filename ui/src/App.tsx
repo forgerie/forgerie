@@ -17,11 +17,12 @@ import { SessionFrame } from "./ui/SessionFrame";
 import { StatusChip } from "./ui/StatusChip";
 import { StatusDetail } from "./session/StatusDetail";
 import { browserStorage, createDraftStore } from "./draftStore";
+import type { PendingSessionRecovery } from "./app/PendingSession.binding";
 import { NewSession, type LaunchDraft, type LaunchMode, type Placement } from "./NewSession";
 import { createWorktreeApi, type WorktreeApi, type WorktreeRecord } from "./worktrees/worktreeApi";
 import { createDeferredFiles, createNewSessionApi, defaultDestinationCwd, newStartupToken, type NewSessionApi, type Project } from "./newSession";
 import { Toast } from "./ui/Toast";
-import { createLaunchStore, type Launch, type LaunchOutcome, type StartupListener, type WorktreeListener } from "./launches";
+import { createLaunchStore, type Launch, type StartupListener, type WorktreeListener } from "./launches";
 import { newSessionShortcut, searchShortcut } from "./shortcuts";
 import type { SessionSearch } from "./search/useSessionSearch";
 import type { SearchHit } from "./search/searchApi";
@@ -118,7 +119,7 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  */
 export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings, modelChains, newSessions, pendingSession }: {
   /** The launch's read-only transcript, supplied by the app binding, never a server session transport. */
-  pendingSession?: ((launch: Launch<LaunchDraft>) => ReactNode) | undefined;
+  pendingSession?: ((launch: Launch<LaunchDraft>, recovery: PendingSessionRecovery) => ReactNode) | undefined;
   /** Production and fixture launches use the same app-owned lifecycle. */
   newSessions?: { api: NewSessionApi; worktrees: WorktreeApi };
   search?: SessionSearch | undefined; triggers?: TriggersSlot | undefined;
@@ -137,6 +138,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const [commandSelection, setCommandSelection] = useState<{ session: Session; draft?: string; error?: string }>();
   // The new-session dialog: the folder it starts in, over the open session.
   const [composing, setComposing] = useState(readNew);
+  const [composeRestore, setComposeRestore] = useState<Launch<LaunchDraft>>();
   const [composeMode, setComposeMode] = useState<LaunchMode>("switch");
   const [settings, setSettings] = useState(readSettings);
   const [backlog, setBacklog] = useState(readBacklogOrSetup);
@@ -163,16 +165,16 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     return { emit: (record: WorktreeRecord) => { for (const listener of listeners) listener(record); },
       on: (listener: WorktreeListener) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
   });
-  const [launches] = useState(() => createLaunchStore<LaunchDraft>(newSessionApi, { onStartup: startup.on, onWorktree: worktreeEvents.on,
+  const [launches] = useState(() => createLaunchStore<LaunchDraft>(newSessionApi, { onStartup: startup.on, onWorktree: worktreeEvents.on, setupDraft: () => ({ text: "", attachments: [] }),
     findWorktree: async (token, cwd) => (await worktreeApi.list(cwd)).find((record) => record.startupToken === token) }));
   // Files wait here until their session exists, for every window, so "Put back" always finds them.
   const [deferred] = useState(() => createDeferredFiles());
   const launchList = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
-  const starting = useMemo<StartingSession[]>(() => launchList.filter((launch) => launch.state.type === "starting")
+  const starting = useMemo<StartingSession[]>(() => launchList.filter((launch) => launch.state.type === "starting" || launch.state.type === "failed")
     .map((launch) => ({ id: launch.id, cwd: launch.cwd, title: launch.title, startedAt: launch.startedAt,
-      sessionId: launch.state.type === "starting" ? launch.state.sessionId : undefined })), [launchList]);
+      sessionId: launch.state.type === "starting" ? launch.state.sessionId : undefined, failed: launch.state.type === "failed" })), [launchList]);
   // A reload during any start could leave a session without its first message.
-  const inFlight = starting.length > 0;
+  const inFlight = starting.some((item) => !item.failed);
   useEffect(() => {
     if (!inFlight) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -276,31 +278,30 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     if (fromComposer) window.history.replaceState({}, "", url); else window.history.pushState({}, "", url);
     setSelectedId(session.id);
   }, [selectedId]);
-  // Replace the dialog immediately, but keep its binding mounted until the outcome restores or consumes it.
+  // The launch store owns progress and failure after the dialog unmounts.
   const launchOptimistically = useCallback((id: string) => {
-    const composeUrl = window.location.href;
-    const composeHistory = window.history.state;
-    const url = new URL(composeUrl);
+    const url = new URL(window.location.href);
     clearSettings(url);
     for (const param of ["session", "new", "item", "itemScope", "place"]) url.searchParams.delete(param);
     url.searchParams.set("launch", id);
     window.history.replaceState({}, "", url);
-    setSelectedId(undefined);
-    setCommandSelection(undefined);
-    setSelectedLaunch(id);
+    setComposing(undefined); setComposeRestore(undefined); setComposeItem(undefined);
+    setSelectedId(undefined); setCommandSelection(undefined); setSelectedLaunch(id);
     setSettings(undefined); setBacklog(undefined); setTriggerPlace(undefined); setOpen(false);
-    return (outcome: LaunchOutcome) => {
-      // History and deliberate navigation, not completion timing, own the visible page.
-      if (readLaunch() !== id || readNew() !== undefined || readSettings() || readBacklog() || readTriggers()) return false;
-      if (outcome.type === "failed") {
-        window.history.replaceState(composeHistory, "", composeUrl);
-        setSelectedLaunch(undefined);
-        setSelectedId(readSelected());
-        setSettings(readSettings()); setBacklog(readBacklog()); setTriggerPlace(readTriggers());
-      }
-      return true;
-    };
   }, []);
+  const restoreLaunch = (launch: Launch<LaunchDraft>) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("launch");
+    const place = launch.placement.destination?.kind;
+    if (place) url.searchParams.set("place", place === "fresh-worktree" ? "fresh" : "existing"); else url.searchParams.delete("place");
+    const item = launch.placement.item;
+    if (item) url.searchParams.set("item", itemParam(item)); else url.searchParams.delete("item");
+    if (item?.scope) url.searchParams.set("itemScope", item.scope); else url.searchParams.delete("itemScope");
+    url.searchParams.set("new", launch.cwd);
+    window.history.replaceState(DIALOG_ENTRY, "", url);
+    setComposeItem(item ? { ...item, scope: item.scope ?? "mine" } : undefined); setComposeRestore(launch); setComposeKey((key) => key + 1);
+    setComposing(launch.cwd); setSelectedLaunch(undefined);
+  };
   // Returning to a pending history entry after its dialog unmounted resolves that same entry, not a new one.
   useEffect(() => {
     if (!selectedLaunch || composing !== undefined || settings || backlog || triggerPlace) return;
@@ -316,6 +317,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const opening = useRef(false);
   const startNew = useCallback(async (mode: LaunchMode = "switch", item?: BacklogItem) => {
     setOpen(false);
+    setComposeRestore(undefined);
     if (opening.current) return;
     // A backlog item starts at its destination: its own project, or its source's destination project. A source with
     // no destination opens the dialog with no folder. Over an open dialog, it replaces that dialog's destination and item.
@@ -354,6 +356,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     const url = new URL(window.location.href);
     url.searchParams.delete("launch"); setSelectedLaunch(undefined);
     url.searchParams.set("new", cwd);
+    url.searchParams.delete("place");
     window.history.pushState(DIALOG_ENTRY, "", url);
     setComposing(cwd);
   }, [find, recent, backlogScope, newSessionApi]);
@@ -378,8 +381,8 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     if (pending && pending.id === selectedLaunch) { setOpen(false); return; }
     if (!pending) { switchSession(row.session); return; }
     if (pending.sessionId) switchSession({ id: pending.sessionId, cwd: pending.cwd, name: pending.title });
-    else void startNew();
-  }, [starting, selectedLaunch, startNew, switchSession, found, closeFound]);
+    else launchOptimistically(pending.id);
+  }, [starting, selectedLaunch, launchOptimistically, switchSession, found, closeFound]);
   // A hit opens its session at the matched passage. The query and its hits stay for the next look.
   const openSearch = search?.actions.open;
   const openHit = useCallback((hit: SearchHit) => {
@@ -500,11 +503,11 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   const known = !selectedId ? undefined : commandSelection?.session.id === selectedId
     ? { ...picker.find(selectedId), ...commandSelection.session } : picker.find(selectedId);
 
-  // A background start that failed after its window closed must still be seen. The window holds its draft.
-  const orphan = composing === undefined ? launchList.find((launch) => launch.state.type === "failed" || launch.state.type === "unsent") : undefined;
+  // A background failure still needs review. The launch store holds its draft.
+  const orphan = composing === undefined ? launchList.find((launch) => (launch.state.type === "failed" || launch.state.type === "unsent") && launch.id !== selectedLaunch) : undefined;
   const orphanNotice = orphan ? <Toast tone="alert" onDismiss={() => launches.dismiss(orphan.id)}
     message={`“${orphan.title}” ${orphan.state.type === "unsent" ? "started, but its first message may not have reached Pi." : "did not start."}`}
-    action={{ label: "Review", onPress: () => { void startNew(); } }} /> : undefined;
+    action={{ label: "Review", onPress: () => { launchOptimistically(orphan.id); } }} /> : undefined;
   // One message at a time. It shows in the page's toast region, whether the list is open or not.
   const toast = picker.view.toast
     ? <PickerToast toast={picker.view.toast} onUndo={picker.actions.onUndo} onDismiss={picker.actions.onDismissToast} /> : orphanNotice;
@@ -541,7 +544,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   } : undefined;
   const sessionFound = search && found && found.hit.sessionId === selectedId ? foundBinding(found, search.actions) : undefined;
   const dialog = composing === undefined ? null : composing || composeItem
-    ? <NewSession key={composeKey} hidden={selectedLaunch !== undefined} onLaunching={launchOptimistically} cwd={composing} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
+    ? <NewSession key={composeKey} hidden={selectedLaunch !== undefined} onLaunching={launchOptimistically} cwd={composing} initialLaunch={composeRestore} initialPlacement={readPlace()} initialMode={composeMode} api={newSessionApi} worktrees={worktreeApi}
       item={composeItem} backlog={backlogApi} lookSession={picker.look} onItemRemoved={dropComposeItem}
       launches={launches} deferred={deferred} drafts={drafts}
       onDestination={(next, place) => {
@@ -617,7 +620,12 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
       ? <SessionFrame name="New session" status={<StatusChip label="No project" tone="bad" panel={{ title: "No project", children: <p>Forgerie knows no project yet, and this app cannot add one yet.</p> }} />}><div className="thread-empty" /></SessionFrame>
     : selectedLaunch ? (() => {
       const launch = launchList.find((item) => item.id === selectedLaunch);
-      return launch && pendingSession ? pendingSession(launch) : <SessionFrame name={launch?.title ?? "New session"}
+      return launch && pendingSession ? pendingSession(launch, {
+        onRestore: () => restoreLaunch(launch),
+        onRetrySetup: () => { const next = launches.retrySetup(launch.id); if (next) launchOptimistically(next.id); },
+        worktrees: worktreeApi,
+        onDiscarded: () => launches.forgetSetup(launch.id),
+      }) : <SessionFrame name={launch?.title ?? "New session"}
         status={<StatusChip label={launch ? "Starting…" : "Launch unavailable"} tone={launch ? "neutral" : "bad"} />}>
         <div className="thread-empty">{launch?.draft.text}</div></SessionFrame>;
     })()

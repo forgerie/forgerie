@@ -197,7 +197,7 @@ describe("starting a new session", () => {
     await render(script.api, { onDestination });
     await click(document.querySelector<HTMLButtonElement>(".destination-trigger")!);
     const panel = () => document.querySelector<HTMLElement>(".floating-panel")!;
-    await click(button("forgerie", panel()));
+    await click(button("Choose branch or worktree in forgerie…", panel()));
     await click(button("feat/ui", panel()));
     expect(document.querySelector(".floating-panel")).toBeNull();
     expect(document.querySelector(".destination-value")!.textContent).toBe("forgerie · feat/ui");
@@ -211,22 +211,22 @@ describe("starting a new session", () => {
   it("keeps the message and says why when the session did not start", async () => {
     const script = scriptedApi(() => ({ type: "failed", failure: { stage: "start", message: "No such folder", maybeStarted: false } }));
     const onStarted = vi.fn();
-    await render(script.api, { onStarted });
+    const launches = await render(script.api, { onStarted });
     await type("Fix the build");
     await send();
     expect(onStarted).not.toHaveBeenCalled();
-    expect(textarea().value).toBe("Fix the build");
-    expect(error()).toBe("The session did not start: No such folder");
+    expect(dialog()?.open).toBe(false);
+    expect(launches.getSnapshot()).toMatchObject([{ draft: { text: "Fix the build" }, state: { type: "failed", error: "The session did not start: No such folder" } }]);
   });
 
   it("warns that a session may exist when the reply was lost, and never starts again by itself", async () => {
     const script = scriptedApi(() => ({ type: "failed", failure: { stage: "start", message: "Network error.", maybeStarted: true } }));
-    await render(script.api);
+    const launches = await render(script.api);
     await type("hi");
     await send();
-    expect(error()).toMatch(/may have started anyway/u);
+    expect(launches.getSnapshot()[0]?.state).toMatchObject({ type: "failed", error: expect.stringContaining("may have started anyway") });
     expect(script.starts).toHaveLength(1);
-    expect(textarea().value).toBe("hi");
+    expect(launches.getSnapshot()[0]?.draft.text).toBe("hi");
   });
 
   it("opens the session it made when only the first message failed, with the message back in the draft", async () => {
@@ -249,7 +249,7 @@ describe("starting a new session", () => {
     expect(error()).toMatch(/Shell commands need a running session/u);
   });
 
-  it("shows that it is starting, and cannot be closed until the start ends", async () => {
+  it("closes before the delayed start ends", async () => {
     let finish!: (result: StartResult) => void;
     const onClose = vi.fn();
     await render(scriptedApi(() => new Promise((resolve) => { finish = resolve; })).api, { onClose });
@@ -260,7 +260,8 @@ describe("starting a new session", () => {
     expect(document.querySelector(".ns-status")).toBeNull();
     await act(async () => { dialog()!.dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(button("Close new session")?.disabled).toBe(true);
-    expect(onClose).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(dialog()?.open).toBe(false);
     await act(async () => { finish({ type: "started", session: { id: "s", cwd: "/code/forgerie" } }); });
   });
 
@@ -336,31 +337,16 @@ describe("a skill or prompt template as the first message", () => {
 });
 
 describe("Rapidfire", () => {
-  it("starts each session in the background, clears the bar, and lists how each one went", async () => {
-    const replies: ((result: StartResult) => void)[] = [];
-    const script = scriptedApi(() => new Promise((resolve) => { replies.push(resolve); }));
-    const onStarted = vi.fn();
-    await render(script.api, { onStarted });
-    await click(button("Rapidfire"));
-    expect(button("Rapidfire")?.getAttribute("aria-pressed")).toBe("true");
-    await type("First task");
-    await send();
-    await type("Second task");
-    await send();
-    expect(textarea().value).toBe("");
-    expect(script.starts.map((start) => start.text)).toEqual(["First task", "Second task"]);
-    const rows = () => [...document.querySelectorAll(".ns-launch")].map((row) => row.textContent);
-    expect(rows()).toEqual(["Second taskStarting…", "First taskStarting…"]);
-    await act(async () => { replies[0]!({ type: "started", session: { id: "s1", cwd: "/code/forgerie" } }); });
-    await act(async () => { replies[1]!({ type: "failed", failure: { stage: "start", message: "Pi is down.", maybeStarted: false } }); });
-    await settle();
-    expect(onStarted).not.toHaveBeenCalled();
-    expect(rows()[1]).toContain("Started");
-    expect(rows()[0]).toContain("The session did not start: Pi is down.");
-    await click(button("Put back"));
-    expect(textarea().value).toBe("Second task");
-    await click(button("Open"));
-    expect(onStarted).toHaveBeenCalledWith({ id: "s1", cwd: "/code/forgerie" }, undefined);
+  it("closes Rapidfire immediately and keeps failure outside the clean dialog", async () => {
+    let finish!: (result: StartResult) => void;
+    const script = scriptedApi(() => new Promise((resolve) => { finish = resolve; }));
+    const onClose = vi.fn();
+    const launches = await render(script.api, { onClose, mode: "rapidfire" });
+    await type("First task"); await send();
+    expect(onClose).toHaveBeenCalledOnce(); expect(dialog()?.open).toBe(false);
+    expect(document.querySelector(".ns-tray")).toBeNull();
+    await act(async () => finish({ type: "failed", failure: { stage: "start", message: "Pi is down.", maybeStarted: false } }));
+    expect(launches.getSnapshot()).toMatchObject([{ state: { type: "failed" }, draft: { text: "First task" } }]);
   });
 
   it("can open straight into Rapidfire", async () => {

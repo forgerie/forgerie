@@ -86,7 +86,7 @@ try {
   assert.equal(listed.cwd, cwd);
   step("Pi started it with the chosen level, the reply arrived, and the catalog lists it", { thinkingLevel: status.thinkingLevel, model: status.model?.id });
 
-  // Rapidfire: Ctrl+Enter opens the dialog where the reader is; Send starts in the background and keeps it open.
+  // Rapidfire also closes immediately and shows the pending session.
   await evaluate(cdp, "document.activeElement?.blur()");
   await pressCombo(cdp, "ctrl+enter");
   await until("!!document.querySelector('dialog.ns-dialog[open]') && !document.querySelector('.ns-dialog .model-trigger').textContent.startsWith('No model')");
@@ -95,14 +95,12 @@ try {
   await evaluate(cdp, "document.querySelector('.ns-dialog [data-composer-input]').focus()");
   await cdp.send("Input.insertText", { text: "Automated Rapidfire test. Reply with the single word OK." });
   await pressCombo(cdp, "ctrl+enter");
-  await until("document.querySelector('.ns-launch')?.dataset.state === 'starting'", 10_000);
-  const pendingRow = await evaluate(cdp, "!!document.querySelector('.ns-dialog') && document.querySelector('.ns-dialog [data-composer-input]').value === ''");
-  assert.equal(pendingRow, true, "the dialog stayed open with an empty bar");
-  await until("document.querySelector('.ns-launch')?.dataset.state === 'started'", 90_000);
-  assert.equal(await evaluate(cdp, "new URLSearchParams(location.search).get('session')"), id, "Rapidfire moved the reader");
-  rapidId = (await call("/api/sessions/all")).sessions.filter((session) => session.cwd === cwd && session.id !== id).map((session) => session.id)[0];
-  assert.ok(rapidId, "the Rapidfire session is in the catalog");
-  step("Rapidfire started a second session in the background and kept the dialog open", { rapidId });
+  await until("new URLSearchParams(location.search).has('launch')", 10_000);
+  assert.equal(await evaluate(cdp, "!!document.querySelector('dialog.ns-dialog[open]')"), false, "the dialog closed before startup settled");
+  await until("new URLSearchParams(location.search).get('session') && new URLSearchParams(location.search).get('session') !== " + JSON.stringify(id), 90_000);
+  rapidId = await evaluate(cdp, "new URLSearchParams(location.search).get('session')");
+  assert.ok((await call("/api/sessions/all")).sessions.some((session) => session.id === rapidId), "the Rapidfire session is in the catalog");
+  step("Rapidfire closed the dialog, showed progress, and opened the created session", { rapidId });
 
   assert.deepEqual(result.errors, []);
   const output = resolve("verification/local");

@@ -19,6 +19,7 @@ export type LaunchState =
 /** `D` is the draft that comes back to the composer on a failure. */
 export interface Launch<D> {
   id: string; cwd: string; title: string; startedAt: string; state: LaunchState; draft: D;
+  prompt: FirstPrompt; choice: AgentChoice; placement: Placement;
   /** The fresh worktree this start set up, as the server last reported it. */
   worktree?: WorktreeRecord | undefined;
   /** The setup reached the post-create hook, so its step shows. */
@@ -70,6 +71,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
   onWorktree?: ((listener: WorktreeListener) => () => void) | undefined;
   /** Reads a start's worktree after a failure whose live events did not arrive. */
   findWorktree?: ((startupToken: string, cwd: string) => Promise<WorktreeRecord | undefined>) | undefined;
+  setupDraft?: ((record: WorktreeRecord) => D) | undefined;
   now?: () => Date;
 } = {}) {
   let launches: readonly Launch<D>[] = [];
@@ -97,10 +99,10 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
     change(launch.id, { worktree: record, hookSeen,
       ...(launch.state.type === "starting" && progress ? { state: { ...launch.state, progress } } : {}) });
   });
-  return {
+  const store = {
     getSnapshot: () => launches,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    /** Start one session. Never retried: a step that may have worked is reported, not repeated. */
+    /** Start one session. Never automatically retried: a step that may have worked is reported, not repeated. */
     launch(cwd: string, prompt: FirstPrompt, choice: AgentChoice, draft: D, placement: Placement & { worktree?: WorktreeRecord | undefined } = {}): {
       id: string; done: Promise<LaunchOutcome>;
       /** The worktree this start set up, as last reported. Read it before taking the launch out of the list. */
@@ -109,7 +111,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
       const id = newStartupToken();
       const fresh = placement.destination?.kind === "fresh-worktree";
       set([...launches, { id, cwd, title: placement.title ?? launchTitle(prompt.text), startedAt: (options.now?.() ?? new Date()).toISOString(),
-        state: { type: "starting", ...(fresh ? { progress: placement.setupId ? "Retrying worktree setup…" : "Creating worktree…" } : {}) }, draft,
+        state: { type: "starting", ...(fresh ? { progress: placement.setupId ? "Retrying worktree setup…" : "Creating worktree…" } : {}) }, draft, prompt, choice, placement,
         ...(placement.worktree ? { worktree: placement.worktree } : {}) }]);
       const created = (session: Session) => {
         const launch = launches.find((item) => item.id === id);
@@ -132,6 +134,30 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
         }).then((outcome) => { if (launches.some((item) => item.id === id)) patch(id, outcome); return outcome; });
       return { id, done, worktree: () => launches.find((item) => item.id === id)?.worktree };
     },
+    /** Recovery uses the original request and the same failed worktree, never a new worktree. */
+    retrySetup(id: string) {
+      const previous = launches.find((item) => item.id === id);
+      if (previous?.state.type !== "failed" || previous.worktree?.setup.phase !== "failed") return undefined;
+      const next = store.launch(previous.worktree.repo, previous.prompt, previous.choice, previous.draft,
+        { ...previous.placement, destination: { kind: "fresh-worktree" }, setupId: previous.worktree.id, worktree: previous.worktree });
+      store.take(id);
+      return next;
+    },
+    forgetSetup(id: string) {
+      const launch = launches.find((item) => item.id === id);
+      if (launch?.state.type !== "failed") return;
+      change(id, { worktree: undefined, placement: { ...launch.placement, setupId: undefined } });
+    },
+    /** A reload can recover a server-owned setup even though its browser draft is gone. */
+    recoverSetup(record: WorktreeRecord) {
+      if (!options.setupDraft || record.setup.phase !== "failed" || record.sessionId || record.state.kind !== "active"
+        || launches.some((item) => item.worktree?.id === record.id || item.id === record.startupToken)) return;
+      set([...launches, { id: record.startupToken ?? `setup-${record.id}`, cwd: record.repo, title: record.branch,
+        startedAt: record.updatedAt ?? (options.now?.() ?? new Date()).toISOString(),
+        state: { type: "failed", error: setupFailureText(record), maybeStarted: false },
+        draft: options.setupDraft(record), prompt: { text: "" }, choice: {},
+        placement: { destination: { kind: "fresh-worktree" }, setupId: record.id }, worktree: record, hookSeen: record.setup.log !== "" }]);
+    },
     /** Take a launch out of the list, with its draft, to put the draft back in the composer. */
     take(id: string): Launch<D> | undefined {
       const launch = launches.find((item) => item.id === id);
@@ -141,6 +167,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
     dismiss(id: string) { set(launches.filter((item) => item.id !== id || item.state.type === "starting")); },
     dispose() { stopStartup?.(); stopWorktree?.(); listeners.clear(); },
   };
+  return store;
   async function knownSetup(id: string, cwd: string): Promise<WorktreeRecord | undefined> {
     const live = launches.find((item) => item.id === id)?.worktree;
     if (live?.setup.phase === "failed") return live;

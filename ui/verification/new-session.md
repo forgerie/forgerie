@@ -18,15 +18,15 @@ The first version (2026-10-05) was the chat composer on a tab, with no frame. Th
 
 | Part | Behavior |
 | --- | --- |
-| Destination | The tab names where the session starts: the open session's folder, then the newest session's folder, then the first project. "Start in" opens Forgerie's projects with search, then the chosen project's workspaces. The URL keeps `?new=<folder>`, so a reload reopens the dialog in the same place. |
+| Destination | The tab names where the session starts: the open session's folder, then the newest session's folder, then the first project. "Start in" opens projects with search. Selecting a project uses its Git default branch checkout. "Choose branch or worktree in <project>…" opens the optional checkout choice. A fresh dialog does not keep a previous explicit branch choice. The URL keeps `?new=<folder>`, so a reload reopens the dialog in the same place. |
 | First message | The usual composer: `@` files of the destination, `#` models, dictation, and up to 16 attachments. The unsent message and its text survive closing the dialog and a reload, in this browser only. |
 | Files | Small images go with the message. Other files wait in the dialog until the session exists, then the start saves them in the session's folder and names them in the message, as in a running session. |
 | Skills and prompt templates | `/` lists the destination's skills and prompt templates. A first message that starts with one runs it through Pi's prompt-resource route with the identity the folder listed. A `/command` the folder does not list is refused and stays in the bar: built-in commands need a running session. |
 | Model and thinking level | The picker shows Pi's default for the destination. Moving to another folder keeps a chosen model only where that folder offers it. The session starts with exactly what the picker shows. |
-| Send | A normal start closes the dialog and opens the pending session immediately, without waiting for the server. The pending view shows the first message and startup progress. Success opens the created session in the same history entry. If startup fails, the dialog reopens with the original message, attachments, destination, model, and thinking level. Leaving the pending session prevents its completion from moving you back. |
-| Rapidfire | The chip in the bar. Send starts the session in the background, empties the bar, and keeps the dialog open for the next one. A list under the card shows each start: its progress, "Started" with Open, or the failure with Put back, which returns the message and its files to the bar. Starts keep going after the dialog closes. |
-| Session list | A start shows at once as a Working row named by its first line, with no row menu. Once Pi has created the session and listed it, Pi's own row replaces it. Selecting the current pending session keeps its view open. Selecting another start opens its session if it exists, or the dialog. |
-| Background failures | A start that fails after you leave shows a notice over the thread. Review opens the dialog, where Put back restores the message and files. Forward into a failed pending session shows its error, not startup progress. A reload while any start is in flight asks first. |
+| Send | A normal start closes the dialog and opens the pending session immediately, without waiting for the server. The pending view shows the first message and startup progress. Success opens the created session in the same history entry. If startup fails, the pending session keeps its error and a Restore draft action. Recovery preserves the original message, attachments, destination, model, and thinking level. Failed worktree setup offers its log, Retry setup in the same worktree, and Discard worktree. Leaving the pending session prevents its completion from moving you back. |
+| Rapidfire | Send closes the dialog immediately and opens the pending session, just like a normal start. Starts continue after navigation. |
+| Session list | Starts appear before Pi saves them. Failed starts stay in Errored and open their pending view, not the new-session dialog. Successful starts open the created session in the same history entry. |
+| Background failures | A start that fails after you leave shows one notice over the thread. Review opens that pending session with its error and recovery actions. Forward into a failed pending session also shows its error. A reload during a start asks first. Failed server-owned worktree setups are recovered into the session list when their project is read; their browser-only drafts do not survive reload. |
 | Close | Close in the header, Escape, a press on the backdrop, or Back. The draft stays. "Discard draft" clears the text, the files, and the saved copy. |
 
 ## Failures
@@ -35,9 +35,9 @@ Nothing is retried. Each failure says which step failed:
 
 | Failure | What you see |
 | --- | --- |
-| The server rejected the request: a missing field, an unknown model, or an unknown thinking level. | The dialog reopens with "The session did not start: <reason>" and the original input. |
-| Any other failure before the session exists: a lost reply, a 5xx, or a 400 from inside the start. | The dialog reopens with the original input and the reason, then "The session may have started anyway. Check the session list before you try again." |
-| The session started, but its files or first message failed. | The session opens with the message back in its draft and "The session started, but its first message may not have reached Pi". In Rapidfire, its row says so and offers Open. |
+| The server rejected the request: a missing field, an unknown model, or an unknown thinking level. | The pending session shows "The session did not start: <reason>" and Restore draft. |
+| Any other failure before the session exists: a lost reply, a 5xx, or a 400 from inside the start. | The pending session shows the original input and the reason, then "The session may have started anyway. Check the session list before you try again." |
+| The session started, but its files or first message failed. | The session opens with the message back in its draft and "The session started, but its first message may not have reached Pi". This is the same in both modes. |
 | A `!` shell command. | "Shell commands need a running session." Nothing is sent. |
 | A `/command` the folder does not list, or the list could not load. | The reason. Nothing is sent. Retry from the `/` list. |
 | A `/command` sent before the folder's list loaded. | "Still loading. Start again in a moment." Nothing is sent. |
@@ -48,7 +48,7 @@ Nothing is retried. Each failure says which step failed:
 - The composer's pickers mount inside the dialog. A native modal dialog makes the rest of the page inert, so a picker on the page body could not be used.
 - The legacy client also offers other machines as destinations. This client reads only the local machine everywhere, so it cannot open a session it starts elsewhere. Adding a project is still in the legacy client.
 - The "Attachment delivery" choice is the legacy client's "inline or folder" choice, shared with it and with a running session. It decides only images up to 4.5 MiB. Other files, and larger images, always go to `.forgerie/attachments`.
-- Rapidfire in the legacy client allows only the current workspace. Here it follows the tab, because nothing in this client depends on the current workspace.
+- Both launch modes now close on send. The Rapidfire entry point remains available, but no longer keeps a composer open for a batch.
 - Starts in progress live in this browser tab. A reload during a start warns first; after a reload, the list shows the session once Pi saves it.
 
 ## Verification

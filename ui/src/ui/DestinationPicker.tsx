@@ -32,6 +32,7 @@ const PANEL_CAP = 416;
 const PANEL_MIN_REM = 28;
 /** The fresh-worktree choice's id; no workspace id has a colon prefix like this. */
 const FRESH = "fresh:worktree";
+const SPECIFIC = "specific:";
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 function useRead<T>(read: ((signal: AbortSignal) => Promise<T>) | undefined, key: string): Load<T> {
@@ -157,12 +158,15 @@ function DestinationPanel({ id, binding, anchor, trigger, onClose }: {
       : { tone: "status", text: needle ? `No project matches "${query.trim()}".` : "Forgerie knows no projects yet. This app cannot add one yet." };
     const options: OptionItem[] = shownProjects.map((item) => ({ id: item.id, name: item.name, details: [path(item.path)],
       current: binding.cwd === item.path || binding.cwd.startsWith(`${item.path}/`) }));
+    const specific: OptionItem[] = shownProjects.map((item) => ({ id: `${SPECIFIC}${item.id}`, name: `Choose branch or worktree in ${item.name}…` }));
     return <FloatingPanel ref={panel} id={id} role="dialog" tabIndex={-1} onBlur={onBlur} aria-label="Where the session starts" onKeyDown={onKeyDown}>
-      <OptionList ref={list} label="Projects" groups={[{ key: "projects", options }]} status={status}
+      <OptionList ref={list} label="Projects" groups={[{ key: "projects", options }, { key: "specific", options: specific }]} status={status}
         search={{ value: query, onChange: setQuery, label: "Search projects", placeholder: "Search projects" }}
         input={{ type: "focus", onChoose: (projectId) => {
-          const item = shownProjects.find((candidate) => candidate.id === projectId);
+          const explicit = projectId.startsWith(SPECIFIC);
+          const item = shownProjects.find((candidate) => candidate.id === (explicit ? projectId.slice(SPECIFIC.length) : projectId));
           if (!item) return;
+          if (!explicit) { binding.onChoose(item.path, item.name); onClose(true); return; }
           cameFrom.current = item.id; setQuery(""); setStep({ type: "workspaces", project: item });
         } }} />
     </FloatingPanel>;

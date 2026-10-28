@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import { BacklogSettingsView } from "../backlog/BacklogSettings.binding";
 import { createBacklogSettingsApi } from "../backlog/backlogSettingsApi";
 import { App } from "../App";
-import { PendingSession } from "./PendingSession.binding";
+import { PendingSession, type PendingSessionRecovery } from "./PendingSession.binding";
 import type { Launch } from "../launches";
 import type { LaunchDraft } from "../NewSession";
 import { ProjectGroupSettings, useProjectGroups } from "../projectGroups/GroupControls.binding";
@@ -45,7 +45,7 @@ const triggerMemory = createTriggerMemory();
 const triggerListeners = new Set<() => void>();
 const triggerChanges = (listener: () => void) => { triggerListeners.add(listener); return () => { triggerListeners.delete(listener); }; };
 const triggersChanged = () => { for (const listener of triggerListeners) listener(); };
-const pendingSession = (launch: Launch<LaunchDraft>) => <PendingSession launch={launch} />;
+const pendingSession = (launch: Launch<LaunchDraft>, recovery: PendingSessionRecovery) => <PendingSession key={launch.id} launch={launch} recovery={recovery} />;
 const resourceLens: ResourceLensRenderer = ({ id, cwd, onClose }) => <ResourceLens key={id} api={resourceApi} sessionId={id} cwd={cwd} onClose={onClose} />;
 /**
  * The app with project groups (a filter in the session list's menu, a settings page, and related worktrees in each chat's header menu)

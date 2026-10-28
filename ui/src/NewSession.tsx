@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime, type CompleteAttachment } from "@assistant-ui/react";
 import type { Session, SessionModel } from "./contracts";
 import { useThreadMessages } from "./useThreadMessages";
@@ -9,17 +9,14 @@ import type { DraftStore } from "./draftStore";
 import { DestinationPicker } from "./ui/DestinationPicker";
 import type { ModelBinding } from "./ui/ModelPicker";
 import { ImageViewerProvider } from "./ui/ImageViewer";
-import { LaunchTray, NewSessionDialog, type StartPhase } from "./ui/NewSessionDialog";
+import { NewSessionDialog, type StartPhase } from "./ui/NewSessionDialog";
 import { createAttachmentAdapter, promptOf, reusableAttachment } from "./attachments";
 import { createMentionSource } from "./mentionSource";
 import type { CommandCatalog } from "./commands";
-import type { Launch, LaunchOutcome, LaunchStore } from "./launches";
+import type { Launch, LaunchStore } from "./launches";
 import { destinationLabel, keepChoice, thinkingLevelsFor, type AgentChoice, type DeferredFiles, type NewSessionApi, type Project, type PromptResource } from "./newSession";
-import { mergeRecord, type WorktreeApi, type WorktreeOptions, type WorktreeRecord } from "./worktrees/worktreeApi";
+import type { WorktreeApi, WorktreeOptions } from "./worktrees/worktreeApi";
 import { freshLabel } from "./worktrees/worktreeModel";
-import { WorktreeSetupCard } from "./ui/WorktreeSetupCard";
-import { WorktreeDialog } from "./ui/WorktreeActions";
-import { XIcon } from "lucide-react";
 import type { BacklogApi, BacklogClaim, BacklogDetail } from "./backlog/backlogApi";
 import { carryRoute, remoteSource, sameItem, type ItemRef, type SessionLook } from "./backlog/backlogModel";
 import { BacklogCarry, type CarryState } from "./ui/backlog/BacklogCarry";
@@ -31,6 +28,7 @@ export interface LaunchDraft { text: string; attachments: readonly CompleteAttac
 export type LaunchMode = "switch" | "rapidfire";
 /** A fresh worktree, or the chosen folder itself. Only a Git project offers the choice. */
 export type Placement = "fresh" | "existing";
+type Destination = { cwd: string; label?: string; placement?: Placement | undefined; setupId?: string | undefined };
 type Options = { cwd: string; value?: WorktreeOptions | undefined };
 type Phase = { type: "composing"; error?: string } | { type: "starting"; id: string };
 type ItemLoad = { ref: ItemRef; detail?: BacklogDetail | undefined; error?: string | undefined };
@@ -66,16 +64,17 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
 /**
  * Binding: the new-session dialog. The composer takes the first message, its
  * files, and a skill or prompt template; the tab above it names where the
- * session starts. Send starts the session and opens it, or, in Rapidfire,
- * starts it in the background and clears the bar for the next one. Nothing is
- * retried: a step that may have worked is reported, never repeated.
+ * session starts. Send closes the dialog and shows the pending session. Nothing
+ * retries automatically: a step that may have worked is reported, never repeated.
  */
-export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "switch", api, worktrees, launches, deferred, drafts, onStarted, onDestination, onClose,
+export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "switch", initialLaunch, api, worktrees, launches, deferred, drafts, onStarted, onDestination, onClose,
   item: initialItem, backlog, lookSession, onItemRemoved, hidden = false, onLaunching }: {
-  /** Retain every composer choice while its optimistic page is visible, without a modal or focus trap. */
+  /** Hide without a modal or focus trap for hosts that retain this binding. */
   hidden?: boolean;
-  /** Switch-mode only. Return a settlement guard: false leaves the result for background review. */
-  onLaunching?: ((id: string) => (outcome: LaunchOutcome) => boolean) | undefined;
+  /** Show the app-owned pending session before the start settles. */
+  onLaunching?: ((id: string) => void) | undefined;
+  /** Explicit recovery, never a remembered choice for a fresh dialog. */
+  initialLaunch?: Launch<LaunchDraft> | undefined;
   cwd: string; initialMode?: LaunchMode; api: NewSessionApi; launches: LaunchStore<LaunchDraft>; drafts?: DraftStore | undefined;
   /** A backlog item the session takes. Its file leads the first message, and starting claims it. */
   item?: ItemRef | undefined;
@@ -89,7 +88,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   initialPlacement?: Placement | undefined;
   /** Worktree options and failed setups. Absent: every start uses the folder itself, as before worktrees. */
   worktrees?: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard"> | undefined;
-  /** Files held until their session exists. App-wide, so "Put back" in a later window still finds them. */
+  /** Files held until their session exists. App-wide, so draft recovery still finds them. */
   deferred: DeferredFiles;
   /** The author moved the destination. The URL follows, so a reload comes back here. */
   onDestination?: ((cwd: string, placement?: Placement) => void) | undefined;
@@ -97,15 +96,15 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   onStarted: (session: Session, unsent?: { draft: string; error: string }) => void;
   onClose: () => void;
 }) {
-  const [destination, setDestination] = useState<{ cwd: string; label?: string; placement?: Placement | undefined }>({ cwd: initialCwd, placement: initialPlacement });
+  const [destination, setDestination] = useState<Destination>(() => ({
+    cwd: initialCwd,
+    setupId: initialLaunch?.worktree?.setup.phase === "failed" ? initialLaunch.worktree.id : undefined,
+    placement: initialPlacement ?? (initialLaunch?.placement.destination?.kind === "fresh-worktree" ? "fresh"
+      : initialLaunch?.placement.destination ? "existing" : undefined),
+  }));
   const [options, setOptions] = useState<Options>();
-  // Failed setups in this repository, newest first. A reload finds them through the server's inventory.
-  const [failedSetups, setFailedSetups] = useState<{ repo: string; records: WorktreeRecord[] }>();
-  const [inspected, setInspected] = useState<string>();
-  const [discarding, setDiscarding] = useState<WorktreeRecord>();
-  const retry = useRef<WorktreeRecord | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [choice, setChoice] = useState<AgentChoice>({});
+  const [choice, setChoice] = useState<AgentChoice>(initialLaunch?.choice ?? {});
   const [defaults, setDefaults] = useState<Defaults>();
   const [resources, setResources] = useState<{ cwd: string; catalog: CommandCatalog; commands: PromptResource[] }>();
   const [resourceAttempt, setResourceAttempt] = useState(0);
@@ -116,11 +115,10 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const [saved] = useState(() => drafts?.session(NEW_SESSION_DRAFT));
   const [chatDraft] = useState(() => createChatDraft(() => runtimeRef.current?.thread.composer, saved));
-  const started = useSyncExternalStore(launches.subscribe, launches.getSnapshot);
-  const [item, setItem] = useState(backlog ? initialItem : undefined);
+  const [item, setItem] = useState(backlog ? initialLaunch?.placement.item ?? initialItem : undefined);
   const [itemLoad, setItemLoad] = useState<ItemLoad>();
   // The claim that beat this start. The item stays, so the author can see who holds it.
-  const [taken, setTaken] = useState<BacklogClaim>();
+  const [taken, setTaken] = useState<BacklogClaim | undefined>(initialLaunch?.state.type === "failed" ? initialLaunch.state.taken : undefined);
   useEffect(() => {
     if (!item || !backlog) return;
     const controller = new AbortController();
@@ -162,15 +160,10 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     if (!worktrees || !repo) return;
     const controller = new AbortController();
     worktrees.list(repo, controller.signal).then((records) => {
-      if (controller.signal.aborted) return;
-      setFailedSetups({ repo, records: records.filter((record) => record.setup.phase === "failed" && !record.sessionId && record.state.kind === "active")
-        .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")) });
-    }, () => { /* The inventory is a convenience; a start still works without it. */ });
+      if (!controller.signal.aborted) for (const record of records) launches.recoverSetup(record);
+    }, () => { /* Inventory failure does not block a start. */ });
     return () => controller.abort();
-  }, [worktrees, repo]);
-  // A switch-mode start can outlive this dialog (Back, a reload). Its result must not pull the reader away.
-  const alive = useRef(true);
-  useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  }, [worktrees, repo, launches]);
   useEffect(() => () => attachments.dispose(), [attachments]);
 
   useEffect(() => {
@@ -206,7 +199,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   const model = choice.model ?? known?.model;
   const thinkingLevel = choice.thinkingLevel ?? known?.thinkingLevel;
   const canSend = defaults?.cwd === cwd && (!worktrees || options?.cwd === destination.cwd) && !itemBlocks;
-  const [restoring, setRestoring] = useState<LaunchDraft>();
+  const [restoring, setRestoring] = useState<LaunchDraft | undefined>(initialLaunch?.draft);
   const putBack = useCallback((draft: LaunchDraft) => { setRestoring(draft); }, []);
   const onNew = useCallback(async (message: AppendMessage) => {
     const authored = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
@@ -237,38 +230,22 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     // Start with exactly what the bar shows. Pi's own default for a create can
     // differ from the default its model list reports for the same folder.
     // A retry sends this message into the worktree whose setup failed, instead of making another.
-    const retrying = retry.current;
-    retry.current = undefined;
+    const retrying = initialLaunch?.worktree?.id === destination.setupId ? initialLaunch?.worktree : undefined;
     const site = retrying ? { destination: { kind: "fresh-worktree" as const }, setupId: retrying.id, worktree: retrying }
       : destination.placement !== undefined || where?.kind === "non-git"
         ? { destination: { kind: destination.placement === "fresh" ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
     const placement = item ? { ...site, item, ...(itemTitle ? { title: itemTitle } : {}) } : site;
-    if (retrying) { setInspected(undefined); setFailedSetups((current) => current && { ...current, records: current.records.filter((record) => record.id !== retrying.id) }); }
     const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft, placement);
-    // One item goes to one session. In Rapidfire the bar clears for the next start, so the item leaves with this one.
-    if (mode === "rapidfire") { if (item) removeItem(); return; }
+    if (initialLaunch) launches.take(initialLaunch.id);
     setPhase({ type: "starting", id: launch.id });
-    const settleLaunch = onLaunching?.(launch.id);
+    // Both modes show progress in the app-owned pending page, never in this window.
+    onLaunching?.(launch.id);
+    if (onLaunching) return;
+    onClose();
     const outcome = await launch.done;
-    const failedSetup = launch.worktree();
-    // The window closed while it started (Back, the row, a reload): the start stays in the list,
-    // so the app's notice says how it went and "Put back" still has its files. A success needs nothing.
-    if (!alive.current || (settleLaunch && !settleLaunch(outcome))) { if (outcome.type === "started" && !settleLaunch) launches.take(launch.id); return; }
-    launches.take(launch.id);
-    if (outcome.type === "started") { onStarted(outcome.session); return; }
-    if (outcome.type === "unsent") { onStarted(outcome.session, { draft: typed, error: outcome.error }); return; }
-    // Another session took the item first. Its card says so and offers the way on; the words go back.
-    if (outcome.taken) { setTaken(outcome.taken); setPhase({ type: "composing" }); void putBack(draft); return; }
-    // A failed setup keeps its card, with its log and what to do next, instead of a line of text.
-    if (failedSetup?.setup.phase === "failed") {
-      setFailedSetups((current) => ({ repo: failedSetup.repo, records: [failedSetup, ...(current?.repo === failedSetup.repo ? current.records.filter((item) => item.id !== failedSetup.id) : [])] }));
-      setInspected(failedSetup.id);
-      setPhase({ type: "composing" });
-      void putBack(draft);
-      return;
-    }
-    refuse(outcome.error);
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, mode, onStarted, onLaunching, putBack, saved, where, destination.placement, item, itemTitle, canSend, removeItem]);
+    if (outcome.type === "started") { launches.take(launch.id); onStarted(outcome.session); }
+    if (outcome.type === "unsent") { launches.take(launch.id); onStarted(outcome.session, { draft: typed, error: outcome.error }); }
+  }, [deferred, resources, cwd, launches, model, thinkingLevel, onStarted, onLaunching, onClose, initialLaunch, putBack, where, destination.placement, destination.setupId, item, itemTitle, canSend]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({
@@ -307,36 +284,15 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     `/api/models?${new URLSearchParams({ cwd })}`), [cwd]);
   const label = !cwd ? "Choose a project" : fresh ? freshLabel(destinationLabel(git.repo, projects), git)
     : defaultBranch && cwd !== git.repo ? `${destinationLabel(git.repo, projects)} · ${git.defaultBranch}` : destination.label ?? destinationLabel(cwd, projects);
-  const current = phase.type === "starting" ? started.find((item) => item.id === phase.id) : undefined;
-  const progress = current?.state;
-  const view: StartPhase = phase.type === "starting"
-    ? { type: "starting", progress: progress?.type === "starting" ? progress.progress : undefined }
+  const view: StartPhase = phase.type === "starting" ? { type: "starting" }
     : phase.error ? { type: "failed", message: phase.error } : { type: "ready" };
-  // What the card shows: the setup of the start in progress, or a failed setup the reader is looking at.
-  const failedList = failedSetups && failedSetups.repo === repo ? failedSetups.records : [];
-  const shown = phase.type === "starting" && !onLaunching ? current?.worktree && { record: current.worktree, hookSeen: current.hookSeen === true }
-    : inspected ? (() => { const record = failedList.find((item) => item.id === inspected); return record && { record, hookSeen: record.setup.log !== "" }; })() : undefined;
-  const setupCard = shown ? <WorktreeSetupCard setup={shown.record.setup} hookSeen={shown.hookSeen} branch={shown.record.branch}
-    actions={shown.record.setup.phase === "failed" && phase.type !== "starting" ? <>
-      <button type="button" className="wt-secondary" onClick={() => setDiscarding(shown.record)}>Discard worktree…</button>
-      <button type="button" className="primary wt-primary" onClick={() => { retry.current = shown.record; void runtimeRef.current?.thread.composer.send(); }}
-        title="Run the setup again in the same worktree, then start the session with the message above">Retry setup</button>
-      <button type="button" className="icon-button quiet-button wt-dismiss" aria-label="Hide this setup" onClick={() => setInspected(undefined)}>
-        <XIcon aria-hidden size={16} /></button>
-    </> : undefined} /> : undefined;
-  const open = (launch: Launch<LaunchDraft>) => {
-    const { state } = launch;
-    if (state.type !== "started" && state.type !== "unsent") return;
-    launches.take(launch.id);
-    onStarted(state.session, state.type === "unsent" ? { draft: launch.draft.text, error: state.error } : undefined);
-  };
   // Clears the bar and its files. The saved draft follows the bar, so it clears too.
   const discard = () => { setPhase({ type: "composing" }); void runtimeRef.current?.thread.composer.reset(); };
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <DictationProvider adapter={dictation}>
       <ImageViewerProvider>
-        <NewSessionDialog hidden={hidden} carry={carry ? {
+        <NewSessionDialog hidden={hidden || starting} carry={carry ? {
             card: <BacklogCarry state={carry} onRemove={removeItem} />,
             note: carry.type === "ready" ? <p className="bl-note">Starting gives this item to the new session until you archive it.</p> : undefined,
             placeholder: "Add anything the item does not say, or start with the item as written…",
@@ -346,7 +302,6 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
           phase={view} rapidfire={mode === "rapidfire"} onRapidfire={() => setMode(mode === "rapidfire" ? "switch" : "rapidfire")}
           onDiscard={discard} onClose={onClose} model={modelBinding} mentions={mentions}
           commands={{ catalog: resources?.cwd === cwd ? resources.catalog : { type: "loading" }, onRetry: () => setResourceAttempt((n) => n + 1) }}
-          setup={setupCard}
           destination={<DestinationPicker binding={{
             cwd, label, disabled: starting, placement: worktrees ? (fresh ? "fresh" : "existing") : undefined,
             listProjects: (signal) => api.projects(signal),
@@ -355,30 +310,10 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
               where && (path === destination.cwd || path === git?.repo) ? Promise.resolve(where) : worktrees.options(path, signal) } : {}),
             onChoose: (next, nextLabel, placement) => {
               setDestination({ cwd: next, ...(placement === "fresh" ? {} : { label: nextLabel }), placement });
-              setInspected(undefined);
               if (placement) onDestination?.(next, placement); else onDestination?.(next);
             },
           }} />}
-          tray={<LaunchTray launches={started.filter((launch) => phase.type !== "starting" || launch.id !== phase.id)} onOpen={open}
-            onRestore={(launch) => { const taken = launches.take(launch.id); if (taken) void putBack(taken.draft); }}
-            onInspect={(launch) => {
-              const record = launch.worktree;
-              if (!record) return;
-              const taken = launches.take(launch.id);
-              setFailedSetups((list) => ({ repo: record.repo, records: [record, ...(list?.repo === record.repo ? list.records.filter((item) => item.id !== record.id) : [])] }));
-              setInspected(record.id);
-              if (taken) void putBack(taken.draft);
-            }}
-            failedSetups={failedList.filter((record) => record.id !== inspected && !started.some((launch) => launch.worktree?.id === record.id))}
-            onInspectSetup={(record) => setInspected(record.id)}
-            onDismiss={(launch) => launches.dismiss(launch.id)} />} />
-        {discarding && worktrees && <WorktreeDialog command="discard" info={mergeRecord(undefined, discarding)} api={worktrees}
-          onDone={(result) => {
-            if (result.kind !== "discarded") return;
-            setFailedSetups((list) => list && { ...list, records: list.records.filter((item) => item.id !== discarding.id) });
-            setInspected(undefined);
-          }}
-          onClose={() => setDiscarding(undefined)} />}
+          />
       </ImageViewerProvider>
     </DictationProvider>
   </AssistantRuntimeProvider>;

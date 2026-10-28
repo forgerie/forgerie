@@ -103,26 +103,23 @@ describe("a new session with a backlog item", () => {
     expect(h.starts[0]![3]).toMatchObject({ item: { projectId: "p1", itemId: "01A" } });
   });
 
-  it("when another session took the item first: names it, keeps the words, and offers the two ways on", async () => {
+  it("keeps a raced backlog claim visible in the launch and restores the claimed-item recovery", async () => {
     const taken: StartFailure = { stage: "start", message: "Backlog item is already claimed", maybeStarted: false, taken: held };
     const h = harness({ outcome: () => ({ type: "failed", failure: taken }) });
-    const opened: Session[] = [];
-    let removed = 0;
-    await render(h, { onStarted: (session) => opened.push(session), onItemRemoved: () => { removed += 1; } });
-    await type("Keep nested runs out of the inbox.");
-    await send();
+    await render(h); await type("Keep nested runs out of the inbox."); await send();
+    const launch = h.launches.getSnapshot()[0]!;
+    expect(launch.state).toMatchObject({ type: "failed", taken: held, error: expect.stringContaining("Another session took this item first") });
+    expect(document.querySelector<HTMLDialogElement>(".ns-dialog")?.open).toBe(false);
+    await act(async () => root.render(<NewSession key="restore" initialLaunch={launch} cwd={launch.cwd} api={h.api} launches={h.launches}
+      deferred={createDeferredFiles()} backlog={h.backlog} lookSession={() => ({ state: "working", name: "Atomic deploys", time: "41m" })}
+      onStarted={() => {}} onClose={() => {}} />));
+    await settle();
     expect(document.querySelector(".bl-refusal")!.textContent).toContain("Atomic deploys took this item first");
-    expect(document.querySelector(".bl-carry-where")!.textContent).toBe("Taken by Atomic deploys 41m ago");
     expect(textarea().value).toBe("Keep nested runs out of the inbox.");
     expect(button("Start session")!.disabled).toBe(true);
-    await click(button("Open Atomic deploys"));
-    expect(opened).toEqual([{ id: "s-held", cwd: "/code/forgerie/.worktree/s-9" }]);
     await click(button("Start without the item"));
-    expect(removed).toBe(1);
-    expect(document.querySelector(".bl-carry")).toBeNull();
     expect(button("Start session")!.disabled).toBe(false);
-    await send();
-    expect(h.starts[1]![3]).not.toHaveProperty("item");
+    await send(); expect(h.starts[1]![3]).not.toHaveProperty("item");
   });
 
   it("refuses up front an item that is blocked, and says why", async () => {

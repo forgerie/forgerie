@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createLaunchStore, launchTitle, type StartupListener } from "./launches";
+import type { WorktreeRecord } from "./worktrees/worktreeApi";
 import type { NewSessionApi } from "./newSession";
 
 type Start = NewSessionApi["start"];
@@ -32,7 +33,7 @@ describe("launches", () => {
     // Once Pi creates it, the session id is known, so the list can show Pi's row instead of the placeholder.
     calls[0]![3]!.onCreated!({ id: "s1", cwd: "/w" });
     expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", sessionId: "s1" });
-    expect(store.getSnapshot()).toEqual([{ id, cwd: "/w", title: "Fix the build", startedAt: "2026-10-05T12:00:00.000Z", state: { type: "starting", sessionId: "s1" }, draft: "draft" }]);
+    expect(store.getSnapshot()).toMatchObject([{ id, cwd: "/w", title: "Fix the build", startedAt: "2026-10-05T12:00:00.000Z", state: { type: "starting", sessionId: "s1" }, draft: "draft" }]);
     emit({ startupToken: id, activity: { phase: "active", label: "Refreshing provider models" } });
     emit({ startupToken: "someone-else", activity: { phase: "active", label: "Other" } });
     expect(store.getSnapshot()[0]!.state).toEqual({ type: "starting", sessionId: "s1", progress: "Refreshing provider models" });
@@ -65,5 +66,39 @@ describe("launches", () => {
     const { id } = store.launch("/w", { text: "hi" }, {}, "");
     store.dismiss(id);
     expect(store.getSnapshot()).toHaveLength(1);
+  });
+});
+
+describe("failed setup recovery outside the dialog", () => {
+  const failed: WorktreeRecord = { id: "wt1", repo: "/repo", path: "/repo/.worktree/task", branch: "task", defaultBranch: "main",
+    setup: { phase: "failed", exitCode: 7, log: "Dependency install failed" }, state: { kind: "active" }, cleanup: { kind: "pending" } };
+
+  it("retries the same setup with the original prompt, files, model, thinking and backlog item", async () => {
+    const calls: Parameters<Start>[] = [];
+    const store = createLaunchStore<string>({ start: async (...args) => { calls.push(args);
+      return { type: "failed", failure: { stage: "start", message: "Setup failed", maybeStarted: true } };
+    } });
+    const prompt = { text: "Fix it", files: [{ kind: "file" as const, name: "notes.txt", mimeType: "text/plain", data: "bm90ZXM=" }] };
+    const choice = { model: { provider: "p", id: "opus" }, thinkingLevel: "high" };
+    const first = store.launch("/repo", prompt, choice, "original draft", {
+      destination: { kind: "fresh-worktree" }, item: { projectId: "p1", itemId: "a" }, worktree: failed,
+    });
+    await first.done;
+    const retry = store.retrySetup(first.id)!;
+    await retry.done;
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject(["/repo", prompt, choice, { setupId: "wt1", destination: { kind: "fresh-worktree" }, item: { projectId: "p1", itemId: "a" } }]);
+    expect(store.getSnapshot()).toMatchObject([{ id: retry.id, draft: "original draft", state: { type: "failed", maybeStarted: false } }]);
+  });
+
+  it("recovers inventory once and drops discarded setup identity without losing its draft", () => {
+    const store = createLaunchStore<string>({ start: async () => ({ type: "started", session: { id: "s1", cwd: "/repo" } }) }, { setupDraft: () => "recovered" });
+    store.recoverSetup(failed); store.recoverSetup(failed);
+    expect(store.getSnapshot()).toHaveLength(1);
+    const launch = store.getSnapshot()[0]!;
+    expect(launch.state).toMatchObject({ type: "failed", error: expect.stringContaining("exited with 7") });
+    store.forgetSetup(launch.id);
+    expect(store.getSnapshot()[0]).toMatchObject({ draft: "recovered", worktree: undefined, placement: { setupId: undefined } });
+    expect(store.retrySetup(launch.id)).toBeUndefined();
   });
 });

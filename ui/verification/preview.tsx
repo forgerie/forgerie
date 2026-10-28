@@ -23,7 +23,8 @@ import { createMentionSource, type MentionSource } from "../src/mentionSource";
 import "../src/ui/theme.css";
 import { NewSession, type LaunchDraft } from "../src/NewSession";
 import { PendingSession } from "../src/app/PendingSession.binding";
-import { createLaunchStore } from "../src/launches";
+import type { WorktreeApi, WorktreeRecord } from "../src/worktrees/worktreeApi";
+import { createLaunchStore, type Launch } from "../src/launches";
 import { createDeferredFiles, type NewSessionApi, type Project, type Workspace } from "../src/newSession";
 import { createAttachmentAdapter } from "../src/attachments";
 import { attachmentDelivery } from "../src/attachmentDelivery";
@@ -913,10 +914,22 @@ const previewNewApi: NewSessionApi = {
     const text = typeof first === "string" ? first : first.text;
     const slow = scenario === "new-session-slow" || scenario === "new-session-rapidfire" && text.startsWith("Second");
     await new Promise((resolve) => setTimeout(resolve, slow ? 60_000 : 300));
-    if (scenario === "new-session-error" || scenario === "new-session-rapidfire" && text.startsWith("Third")) return { type: "failed", failure: { stage: "start", message: `Folder not found: ${cwd}`, maybeStarted: false } };
+    if (scenario === "new-session-failed-pending" || scenario === "new-session-error" || scenario === "new-session-rapidfire" && text.startsWith("Third")) return { type: "failed", failure: { stage: "start", message: `Folder not found: ${cwd}`, maybeStarted: false } };
     document.documentElement.dataset["started"] = JSON.stringify({ cwd, text });
     return { type: "started", session: { id: "preview-new", cwd } };
   },
+};
+const previewFailedSetup: WorktreeRecord = {
+  id: "failed-preview", repo: previewProjects[0]!.path, path: `${previewProjects[0]!.path}/.worktree/fix-login`,
+  branch: "fix-login", defaultBranch: "main", state: { kind: "active" }, cleanup: { kind: "pending" },
+  setup: { phase: "failed", exitCode: 7, log: "Installing dependencies\nnpm ERR! Dependency install failed" },
+};
+const previewWorktreeApi: Pick<WorktreeApi, "options" | "list" | "land" | "discardPreview" | "discard"> = {
+  options: async () => ({ kind: "git", repo: previewProjects[0]!.path, defaultBranch: "main", defaultCwd: previewProjects[0]!.path, defaultDestination: "existing-workspace" }),
+  list: async () => [],
+  land: async () => ({ kind: "landed", sha: "abc", cleanup: { kind: "done" } }),
+  discardPreview: async () => ({ worktreeId: previewFailedSetup.id, branch: "fix-login", defaultBranch: "main", commits: [], dirtyFiles: [], confirmationToken: "preview" }),
+  discard: async () => ({ kind: "discarded", cleanup: { kind: "done" } }),
 };
 const previewLaunches = createLaunchStore<LaunchDraft>(previewNewApi);
 const previewDeferred = createDeferredFiles();
@@ -952,6 +965,7 @@ async function dropFiles(name: string) {
 }
 /** The dialog over a session, as it opens in the app. No network. */
 function NewSessionPreview() {
+  const [restoring, setRestoring] = useState<Launch<LaunchDraft>>();
   const [started, setStarted] = useState<string>();
   const [pending, setPending] = useState<string>();
   const launches = useSyncExternalStore(previewLaunches.subscribe, previewLaunches.getSnapshot);
@@ -964,7 +978,16 @@ function NewSessionPreview() {
     if (scenario.startsWith("new-session-attach")) timers.push(setTimeout(() => void dropFiles(scenario), 300));
     // The menu scenario opens the attach chip's setting once the image is in.
     if (scenario === "new-session-attach-menu") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"][aria-label^="Send images"]')?.click(), 1200));
-    if (scenario === "new-session-destination") timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
+    if (scenario === "new-session-destination") {
+      timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>(".destination-trigger")?.click(), 400));
+      timers.push(setTimeout(() => document.querySelector<HTMLButtonElement>('[data-option-id="specific:p1"]')?.click(), 700));
+    }
+    if (scenario === "new-session-failed-pending") {
+      const launch = previewLaunches.launch(previewProjects[0]!.path, { text: "Fix the login form and add regression tests." }, {},
+        { text: "Fix the login form and add regression tests.", attachments: [] },
+        { destination: { kind: "fresh-worktree" }, worktree: previewFailedSetup });
+      setPending(launch.id); setOpen(false);
+    }
     if (scenario === "new-session-rapidfire") {
       for (const [index, text] of ["First: fix the login form", "Second: add the regression tests", "Third: update the changelog"].entries()) {
         timers.push(setTimeout(() => previewLaunches.launch("/home/simon/code/sandbox/forgerie", { text }, {}, { text, attachments: [] }), 200 + index * 50));
@@ -973,10 +996,14 @@ function NewSessionPreview() {
     return () => timers.forEach(clearTimeout);
   }, []);
   return <AssistantRuntimeProvider runtime={runtime}>
-    {launch ? <PendingSession launch={launch} /> : <SessionFrame name={started ?? "Session client"} status={<StatusChip label="Connected" tone="quiet" />}><Thread /></SessionFrame>}
-    {open && <NewSession hidden={pending !== undefined} onLaunching={(id) => {
+    {launch ? <PendingSession key={launch.id} launch={launch} recovery={{
+      onRestore: () => { setRestoring(launch); setPending(undefined); setOpen(true); },
+      onRetrySetup: () => { const next = previewLaunches.retrySetup(launch.id); if (next) setPending(next.id); },
+      onDiscarded: () => previewLaunches.forgetSetup(launch.id), worktrees: previewWorktreeApi,
+    }} /> : <SessionFrame name={started ?? "Session client"} status={<StatusChip label="Connected" tone="quiet" />}><Thread /></SessionFrame>}
+    {open && <NewSession key={restoring?.id} initialLaunch={restoring} worktrees={previewWorktreeApi} hidden={pending !== undefined} onLaunching={(id) => {
       setPending(id);
-      return (outcome) => { if (outcome.type === "failed") setPending(undefined); return true; };
+      setOpen(false);
     }} cwd="/home/simon/code/sandbox/forgerie/.worktree/new-ui-mvp" api={previewNewApi} launches={previewLaunches} deferred={previewDeferred}
       initialMode={scenario === "new-session-rapidfire" ? "rapidfire" : "switch"}
       onStarted={(session) => { setPending(undefined); setStarted(`Opened ${session.id} in ${session.cwd}`); setOpen(false); }} onClose={() => setOpen(false)} />}

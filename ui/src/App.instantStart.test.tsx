@@ -60,7 +60,7 @@ beforeEach(async () => {
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   const request = (path: string, init?: RequestInit) => server.transport.request(path, init ?? {});
   const host = document.body.appendChild(document.createElement("div")); root = createRoot(host);
-  await act(async () => root.render(<App pendingSession={launch => <PendingSession launch={launch} />} newSessions={{ api: createNewSessionApi(request), worktrees: createWorktreeApi(request) }} />));
+  await act(async () => root.render(<App pendingSession={(launch, recovery) => <PendingSession launch={launch} recovery={recovery} />} newSessions={{ api: createNewSessionApi(request), worktrees: createWorktreeApi(request) }} />));
   await until(() => dialog()?.open === true && document.querySelector(".model-trigger")?.textContent?.includes("Opus") === true);
 });
 afterEach(async () => {
@@ -85,7 +85,7 @@ async function succeed() {
 it("closes the modal and renders the prompt before the create API answers, then replaces the same history entry", async () => {
   const original = dialog(); const historyLength = window.history.length;
   await send();
-  expect(dialog()).toBe(original); expect(dialog()?.open).toBe(false); expect(dialog()?.hidden).toBe(true);
+  expect(original).not.toBeNull(); expect(dialog()).toBeNull();
   expect(document.querySelector("dialog[open]")).toBeNull();
   const token = params().get("launch"); expect(token).toMatch(/^start-/u);
   expect(params().has("session")).toBe(false);
@@ -105,7 +105,7 @@ it("closes the modal and renders the prompt before the create API answers, then 
   expect(params().has("new")).toBe(false);
 });
 
-it("keeps the pending transcript and retained modal when its own launch row is selected", async () => {
+it("keeps the pending transcript and closed dialog when its own launch row is selected", async () => {
   const original = dialog();
   await send();
   const token = params().get("launch")!;
@@ -113,8 +113,7 @@ it("keeps the pending transcript and retained modal when its own launch row is s
   await act(async () => document.getElementById(`picker-row-${token}`)!.click());
   expect(params().get("launch")).toBe(token);
   expect(params().has("new")).toBe(false);
-  expect(dialog()).toBe(original);
-  expect(dialog()?.open).toBe(false);
+  expect(original).not.toBeNull(); expect(dialog()).toBeNull();
   expect(visibleShell()?.querySelector(".message-text")?.textContent).toBe("Fix the build");
   await succeed();
 });
@@ -146,32 +145,30 @@ it("shows the failure instead of startup when Forward returns to a failed backgr
   expect(dialog()).toBeNull();
 });
 
-it("reopens the very same modal after a failure with exact text, placement, model and thinking unchanged", async () => {
-  const originalDialog = dialog()!; const originalInput = input();
-  // Model a native queued close event that arrives only after the fast failure has reopened the modal.
-  vi.spyOn(originalDialog, "close").mockImplementation(() => originalDialog.removeAttribute("open"));
+it("keeps a failed pending page and restores exact text and model only when requested", async () => {
   const destination = document.querySelector(".destination-value")?.textContent;
   const modelLabel = document.querySelector(".model-trigger")?.textContent;
   const text = "  Fix the build\n\nKeep this whitespace.  \n";
   await send(text);
+  const token = params().get("launch");
   await act(async () => creation.resolve(Response.json({ error: "Unknown model from fixture" }, { status: 400 })));
+  await until(() => visibleShell()?.textContent?.includes("Unknown model from fixture") === true);
+  expect(dialog()).toBeNull(); expect(params().get("launch")).toBe(token);
+  expect(document.getElementById(`picker-row-${token}`)?.getAttribute("data-state")).toBe("errored");
+  await act(async () => button("Restore draft").click());
   await until(() => dialog()?.open === true && input().value === text);
-  expect(dialog()).toBe(originalDialog); expect(input()).toBe(originalInput);
-  expect(dialog()?.hidden).toBe(false);
   expect(document.querySelector(".destination-value")?.textContent).toBe(destination);
   expect(document.querySelector(".model-trigger")?.textContent).toBe(modelLabel);
-  await act(async () => { originalDialog.dispatchEvent(new Event("close")); });
-  expect(dialog()?.open).toBe(true);
-  expect(params().get("place")).toBe("existing"); expect(params().get("new")).toBe("/workspace");
-  expect(document.querySelector(".ns-error")?.textContent).toContain("The session did not start: Unknown model from fixture");
+  expect(document.querySelector(".ns-tray")).toBeNull();
+  expect(params().get("place")).toBe("existing");
   expect(server.requests.filter(url => url.pathname === "/api/sessions")).toHaveLength(1);
 });
 
-it("keeps the maybe-started warning and never retries an ambiguous failure", async () => {
+it("keeps the maybe-started warning outside the dialog and never automatically retries", async () => {
   await send();
   await act(async () => creation.resolve(Response.json({ error: "Reply lost" }, { status: 503 })));
-  await until(() => dialog()?.open === true && document.querySelector(".ns-error")?.textContent?.includes("may have started anyway") === true);
-  expect(input().value).toBe("Fix the build");
+  await until(() => visibleShell()?.textContent?.includes("may have started anyway") === true);
+  expect(dialog()).toBeNull();
   expect(server.requests.filter(url => url.pathname === "/api/sessions")).toHaveLength(1);
 });
 
@@ -234,11 +231,19 @@ it("keeps validation refusals in the modal without opening a pending page", asyn
   expect(server.requests.some(url => url.pathname === "/api/sessions")).toBe(false);
 });
 
-it("keeps Rapidfire in the open modal while the API is delayed and after success", async () => {
+it("closes Rapidfire at once and shows the pending prompt before the API answers", async () => {
   await act(async () => button("Rapidfire").click()); await type("Background work");
   await act(async () => button("Start in background").click());
-  expect(dialog()?.open).toBe(true); expect(params().has("launch")).toBe(false); expect(input().value).toBe("");
-  await act(async () => { creation.resolve(Response.json(session)); prompt.resolve(Response.json({ accepted: true })); });
-  await until(() => document.querySelector(".ns-launch")?.textContent?.includes("Started") === true);
-  expect(dialog()?.open).toBe(true); expect(params().get("session")).toBe("old");
+  expect(dialog()).toBeNull(); expect(params().has("launch")).toBe(true);
+  expect(visibleShell()?.textContent).toContain("Background work");
+  await succeed();
+});
+
+it("does not carry an old explicit branch placement into a fresh dialog", async () => {
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close new session"]')!.click());
+  await until(() => dialog() === null);
+  window.history.replaceState({}, "", "/?session=old&place=existing");
+  await act(async () => document.body.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", ctrlKey: true })));
+  await until(() => dialog()?.open === true);
+  expect(params().has("place")).toBe(false);
 });
