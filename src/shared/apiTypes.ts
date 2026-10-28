@@ -309,6 +309,7 @@ export interface SessionNotificationSummaryEvent {
 }
 
 export interface SessionInfo extends SessionRef {
+  modelChain?: string;
   /** An opt-in PR watch remains Working while the agent is idle. */
   watchingPullRequest?: boolean;
   watchingActionRun?: boolean;
@@ -794,6 +795,7 @@ export interface ModelSelectionResponse {
 /** Pi's effective choices for a session that will start in one destination. */
 export interface NewSessionModelSelectionResponse extends ModelSelectionResponse {
   model?: SessionModel;
+  modelChain?: string;
   thinkingLevel: string;
 }
 
@@ -837,7 +839,13 @@ export interface SessionAskCatalogSnapshot {
   sessions: SessionAskCatalogEntry[];
 }
 
+/** Display-only Durable transcript entry. Never supplied to Pi as a model message. */
+export const MODEL_CHAIN_SWITCH_KIND = "forgerie.model-chain-switch";
+export interface ModelChainSwitchNotice { from: string; to: string; error: string }
+export interface ModelChainWait { from: string; error: string; until: number }
+
 export interface SessionStatus {
+  chainWait?: ModelChainWait;
   workflow?: WorkflowGlance;
   attentionHint?: AttentionHint;
   sessionId: string;
@@ -849,6 +857,7 @@ export interface SessionStatus {
   /** True when the server has verified a backing session file exists; false when known transient. */
   persisted?: boolean;
   model?: SessionModel;
+  modelChain?: string;
   thinkingLevel?: string;
   isStreaming: boolean;
   isCompacting: boolean;
