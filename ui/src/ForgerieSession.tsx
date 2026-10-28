@@ -8,6 +8,9 @@ import { ProcessesPanel } from "./processes/ProcessesPanel";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import { FileTextIcon } from "lucide-react";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
+import { ChainSwitchLine } from "./models/ChainSwitchLine";
+import { ChainWaitStatus } from "./models/ChainWaitStatus";
+import type { ChainWaitRenderer, ChainWaitView } from "./models/chainWait";
 import { contextUse } from "./contextUse";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
@@ -18,7 +21,7 @@ import { useThreadMessages } from "./useThreadMessages";
 import { foldProcessEvents } from "./processes/processEvent";
 import { loadProcessOutput } from "./processes/processApi";
 import { ProcessEventView } from "./processes/ProcessEventView";
-import { markPosition, threadMessageIdAt, type ActionRunNoticeArtifact, type ChildEntryArtifact, type GatedActionArtifact, type OldIssueProposalArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
+import { markPosition, threadMessageIdAt, type ActionRunNoticeArtifact, type ChainSwitchArtifact, type ChildEntryArtifact, type GatedActionArtifact, type OldIssueProposalArtifact, type ProcessEventArtifact, type WorkflowEntryArtifact } from "./transcript";
 import type { FoundBinding, MatchBarView } from "./search/found";
 import { MatchBar } from "./search/MatchBar";
 import type { SystemArtifactView } from "./ui/Messages";
@@ -133,7 +136,7 @@ const actionRunApi = createActionRunApi(browserTransport.request);
 const NO_RUN_LINKS: readonly ActionRunLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, found, suggestionLinks, revealSuggestion }: {
+export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, chainWait, found, suggestionLinks, revealSuggestion }: {
   /** Where a suggestion's background session and the Backlog open. Absent: the card offers no Open. */
   suggestionLinks?: SuggestionLinks | undefined;
   /** A suggestion to bring into view, such as one the Backlog view showed in this chat. A new key asks again. */
@@ -145,6 +148,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   relatedWork?: RelatedWorkRenderer | undefined;
   /** The session's Skills and prompts sheet, opened from its header menu. */
   resourceLens?: ResourceLensRenderer | undefined;
+  /** Draws a model chain's wait with the app's chains. Absent: the line names no next model. */
+  chainWait?: ChainWaitRenderer | undefined;
   /** The catalog's live view of this session's pull request link and watch. */
   pullRequests?: readonly PullLink[] | undefined;
   /** The catalog's live view of this session's linked Actions runs and their watches. */
@@ -405,6 +410,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
       onDecide={(decision, note) => workflows.decide(item.entry.runId, item.entry.stage, decision, note)}
       onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows, proposalView, gatedView]);
   const needsForRecap = recapNeeds({ ask: state.ask, waiting, records, children: children.children, runs });
+  // The session's models, for names: a workflow sheet's pickers and route, and a model chain's lines.
+  const [sessionModels, setSessionModels] = useState<readonly SessionModel[]>([]);
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
     const recap = (custom as Partial<RecapArtifact> | undefined)?.recap;
     if (recap !== undefined) return <RecapEntry data={recap} needs={needsForRecap} />;
@@ -436,13 +443,15 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     }
     if (entry !== undefined) return <ChildEntryView entry={entry} onAnswer={childrenAvailable && !readOnly ? childAgents.answer : undefined}
       onOpen={childrenAvailable ? openChildByName : undefined} />;
+    const chainSwitch = (custom as Partial<ChainSwitchArtifact> | undefined)?.chainSwitch;
+    if (chainSwitch !== undefined) return <ChainSwitchLine notice={chainSwitch} models={sessionModels} />;
     const runNotice = (custom as Partial<ActionRunNoticeArtifact> | undefined)?.actionRunNotice;
     if (runNotice !== undefined) return <ActionRunNoticeView notice={runNotice} />;
     const event = (custom as Partial<ProcessEventArtifact> | undefined)?.processEvent;
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, ledgeKeys, proposalView, gatedView, needsForRecap]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, ledgeKeys, proposalView, gatedView, needsForRecap, sessionModels]);
   // Backlog suggestions: cards in the thread and the header's list read the server's records, never the transcript alone.
   const look = suggestionLinks?.look ?? NO_LOOK;
   const openSuggestionSession = suggestionLinks?.openSession;
@@ -520,17 +529,28 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   const proposalBlock = running !== undefined ? "Another workflow is running." : busy ? "Wait for the agent to finish its turn." : undefined;
   // A workflow sheet's pickers offer the session's models, and the route names them; a new worker can run as any listed agent.
   const sheetOpen = workflowSheet !== undefined && workflowSheet.type !== "picker";
-  const [sessionModels, setSessionModels] = useState<readonly SessionModel[]>([]);
   const [agentNames, setAgentNames] = useState<readonly string[]>([]);
+  // A model chain's lines name models too: the wait above the input, and each switch in the thread.
+  const chainSwitched = useMemo(() => state.transcript.messages.some((message) => message.chainSwitch !== undefined), [state.transcript.messages]);
+  const namesModels = sheetOpen || state.status?.modelChain !== undefined || state.status?.chainWait !== undefined || chainSwitched;
+  useEffect(() => {
+    if (!namesModels) return;
+    const controller = new AbortController();
+    store.listModels(controller.signal).then((models) => { if (!controller.signal.aborted) setSessionModels(models); }, () => undefined);
+    return () => controller.abort();
+  }, [namesModels, store]);
   useEffect(() => {
     if (!sheetOpen) return;
     const controller = new AbortController();
-    store.listModels(controller.signal).then((models) => { if (!controller.signal.aborted) setSessionModels(models); }, () => undefined);
     if (workflowSheet?.type === "proposal") agentsApi.list(controller.signal, browserTransport.request).then((list) => {
       if (!controller.signal.aborted) setAgentNames([...new Set(list.agents.filter((agent) => agent.advertise && !agent.disabled && agent.broken === undefined).map((agent) => agent.name))].sort());
     }, () => undefined);
     return () => controller.abort();
   }, [sheetOpen, workflowSheet?.type, store]);
+  // A chain's wait. The input bar's own Stop shows while the run runs; otherwise the line carries one.
+  const wait = state.status?.chainWait;
+  const waitView: ChainWaitView | undefined = wait === undefined ? undefined : { wait, chain: state.status?.modelChain, models: sessionModels,
+    onStop: state.transcript.isRunning || state.connection.type !== "ready" ? undefined : () => { void onCancel(); } };
   const workerModels = useMemo<WorkerModels>(() => ({ known: sessionModels, list: store.listModels }), [sessionModels, store]);
   const sheetRun = workflowSheet?.type === "run" ? runs.find((run) => run.id === workflowSheet.runId) : undefined;
   /** Closes the proposal's sheet once its decision went through, unless the reader already moved on. */
@@ -674,6 +694,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
             {held.readError !== undefined && waiting.some((item) => item.kind === "gated")
               && <GatedActionsReadProblem error={held.readError} onRetry={() => { void gated.retry(); }} />}
           </PinnedDock>}
+          {waitView !== undefined && !readOnly && (chainWait?.(waitView) ?? <ChainWaitStatus wait={waitView.wait} models={waitView.models} onStop={waitView.onStop} />)}
           {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run", runId: running.id })} />}
         </>}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}
@@ -696,7 +717,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
         onOpenFile={readOnly ? undefined : openLinkedFile}
         model={{ model: state.status?.model, thinkingLevel: state.status?.thinkingLevel, disabled: state.connection.type !== "ready",
           listModels: store.listModels, listThinkingLevels: store.listThinkingLevels, onModel: store.setModel, onThinkingLevel: store.setThinkingLevel,
-          context: contextUse(state.status), cycle: true }}
+          chain: { current: state.status?.modelChain, onChoose: store.setModelChain }, context: contextUse(state.status), cycle: true }}
         commandResult={state.commandResult ? {
           result: state.commandResult, disabled: state.sending || state.connection.type !== "ready",
           onChoose: (requestId, value) => { void store.respondToCommand(requestId, value).then(applyResult).catch(() => { /* Store exposes the error and keeps the choices. */ }); },

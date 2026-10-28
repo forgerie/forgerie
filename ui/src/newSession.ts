@@ -17,11 +17,13 @@ export type Workspace = z.infer<typeof workspaceSchema>;
 /** Pi's choices for a session that will start in one folder. */
 export const newSessionModelsSchema = z.object({
   models: z.array(sessionModelSchema), model: sessionModelSchema.optional(), thinkingLevel: z.string(),
+  /** The default is this model chain; `model` is then the entry a session starts on. A server from before chains sends none. */
+  modelChain: z.string().min(1).optional().catch(undefined),
 });
 
 /** Where the new session starts. `label` is what a person reads. */
-/** What the author picked before the session exists. Absent: Pi's default. */
-export interface AgentChoice { model?: SessionModel | undefined; thinkingLevel?: string | undefined }
+/** What the author picked before the session exists: a model or a model chain. Absent: Pi's default. */
+export interface AgentChoice { model?: SessionModel | undefined; modelChain?: string | undefined; thinkingLevel?: string | undefined }
 
 /**
  * Pi's thinking levels. Without a session, Pi cannot say which ones a model
@@ -196,7 +198,8 @@ export function createNewSessionApi(fetchFn: Fetch) {
       let session: Session;
       let text = prompt.text;
       let promptImages = prompt.images ?? [];
-      const modelSpec = choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined;
+      // A chain is named by its name alone: a spec without a slash.
+      const modelSpec = choice.modelChain ?? (choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined);
       const start = { cwd, ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
         ...(options.destination ? { destination: options.destination } : {}), ...(options.setupId ? { setupId: options.setupId } : {}) };
       try {

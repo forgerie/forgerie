@@ -14,6 +14,7 @@ import { PageSection } from "../ui/PageSection";
 import { WorkflowInputFields } from "../workflows/WorkflowInputFields";
 import { thinkingLevelsFor, type Project } from "../newSession";
 import type { SessionModel } from "../contracts";
+import { chainReferenceOf } from "../modelChoice";
 import { RUN_LATE_CHOICES } from "./triggersModel";
 import { thinkingLevelOf } from "./triggerValues";
 import { fieldDomId, inputFields, type DraftProblems, type TriggerDraft } from "./triggerDraft";
@@ -79,11 +80,14 @@ export function TriggerForm({ draft, onDraft, problems, disabled, hostZone, time
   const chooseAll = (on: boolean) => set({ targets: on ? { kind: "all" } : { kind: "projects", cwds: [...lastFixed.current] } });
   const fields = inputFields(workflow, draft);
   const model = modelOf(draft.model);
+  // A model without a provider names a model chain.
+  const chain = chainReferenceOf(draft.model)?.name;
   const modelBinding: ModelBinding = {
     model, thinkingLevel: draft.thinkingLevel, disabled, emptyLabel: "Default for new sessions",
     listModels, listThinkingLevels: async () => thinkingLevelsFor(model),
     onModel: async (provider, id) => set({ model: `${provider}/${id}` }),
     onThinkingLevel: async (level) => set({ thinkingLevel: thinkingLevelOf(level) }),
+    chain: { current: chain, onChoose: async (name) => set({ model: name }) },
   };
   const whose = spread ? "the projects'" : "the project's";
   const workflowStatus = workflows.type === "loading" ? { tone: "status" as const, text: `Reading ${whose} workflows…` }

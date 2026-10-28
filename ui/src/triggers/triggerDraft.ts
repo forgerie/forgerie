@@ -17,7 +17,7 @@ export interface TriggerDraft {
   timezone: string;
   /** The reader picked the zone, so the host's zone arriving later does not replace it. */
   zoneChosen: boolean;
-  /** `provider/model-id`, or absent for the new-session default. */
+  /** `provider/model-id`, a model chain's name, or absent for the new-session default. */
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   grace: number;

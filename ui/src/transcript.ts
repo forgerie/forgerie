@@ -17,6 +17,7 @@ import { issueOutcomeFrom, issueOutcomeOf, type IssueOutcome } from "./issues/fi
 import { suggestionRefOf, suggestionRefSchema, type SuggestionRef } from "./backlog/suggestions/suggestionsApi";
 import { workflowEntryOf, type WorkflowEntry } from "./workflows/workflowsModel";
 import { gatedEntryOf, type GatedActionEntry } from "./gatedActions/gatedActionsModel";
+import { chainSwitchOf, type ModelChainSwitchNotice } from "./models/chainSwitch";
 import { appendOutput, finishRun, interruptRun, isRecordOf, isSameRun, isSavedCopy, reopenRun, runFromRecord, shellText, startedRun, unknownRun,
   type ShellEnd, type ShellRun } from "./shellRun";
 
@@ -63,6 +64,8 @@ export interface TranscriptMessage {
   workflowEntry?: WorkflowEntry;
   /** A call Forgerie holds until the reader approves it. */
   gatedAction?: GatedActionEntry;
+  /** The session's model chain moved past an unavailable model. Shown only; the model never reads it. */
+  chainSwitch?: ModelChainSwitchNotice;
   /**
    * The message's index in the `/messages` list it was read from. A search
    * match names a message by it. A message first seen live has none until
@@ -158,6 +161,9 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
     // An event this app cannot read still shows, as plain system text.
     return { id, role: "system", parts: [{ type: "text", text }], ...(processEvent ? { processEvent } : {}), key: keyOf(message) };
   }
+  const chainSwitch = chainSwitchOf(message);
+  if (chainSwitch) return { id, role: "system", parts: [{ type: "text", text: `Switched from ${chainSwitch.from} to ${chainSwitch.to}. ${chainSwitch.error}`.trim() }],
+    chainSwitch, key: keyOf(message) };
   const gatedAction = role === "custom" ? gatedEntryOf(message) : undefined;
   if (gatedAction) return { id, role: "system", parts: [{ type: "text", text: textOf(message) }], gatedAction, key: keyOf(message) };
   // A workflow's launch and each decision are user messages to the parent model, but the reader did not type them.
@@ -561,6 +567,8 @@ export type WorkflowEntryArtifact = { workflowEntry: WorkflowEntry };
 export type OldIssueProposalArtifact = { oldIssueProposal: OldIssueProposal };
 /** UI data of a gated action's row, carried as the system message's custom metadata. */
 export type GatedActionArtifact = { gatedAction: GatedActionEntry };
+/** UI data of a model chain switch row, carried as the system message's custom metadata. */
+export type ChainSwitchArtifact = { chainSwitch: ModelChainSwitchNotice };
 /** UI data of a marked message, carried in its custom metadata. A joined reply is marked when any of its messages is. */
 export type MarkArtifact = { marked: true };
 export function convertMessage(message: TranscriptMessage): ThreadMessageLike {
@@ -614,6 +622,8 @@ function convertUnmarked(message: TranscriptMessage): ThreadMessageLike {
     metadata: { custom: { workflowEntry: message.workflowEntry } satisfies WorkflowEntryArtifact } };
   if (message.gatedAction) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { gatedAction: message.gatedAction } satisfies GatedActionArtifact } };
+  if (message.chainSwitch) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
+    metadata: { custom: { chainSwitch: message.chainSwitch } satisfies ChainSwitchArtifact } };
   if (message.summary) return { id: message.id, role: "system", content: [{ type: "text", text: messageText(message) }],
     metadata: { custom: { summary: message.summary } satisfies SummaryArtifact } };
   if (message.role !== "assistant") {

@@ -1,5 +1,6 @@
 // What a backlog suggestion says, in the reader's words. Pure: the card, the sheet, the header button and
 // the Backlog view all read their words from here, so one state reads the same everywhere.
+import { chainReferenceOf } from "../../modelChoice";
 import type { SessionModel } from "../../contracts";
 import type { SessionLook } from "../backlogModel";
 import type { BacklogItem } from "../backlogApi";
@@ -65,6 +66,11 @@ export function modelFromSpec(spec: string | undefined, known: readonly SessionM
 export const specOf = (model: SessionModel | undefined) => model?.provider && model.id ? `${model.provider}/${model.id}` : undefined;
 /** A model's name for a sentence: its display name, else its id. */
 export const modelWords = (model: SessionModel | undefined) => model?.name ?? model?.id;
+/** A spec's name for a sentence: the model's, or "the worker chain" for a model chain. */
+export function specWords(spec: string | undefined, known: readonly SessionModel[] = []): string | undefined {
+  const chain = chainReferenceOf(spec)?.name;
+  return chain === undefined ? modelWords(modelFromSpec(spec, known)) : `the ${chain} chain`;
+}
 
 /**
  * The model a background session starts on: this launch's choice, else the record's default (the project's
@@ -74,7 +80,7 @@ export function launchModel(suggestion: Pick<Suggestion, "defaultModel">, overri
   known: readonly SessionModel[] = []) {
   const chosen = override?.modelSpec ?? suggestion.defaultModel.modelSpec;
   if (chosen !== undefined) {
-    return { model: modelFromSpec(chosen, known), thinkingLevel: override?.modelSpec !== undefined ? override.thinkingLevel : suggestion.defaultModel.thinkingLevel,
+    return { model: modelFromSpec(chosen, known), modelChain: chainReferenceOf(chosen)?.name, thinkingLevel: override?.modelSpec !== undefined ? override.thinkingLevel : suggestion.defaultModel.thinkingLevel,
       source: override?.modelSpec !== undefined ? "chosen" as const : "default" as const };
   }
   return { model: chat.model, thinkingLevel: chat.thinkingLevel, source: "chat" as const };

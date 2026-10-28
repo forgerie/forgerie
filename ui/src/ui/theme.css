@@ -459,6 +459,12 @@ button:disabled { cursor: default; opacity: 0.4; }
 .model-trigger[data-look="word"] { flex: none; min-inline-size: 0; block-size: auto; min-block-size: 1.5rem; padding-inline: var(--space-1); color: var(--foreground); vertical-align: baseline; }
 .model-trigger-name { min-inline-size: 0; max-inline-size: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-trigger-level { flex: none; color: var(--muted-foreground); font-weight: 400; }
+/* A chain in effect: its name, then the entry it runs on now. Both are readouts and both truncate; the chain name
+   keeps its first letters so it stays recognisable, and the entry gives way first because the trigger's label and
+   the panel say it in full. */
+.model-trigger-choice { flex: 0 1 auto; min-inline-size: 3ch; max-inline-size: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-trigger-sep { flex: none; color: var(--muted-foreground); }
+.model-trigger-name[data-tone="entry"] { flex: 0 100 auto; font-weight: 400; }
 .model-trigger svg { flex: none; }
 /* In a very narrow pane the level moves to the picker, where it is always shown,
    so the model name keeps a readable width. Spacing has already yielded. */

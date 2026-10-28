@@ -3,7 +3,7 @@ import { ChevronLeftIcon, EllipsisIcon, Trash2Icon, XIcon } from "lucide-react";
 import { z } from "zod";
 import type { ModelChains } from "@shared/modelChains";
 import type { SessionModel } from "../../contracts";
-import { modelLabel, thinkingLabel } from "../../modelChoice";
+import { chainText, modelLabel } from "../../modelChoice";
 import { thinkingLevelsFor } from "../../newSession";
 import { chainNameOf, composeAgentFile, fileIdFor, FORM_FIELDS, NEW_AGENT_TEXT, modelSpecText, parseAgentFile, parseList, parseModelSpec, readFields, setField } from "../../agents/agentFile";
 import { agentDrafts } from "../../agents/agentDrafts";
@@ -199,15 +199,10 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
   const model = chain === undefined ? resolveModel(fields.model, models) : undefined;
   const spec = parseModelSpec(fields.model);
   const thinking = fields.thinking ?? spec?.level;
-  /** A chain's entries in order, by the names Pi gives them, each with its own level. */
-  const chainText = (entries: readonly string[]) => entries.map((entry) => {
-    const parsed = parseModelSpec(entry);
-    return `${modelLabel(resolveModel(parsed ? modelSpecText(parsed) : entry, models))}${parsed?.level ? ` (${thinkingLabel(parsed.level)})` : ""}`;
-  }).join(", then ");
   const chainEntries = chain !== undefined && chains && Object.hasOwn(chains, chain) ? chains[chain] : undefined;
   const chainProblem = chain !== undefined && chains && !chainEntries
     ? `No model chain is named ${chain}. Choose a chain or a model, or create the chain in Settings > Models.` : undefined;
-  const modelHint = chainEntries ? `A model chain. Runs try ${chainText(chainEntries)}, moving on when a model is unavailable.`
+  const modelHint = chainEntries ? `A model chain. Runs try ${chainText(chainEntries, models)}, moving on when a model is unavailable.`
     : model || chain !== undefined ? undefined : "Without a model, the agent runs on whatever model the session uses.";
   const chooseModel = (value: string) => {
     // A level written into the old model reference moves to its own field.
@@ -219,7 +214,7 @@ export function AgentEditor({ target, home, onBack, onClose, onOpen, onSaved }: 
     listModels, listThinkingLevels: async () => thinkingLevelsFor(model),
     choices: chain !== undefined || (chains && Object.keys(chains).length > 0) ? {
       label: "Model chains", current: chain,
-      options: Object.entries(chains ?? {}).map(([name, entries]) => ({ id: name, name, detail: chainText(entries) })),
+      options: Object.entries(chains ?? {}).map(([name, entries]) => ({ id: name, name, detail: chainText(entries, models) })),
       onChoose: async (name) => { chooseModel(name); },
     } : undefined,
     onModel: async (provider, id) => { chooseModel(`${provider}/${id}`); },

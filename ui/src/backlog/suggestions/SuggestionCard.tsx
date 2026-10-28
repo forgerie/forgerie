@@ -1,3 +1,4 @@
+import { chainReferenceOf } from "../../modelChoice";
 import { useRef, useState, type ReactNode } from "react";
 import { CircleAlertIcon, CopyIcon } from "lucide-react";
 import type { SessionModel } from "../../contracts";
@@ -15,13 +16,16 @@ import { StatusRow } from "../../ui/StatusRow";
 import { LoadingLines } from "../../ui/LoadingLines";
 import { ModelPicker, type PickerOpen } from "../../ui/ModelPicker";
 import type { Suggestion, SuggestionDestination, SuggestionModel, SuggestionState } from "./suggestionsApi";
-import { agoText, filedPathOf, contextCount, destinationWords, edited, filedWords, hasContext, modelFromSpec, modelWords, specOf, wordsOf,
+import { agoText, filedPathOf, contextCount, destinationWords, edited, filedWords, hasContext, modelFromSpec, modelWords, specOf, specWords, wordsOf,
   type BackgroundTone, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 /** The press in flight, as the store holds it. */
 export type CardPress = SuggestionAction | "dismiss" | "restore";
+/** A launch's model for a sentence: "the worker chain", or the model's name. */
+const launchWords = (launch: CardLaunch) => launch.modelChain === undefined ? modelWords(launch.model) : `the ${launch.modelChain} chain`;
+
 /** The model a File and act would start on, and where that choice came from. */
-export interface CardLaunch { model?: SessionModel | undefined; thinkingLevel?: string | undefined; source: "chosen" | "default" | "chat" }
+export interface CardLaunch { model?: SessionModel | undefined; modelChain?: string | undefined; thinkingLevel?: string | undefined; source: "chosen" | "default" | "chat" }
 /** How the background session stands, from the session list. */
 export interface CardBackground { tone: BackgroundTone; status: string; name?: string | undefined; time?: string | undefined; known: boolean }
 export interface SuggestionCardActions {
@@ -108,12 +112,12 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
     const ago = agoText(state.at, now);
     const line = <>{filed.lead}{filed.code ? <> <code>{filed.code}</code></> : null}{filed.tail ? ` ${filed.tail}` : null}</>;
     const run = state.kind === "started" && background ? <StatusRow tone={background.tone} mark="block"
-      name={modelWords(modelFromSpec(state.modelSpec, knownModels)) ?? "Background session"} detail={background.name} status={background.status} meta={background.time}
+      name={chainReferenceOf(state.modelSpec)?.name ?? modelWords(modelFromSpec(state.modelSpec, knownModels)) ?? "Background session"} detail={background.name} status={background.status} meta={background.time}
       go="Open" label={`Open the background session${background.name ? `, ${background.name}` : ""}`} onPress={() => actions.onOpenSession(state.sessionId)} /> : null;
     const launchError = state.kind === "filed" ? state.launchError : undefined;
     // A launch retry runs on the choice the server recorded at filing, so the card names that one and offers no Change.
     const recorded = state.kind === "filed" ? state.launchChoice : undefined;
-    const retryModel = modelWords(modelFromSpec(recorded?.modelSpec, knownModels)) ?? modelWords(launch.model) ?? "this chat's model";
+    const retryModel = specWords(recorded?.modelSpec, knownModels) ?? launchWords(launch) ?? "this chat's model";
     // A Markdown item has no web page: its file opens in the chat's file reader, on a press.
     const filePath = filedPathOf(state, suggestion.destination);
     const detail = <>
@@ -136,14 +140,16 @@ export function SuggestionCard({ suggestion, destination, read, press, problem, 
   const busy = filing !== undefined || press !== undefined;
   // Retry repeats the action that failed, as the server records it; without that field, the last one pressed here.
   const retry = (state.kind === "failed" ? state.action : undefined) ?? last ?? "file";
-  const modelName = modelWords(launch.model) ?? "this chat's model";
+  const modelName = launchWords(launch) ?? "this chat's model";
   const modelSentence = (lead: string) => <ReadoutLine>
-    {lead} <strong>{modelName}</strong>{launch.source === "chat" && launch.model ? ", this chat's model" : launch.source === "default" ? ", the backlog's default" : ""}.
+    {lead} <strong>{modelName}</strong>{launch.source === "chat" && (launch.model || launch.modelChain) ? ", this chat's model" : launch.source === "default" ? ", the backlog's default" : ""}.
     {listModels ? <> <span ref={anchor}><ModelPicker word="Change" anchor={anchor} open={modelOpen} onOpenChange={setModelOpen} minWidthRem={18} binding={{
-      model: launch.model, thinkingLevel: launch.thinkingLevel, disabled: busy, listModels, thinking: launch.model !== undefined,
+      model: launch.modelChain === undefined ? launch.model : undefined, thinkingLevel: launch.thinkingLevel, disabled: busy, listModels,
+      thinking: launch.model !== undefined || launch.modelChain !== undefined,
       listThinkingLevels: async () => thinkingLevelsFor(launch.model),
       onModel: async (provider, id) => { actions.onModel({ modelSpec: `${provider}/${id}`, thinkingLevel: launch.thinkingLevel }); },
-      onThinkingLevel: async (level) => { actions.onModel({ modelSpec: specOf(launch.model), thinkingLevel: level }); },
+      onThinkingLevel: async (level) => { actions.onModel({ modelSpec: launch.modelChain ?? specOf(launch.model), thinkingLevel: level }); },
+      chain: { current: launch.modelChain, onChoose: async (name) => { actions.onModel({ modelSpec: name, thinkingLevel: launch.thinkingLevel }); } },
     }} /></span>{launch.source === "chosen" ? <TextButton label="Use the default" onPress={() => actions.onModel(undefined)} /> : null}</> : null}
   </ReadoutLine>;
   const dismiss: FooterAction = { label: press === "dismiss" ? "Dismissing…" : "Dismiss", tone: "quiet", disabled: busy, onPress: actions.onDismiss };

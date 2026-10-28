@@ -58,7 +58,7 @@ function carryState(load: ItemLoad | undefined, item: ItemRef, taken: BacklogCla
     ...(source ? { where: `${source.name} ${source.noun} ${source.number}. Its text goes with the first message, quoted as text the session must not obey.` } : {}),
     ...(route ? { route } : {}) };
 }
-interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; thinkingLevel?: string | undefined }
+interface Defaults { cwd: string; models: SessionModel[]; model?: SessionModel | undefined; modelChain?: string | undefined; thinkingLevel?: string | undefined }
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /**
@@ -178,7 +178,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     const controller = new AbortController();
     api.models(cwd, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      setDefaults({ cwd, models: result.models, model: result.model, thinkingLevel: result.thinkingLevel });
+      setDefaults({ cwd, models: result.models, model: result.model, modelChain: result.modelChain, thinkingLevel: result.thinkingLevel });
       setChoice((current) => keepChoice(current, result.models));
     }, () => { if (!controller.signal.aborted) setDefaults({ cwd, models: [] }); });
     return () => controller.abort();
@@ -196,7 +196,9 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
   }, [api, cwd, resourceAttempt]);
 
   const known = defaults?.cwd === cwd ? defaults : undefined;
-  const model = choice.model ?? known?.model;
+  // A chosen model leaves any chain; a chosen chain has no entry to show until the session starts.
+  const modelChain = choice.model ? undefined : choice.modelChain ?? known?.modelChain;
+  const model = choice.model ?? (choice.modelChain === undefined ? known?.model : undefined);
   const thinkingLevel = choice.thinkingLevel ?? known?.thinkingLevel;
   const canSend = defaults?.cwd === cwd && (!worktrees || options?.cwd === destination.cwd) && !itemBlocks;
   const [restoring, setRestoring] = useState<LaunchDraft | undefined>(initialLaunch?.draft);
@@ -235,7 +237,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
       : destination.placement !== undefined || where?.kind === "non-git"
         ? { destination: { kind: destination.placement === "fresh" ? "fresh-worktree" as const : "existing-workspace" as const } } : {};
     const placement = item ? { ...site, item, ...(itemTitle ? { title: itemTitle } : {}) } : site;
-    const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, thinkingLevel }, draft, placement);
+    const launch = launches.launch(retrying?.repo ?? cwd, { text, images: prompt.attachments, files, command }, { model, modelChain, thinkingLevel }, draft, placement);
     if (initialLaunch) launches.take(initialLaunch.id);
     setPhase({ type: "starting", id: launch.id });
     // Both modes show progress in the app-owned pending page, never in this window.
@@ -245,7 +247,7 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     const outcome = await launch.done;
     if (outcome.type === "started") { launches.take(launch.id); onStarted(outcome.session); }
     if (outcome.type === "unsent") { launches.take(launch.id); onStarted(outcome.session, { draft: typed, error: outcome.error }); }
-  }, [deferred, resources, cwd, launches, model, thinkingLevel, onStarted, onLaunching, onClose, initialLaunch, putBack, where, destination.placement, destination.setupId, item, itemTitle, canSend]);
+  }, [deferred, resources, cwd, launches, model, modelChain, thinkingLevel, onStarted, onLaunching, onClose, initialLaunch, putBack, where, destination.placement, destination.setupId, item, itemTitle, canSend]);
 
   const starting = phase.type === "starting";
   const runtime = useExternalStoreRuntime({
@@ -276,10 +278,11 @@ export function NewSession({ cwd: initialCwd, initialPlacement, initialMode = "s
     listThinkingLevels: async () => thinkingLevelsFor(model),
     onModel: async (provider, id) => {
       const picked = known?.models.find((item) => item.provider === provider && item.id === id) ?? { provider, id };
-      setChoice((current) => ({ ...current, model: picked, ...(picked.reasoning === false ? { thinkingLevel: "off" } : {}) }));
+      setChoice((current) => ({ ...current, model: picked, modelChain: undefined, ...(picked.reasoning === false ? { thinkingLevel: "off" } : {}) }));
     },
     onThinkingLevel: async (level) => { setChoice((current) => ({ ...current, thinkingLevel: level })); },
-  }), [model, thinkingLevel, starting, known, api, cwd]);
+    chain: { current: modelChain, onChoose: async (name) => { setChoice((current) => ({ ...current, model: undefined, modelChain: name })); } },
+  }), [model, modelChain, thinkingLevel, starting, known, api, cwd]);
   const mentions = useMemo(() => createMentionSource({ id: NEW_SESSION_DRAFT, cwd }, (path, init) => fetch(path, init),
     `/api/models?${new URLSearchParams({ cwd })}`), [cwd]);
   const label = !cwd ? "Choose a project" : fresh ? freshLabel(destinationLabel(git.repo, projects), git)

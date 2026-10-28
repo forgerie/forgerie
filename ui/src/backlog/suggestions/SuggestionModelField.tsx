@@ -1,3 +1,4 @@
+import { chainReferenceOf } from "../../modelChoice";
 import { useRef, useState } from "react";
 import type { SessionModel } from "../../contracts";
 import { thinkingLevelsFor } from "../../newSession";
@@ -35,13 +36,16 @@ export function SuggestionModelField({ label, value, fallback, hint, knownModels
   const anchor = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState<PickerOpen>();
   const model = modelFromSpec(value?.modelSpec, knownModels);
+  // A spec without a provider names a model chain.
+  const chain = chainReferenceOf(value?.modelSpec)?.name;
   return <SettingsField label={label} hint={hint} hintTone="readable">
     <span ref={anchor}>
       <ModelPicker anchor={anchor} open={open} onOpenChange={setOpen} minWidthRem={18} binding={{
-        model, thinkingLevel: value?.thinkingLevel, disabled, emptyLabel: fallback, thinking: model !== undefined, listModels,
+        model, thinkingLevel: value?.thinkingLevel, disabled, emptyLabel: fallback, thinking: model !== undefined || chain !== undefined, listModels,
         listThinkingLevels: async () => thinkingLevelsFor(model),
         onModel: async (provider, id) => { onChange({ modelSpec: `${provider}/${id}`, ...(value?.thinkingLevel ? { thinkingLevel: value.thinkingLevel } : {}) }); },
-        onThinkingLevel: async (level) => { onChange({ modelSpec: specOf(model), thinkingLevel: level }); },
+        onThinkingLevel: async (level) => { onChange({ modelSpec: chain ?? specOf(model), thinkingLevel: level }); },
+        chain: { current: chain, onChoose: async (name) => { onChange({ modelSpec: name, ...(value?.thinkingLevel ? { thinkingLevel: value.thinkingLevel } : {}) }); } },
       }} />
     </span>
     {value?.modelSpec !== undefined && !disabled ? <TextButton label={`Use ${fallback.charAt(0).toLowerCase()}${fallback.slice(1)}`} onPress={() => onChange(undefined)} /> : null}

@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { modelPrefsSchema, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
+import type { ModelChains } from "@shared/modelChains";
 
 /** A save the server refused because a list moved on. Reloading is the way out. */
 export class PrefsConflict extends Error {}
@@ -58,4 +59,10 @@ export function useModelPrefs(enabled = true): ModelPrefs | undefined {
     return () => { controller.abort(); stop(); };
   }, [source, enabled]);
   return prefs;
+}
+
+/** The app's model chains from the same lists. Undefined while unknown; none while the daemon ignores them for a problem. */
+export function useModelChains(enabled = true): ModelChains | undefined {
+  const prefs = useModelPrefs(enabled);
+  return useMemo(() => prefs === undefined ? undefined : prefs.modelChainsProblem === null ? prefs.modelChains : {}, [prefs]);
 }

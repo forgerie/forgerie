@@ -1,6 +1,7 @@
 import type { SessionModel } from "./contracts";
 import { isShown, resolveFavorites } from "./models/modelPrefs";
 import type { ModelPrefs } from "@shared/modelPrefsContract";
+import { parseModelReference } from "@shared/thinkingLevels";
 import type { OptionGroup, OptionItem } from "./ui/OptionList";
 import type { OptionDetail } from "./ui/OptionRow";
 
@@ -154,6 +155,29 @@ export function thinkingLabel(level: string): string {
   const known: Record<string, string> = { off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
   return known[level] ?? level;
 }
+
+/**
+ * A model chain entry, or any `provider/id[:level]` reference, as a person reads it: Pi's name for the model, then its
+ * own level, such as "Claude Opus 4.5 (High)". A model Pi does not list keeps its `provider/id`.
+ */
+export function chainEntryLabel(entry: string, models: readonly SessionModel[]): string {
+  const { model: key, thinkingLevel } = parseModelReference(entry);
+  const known = models.find((model) => modelKey(model) === key);
+  return `${known ? modelLabel(known) : key}${thinkingLevel ? ` (${thinkingLabel(thinkingLevel)})` : ""}`;
+}
+/** A chain's entries in order, by the names Pi gives them, each with its own level: "Claude Opus 4.5 (High), then GPT-5". */
+export const chainText = (entries: readonly string[], models: readonly SessionModel[]): string =>
+  entries.map((entry) => chainEntryLabel(entry, models)).join(", then ");
+
+/** A model reference names a chain when it has no provider: `worker`, or `worker:high` with a level for every entry. */
+export function chainReferenceOf(spec: string | undefined): { name: string; level?: string | undefined } | undefined {
+  const value = spec?.trim();
+  if (!value || value.includes("/")) return undefined;
+  const { model, thinkingLevel } = parseModelReference(value);
+  return model === "" ? undefined : { name: model, ...(thinkingLevel ? { level: thinkingLevel } : {}) };
+}
+/** A chain reference as a model spec string: the name, with the level after a colon. */
+export const chainReferenceText = (name: string, level: string | undefined) => level ? `${name}:${level}` : name;
 
 /**
  * `/model` with optional search text. Pi's server has no `/model` command for

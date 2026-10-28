@@ -4,7 +4,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import { ChevronDownIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import type { SessionModel } from "../contracts";
-import { hiddenModelsLabel, modelKey, modelLabel, modelMenu, modelOptionGroups, thinkingLabel } from "../modelChoice";
+import type { ModelPrefs } from "@shared/modelPrefsContract";
+import { chainText, hiddenModelsLabel, modelKey, modelLabel, modelMenu, modelOptionGroups, thinkingLabel } from "../modelChoice";
 import { cycleTarget, resolveFavorites } from "../models/modelPrefs";
 import { useModelPrefs } from "../models/modelPrefsApi";
 import { usePanelPlacement } from "./usePanelPlacement";
@@ -36,6 +37,16 @@ export interface ModelBinding {
   unsetLevel?: { id: string; label: string } | undefined;
   /** Named choices that stand for more than one model, such as model chains: their own group, above the models. */
   choices?: ModelPickerChoices | undefined;
+  /**
+   * The app's model chains, as a group above the models, read from the same lists as the menu. `current` is the chain
+   * in effect; `model` is then the chain's active entry, and the trigger names both. Ignored when `choices` is set.
+   */
+  chain?: ModelChainChoice | undefined;
+}
+/** A value that can be a model chain. Choosing a model instead leaves the chain. */
+export interface ModelChainChoice {
+  current?: string | undefined;
+  onChoose: (name: string) => Promise<void>;
 }
 /** A group of named choices in the model panel. A choice's `detail` says what it stands for, such as the models in it. */
 export interface ModelPickerChoices {
@@ -144,8 +155,10 @@ export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, 
   // so its result and its error always land in the panel that sent it.
   const [change, setChange] = useState<Change>({ type: "idle" });
   const changing = change.type === "changing";
-  const chosen = binding.model === undefined ? binding.choices?.current : undefined;
-  const label = binding.model ? modelLabel(binding.model) : chosen ?? binding.emptyLabel ?? modelLabel(undefined);
+  // A named choice in effect, such as a chain. The model, when there is one too, is the choice's active entry.
+  const chosen = binding.choices?.current ?? binding.chain?.current;
+  const modelName = binding.model ? modelLabel(binding.model) : undefined;
+  const label = chosen !== undefined ? `${chosen}${modelName ? `, now on ${modelName}` : ""}` : modelName ?? binding.emptyLabel ?? modelLabel(undefined);
   const level = binding.model || chosen ? binding.thinkingLevel : undefined;
   const close = useCallback((giveBack: boolean) => {
     setChange((current) => current.type === "failed" ? { type: "idle" } : current);
@@ -160,9 +173,13 @@ export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, 
     {!bare && <button ref={trigger} type="button" className="model-trigger" disabled={binding.disabled}
       aria-haspopup="dialog" aria-expanded={open !== undefined} aria-controls={open ? panelId : undefined}
       aria-label={`${label}${level ? ` ${thinkingLabel(level)}` : ""}, change model and thinking level`}
-      title="Model and thinking level" data-look={word === undefined ? look : "word"} onClick={() => { if (!changing) onOpenChange(open ? undefined : { query: "" }); }}>
+      title={chosen !== undefined && modelName ? label : "Model and thinking level"} data-look={word === undefined ? look : "word"}
+      onClick={() => { if (!changing) onOpenChange(open ? undefined : { query: "" }); }}>
       {word === undefined ? <>
-        <span className="model-trigger-name">{label}</span>
+        {chosen === undefined ? <span className="model-trigger-name">{label}</span> : <>
+          <span className="model-trigger-choice">{chosen}</span>
+          {modelName && <><span className="model-trigger-sep" aria-hidden>·</span><span className="model-trigger-name" data-tone="entry">{modelName}</span></>}
+        </>}
         {level && <span className="model-trigger-level">{thinkingLabel(level)}</span>}
         <ChevronDownIcon aria-hidden size={14} />
       </> : <>{wordIcon}<span className="model-trigger-name">{word}</span></>}
@@ -170,6 +187,14 @@ export function ModelPicker({ binding, anchor, open, onOpenChange, minWidthRem, 
     {open && createPortal(<ModelPanel id={panelId} binding={binding} anchor={anchor} trigger={trigger} minWidthRem={minWidthRem}
       initialQuery={open.query} onClose={close} change={change} setChange={setChange} />, layer)}
   </>;
+}
+
+/** The app's chains as the panel's named choices, each with its models in order. Chains the daemon ignores count as none. */
+function chainChoices(chain: ModelChainChoice, prefs: ModelPrefs | undefined, models: readonly SessionModel[]): ModelPickerChoices | undefined {
+  const chains = prefs?.modelChainsProblem === null ? prefs.modelChains : {};
+  if (chain.current === undefined && Object.keys(chains).length === 0) return undefined;
+  return { label: "Model chains", current: chain.current, onChoose: chain.onChoose,
+    options: Object.entries(chains).map(([name, entries]) => ({ id: name, name, detail: chainText(entries, models) })) };
 }
 
 function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, onClose, change, setChange }: {
@@ -180,12 +205,14 @@ function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, o
   const panel = useRef<HTMLDivElement>(null);
   const list = useRef<OptionListHandle>(null);
   const [query, setQuery] = useState(initialQuery);
-  const activeKey = binding.model ? modelKey(binding.model) : undefined;
-  const choices = binding.choices;
   const models = useLoad(binding.listModels, "models");
-  // Each model allows its own levels, so they are read again after a change.
-  const levels = useLoad(binding.listThinkingLevels, activeKey ?? (choices?.current === undefined ? "none" : `${CHOICE_PREFIX}${choices.current}`));
   const prefs = useModelPrefs();
+  const choices = binding.choices ?? (binding.chain && chainChoices(binding.chain, prefs, models.type === "ready" ? models.value : []));
+  // While a named choice is in effect, no model row is current: choosing the active entry pins that model instead.
+  const inChoice = choices?.current !== undefined;
+  const activeKey = binding.model && !inChoice ? modelKey(binding.model) : undefined;
+  // Each model allows its own levels, so they are read again after a change.
+  const levels = useLoad(binding.listThinkingLevels, binding.model ? modelKey(binding.model) : inChoice ? `${CHOICE_PREFIX}${choices.current ?? ""}` : "none");
   const [showHidden, setShowHidden] = useState(false);
   const menu = useMemo(() => models.type === "ready" ? modelMenu(models.value, query, { prefs, showHidden, activeKey }) : { groups: [], hidden: 0 },
     [models, query, prefs, showHidden, activeKey]);
@@ -239,7 +266,7 @@ function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, o
   }
   async function pickChoice(id: string) {
     if (busy || !choices) return;
-    if (id === choices.current && binding.model === undefined) { onClose(true); return; }
+    if (id === choices.current) { onClose(true); return; }
     setChange({ type: "changing", target: `${CHOICE_PREFIX}${id}` });
     try {
       await choices.onChoose(id);
@@ -256,7 +283,7 @@ function ModelPanel({ id, binding, anchor, trigger, minWidthRem, initialQuery, o
   const choiceGroup: OptionGroup | undefined = choices && models.type === "ready" ? { key: CHOICE_PREFIX, label: choices.label, options: choices.options
     .filter((option) => needle === "" || option.name.toLowerCase().includes(needle) || option.detail?.toLowerCase().includes(needle))
     .map((option) => ({ id: `${CHOICE_PREFIX}${option.id}`, name: option.name, details: option.detail ? [option.detail] : undefined,
-      current: binding.model === undefined && option.id === choices.current, blocked: busy,
+      current: option.id === choices.current, blocked: busy,
       busy: change.type === "changing" && change.target === `${CHOICE_PREFIX}${option.id}` })) } : undefined;
   const status: OptionStatus | undefined = models.type === "loading" ? { tone: "status", text: "Loading models…" }
     : models.type === "failed" ? { tone: "alert", text: `Models unavailable: ${models.message}` }

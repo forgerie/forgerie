@@ -3,6 +3,7 @@ import { ModelPicker, type ModelBinding, type PickerOpen } from "../ui/ModelPick
 import { TextButton } from "../ui/TextButton";
 import { thinkingLevelsFor } from "../newSession";
 import type { SessionModel } from "../contracts";
+import { chainReferenceOf, chainReferenceText } from "../modelChoice";
 import { modelName, modelOf, modelText, parseModel } from "./workflowRoute";
 
 /** What a worker without a model runs on: its agent file's model, else the session's. */
@@ -36,12 +37,19 @@ export function WorkerModelPicker({ worker, agent, model, reset, models, disable
   const [open, setOpen] = useState<PickerOpen>();
   const spec = parseModel(model);
   const current = modelOf(model, models.known);
+  // A model without a provider names a model chain; its level, if any, applies to every entry.
+  const chain = chainReferenceOf(model);
+  const level = spec?.level ?? chain?.level;
   const binding: ModelBinding = {
-    model: current, thinkingLevel: spec?.level, disabled, emptyLabel: defaultModelLabel(agent),
+    model: current, thinkingLevel: level, disabled, emptyLabel: defaultModelLabel(agent),
     listModels: models.list, listThinkingLevels: async () => thinkingLevelsFor(current),
-    onModel: async (provider, id) => { await onChange(modelText({ provider, id, level: spec?.level })); },
-    onThinkingLevel: async (level) => { if (spec !== undefined) await onChange(modelText({ ...spec, level })); },
-    thinking: current !== undefined,
+    onModel: async (provider, id) => { await onChange(modelText({ provider, id, level })); },
+    onThinkingLevel: async (next) => {
+      if (spec !== undefined) await onChange(modelText({ ...spec, level: next }));
+      else if (chain !== undefined) await onChange(chainReferenceText(chain.name, next));
+    },
+    thinking: current !== undefined || chain !== undefined,
+    chain: { current: chain?.name, onChoose: async (name) => { await onChange(chainReferenceText(name, level)); } },
   };
   const edited = reset !== undefined && model !== reset.to;
   return <>

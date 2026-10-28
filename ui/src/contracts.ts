@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ModelChainWait } from "@shared/apiTypes";
 import { createSessionHistoryPageSchema, createSessionOpenSchema } from "@shared/sessionOpen";
 // This shared module is the sole schema source for native replacement frames.
 export { durableBrowserSnapshotSchema } from "@shared/durableBrowserSnapshot";
@@ -91,6 +92,9 @@ export type PendingDialog = z.infer<typeof pendingDialogSchema>;
 export const DIALOG_INPUT_MAX_LENGTH = 4_000;
 export const doubleEscapeActionSchema = z.enum(["tree", "fork", "none"]);
 export type DoubleEscapeAction = z.infer<typeof doubleEscapeActionSchema>;
+/** The pause before a model chain moves past an entry: `from` is the entry it waits for, `until` the time in ms. */
+export const chainWaitSchema = z.object({ from: z.string(), error: z.string(), until: z.number() }) satisfies z.ZodType<ModelChainWait>;
+export type ChainWait = z.infer<typeof chainWaitSchema>;
 export const statusSchema = z.object({
   workflow: z.object({ name: z.string(), stages: z.array(z.enum(["done", "working", "waiting", "failed", "next"])),
     stage: z.string(), waiting: z.number() }).optional().catch(undefined),
@@ -99,6 +103,10 @@ export const statusSchema = z.object({
   isBashRunning: z.boolean(),
   pendingAsk: pendingAskSchema.optional(),
   model: sessionModelSchema.optional(),
+  /** The model chain the session runs on. `model` is then the chain's active entry. A malformed value drops out. */
+  modelChain: z.string().min(1).optional().catch(undefined),
+  /** The chain waits before it moves past `from` (src/shared/apiTypes.ts `ModelChainWait`). Stop cancels the wait. */
+  chainWait: chainWaitSchema.optional().catch(undefined),
   thinkingLevel: z.string().optional(),
   doubleEscapeAction: doubleEscapeActionSchema.optional(),
   // A dialog of a kind this client does not know stays out of the list, not the whole status.

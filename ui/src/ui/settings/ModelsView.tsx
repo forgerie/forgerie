@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { modelsResponseSchema, type SessionModel } from "../../contracts";
-import { compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
+import { chainText, compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
 import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, TITLE_MODEL_COPY, titleModelState, type Lists, type PrefsChange } from "../../models/modelPrefs";
 import { THINKING_LEVELS, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
 import type { ModelChainsSectionProps } from "../../models/ModelChainsSection";
@@ -230,6 +230,8 @@ function DefaultModel({ lists, models, locked, onChange }: {
 }) {
   const anchor = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<PickerOpen>();
+  // A default without a provider names a model chain.
+  const chain = lists.defaultModel && !lists.defaultModel.includes("/") ? lists.defaultModel : undefined;
   const split = lists.defaultModel ? splitKey(lists.defaultModel) : undefined;
   const chosen = models.find((model) => keyOf(model) === lists.defaultModel) ?? (split ? { ...split, name: lists.defaultModel ?? undefined } : undefined);
   const start = startModel(lists, models);
@@ -239,8 +241,13 @@ function DefaultModel({ lists, models, locked, onChange }: {
     listModels: async () => [...models], listThinkingLevels: async () => thinkingLevelsFor(chosen),
     onModel: async (provider, id) => { onChange({ type: "default", key: `${provider}/${id}` }); },
     onThinkingLevel: async (level) => { onChange({ type: "defaultLevel", level }); },
+    chain: { current: chain, onChoose: async (name) => { onChange({ type: "default", key: name }); } },
   };
-  const hint = start.reason === "unset" ? <>Pi has no default yet, so new sessions start on {startName}.</>
+  const chainEntries = chain !== undefined && lists.modelChains && Object.hasOwn(lists.modelChains, chain) ? lists.modelChains[chain] : undefined;
+  const [noChain, createIt] = TITLE_MODEL_COPY.unknownChain;
+  const hint = chain !== undefined ? chainEntries ? `New sessions start on the ${chain} chain. They try ${chainText(chainEntries, models)}, moving on when a model is unavailable.`
+    : <>{noChain}<code>{chain}</code>{createIt}</>
+    : start.reason === "unset" ? <>Pi has no default yet, so new sessions start on {startName}.</>
     : start.reason === "unavailable" ? <>No signed-in provider offers <code>{lists.defaultModel}</code>, so new sessions start on {startName}.</>
     : start.reason === "notFavorite" ? <>{modelLabel(chosen)} is not a favorite, so new sessions start on {startName}.{" "}
       <button type="button" className="agent-text-button" disabled={locked} onClick={() => { if (lists.defaultModel) onChange({ type: "favorite", key: lists.defaultModel, on: true }); }}>Add it to favorites</button></>
@@ -261,7 +268,8 @@ function TitleModel({ lists, models, locked, onChange }: {
   const anchor = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<PickerOpen>();
   const key = lists.titleModel ?? undefined;
-  const state = titleModelState(key, models);
+  const state = titleModelState(key, models, lists.modelChains);
+  const chain = state === "chain" || state === "unknownChain" ? key : undefined;
   const split = key ? splitKey(key) : undefined;
   const chosen = models.find((model) => keyOf(model) === key) ?? (split ? { ...split, name: key } : undefined);
   const binding: ModelBinding = {
@@ -269,9 +277,14 @@ function TitleModel({ lists, models, locked, onChange }: {
     listModels: async () => [...models], listThinkingLevels: async () => [],
     onModel: async (provider, id) => { onChange({ type: "titleModel", key: `${provider}/${id}` }); },
     onThinkingLevel: async () => undefined,
+    chain: { current: chain, onChoose: async (name) => { onChange({ type: "titleModel", key: name }); } },
   };
   const [before, after] = TITLE_MODEL_COPY.unavailable;
-  const hint = state === "unavailable" ? <>{before}<code>{key}</code>{after}</> : TITLE_MODEL_COPY[state];
+  const [noChain, createIt] = TITLE_MODEL_COPY.unknownChain;
+  const entries = state === "chain" && key && lists.modelChains ? lists.modelChains[key] ?? [] : [];
+  const hint = state === "unavailable" ? <>{before}<code>{key}</code>{after}</>
+    : state === "unknownChain" ? <>{noChain}<code>{key}</code>{createIt}</>
+    : state === "chain" ? `${TITLE_MODEL_COPY.chain}${chainText(entries, models)}.` : TITLE_MODEL_COPY[state];
   return <SettingsField label={TITLE_MODEL_COPY.label} hint={hint}>
     <div ref={anchor} className="agent-model">
       <ModelPicker binding={binding} anchor={anchor} open={open} onOpenChange={setOpen} />

@@ -2,6 +2,7 @@
 // plan's prose does not name models, so the run can start with it, and the start sends it as `models`. Adding or
 // removing a stage or a worker changes what the plan describes, so the agent must update the plan first: those
 // changes go to it as a note through the proposal's changes route.
+import { chainReferenceOf } from "../modelChoice";
 import type { SessionModel } from "../contracts";
 import type { WorkflowStage } from "./workflowsModel";
 
@@ -30,8 +31,10 @@ export function modelOf(spec: string | undefined, known: readonly SessionModel[]
   return known.find((model) => model.provider === parsed.provider && model.id === parsed.id) ?? { provider: parsed.provider, id: parsed.id };
 }
 
-/** "Claude Sonnet 5", or "its default model" for none: the agent file's, else the session's. */
+/** "Claude Sonnet 5", "the worker chain" for a model chain, or "its default model" for none: the agent file's, else the session's. */
 export function modelName(spec: string | undefined, known: readonly SessionModel[] = []): string {
+  const chain = chainReferenceOf(spec);
+  if (chain !== undefined) return `the ${chain.name} chain`;
   const model = modelOf(spec, known);
   return model === undefined ? "its default model" : model.name ?? model.id ?? spec ?? "";
 }

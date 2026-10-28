@@ -1,5 +1,6 @@
 import { recapResultSchema } from "@shared/sessionRecap";
 import type { RecapRequestState } from "./recap/recapModel";
+import type { SessionModelSelection } from "@shared/sessionModelSelection";
 import type { EarlierHistory } from "./historyPaging";
 import { SessionWireDecoder } from "@shared/sessionWire";
 import { processesEventSchema, type ProcessesEvent } from "./processes/processSchemas";
@@ -725,7 +726,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
    * picker shows; nothing changes in the browser before that. Never retried:
    * a lost acknowledgement does not prove the change did not apply.
    */
-  async function changeRuntime(endpoint: "model" | "thinking-level", body: Record<string, string>) {
+  async function changeRuntime(endpoint: "model" | "thinking-level", body: Omit<SessionModelSelection, "cwd"> | { level: string }) {
     const session = state.session;
     if (!session || state.connection.type !== "ready") throw new Error("The session is not connected.");
     const version = statusVersion;
@@ -971,6 +972,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     listModels: async (signal?: AbortSignal) => (await readForPicker("models", modelsResponseSchema, signal)).models,
     listThinkingLevels: async (signal?: AbortSignal) => (await readForPicker("thinking-levels", thinkingLevelsResponseSchema, signal)).levels,
     setModel: (provider: string, modelId: string) => changeRuntime("model", { provider, modelId }),
+    /** Puts the session on a model chain. Choosing a model with `setModel` leaves the chain. */
+    setModelChain: (modelChain: string) => changeRuntime("model", { modelChain }),
     setThinkingLevel: (level: string) => changeRuntime("thinking-level", { level }),
     dismissCompaction: () => { if (state.compaction.type === "finished") update({ ...state, compaction: idleCompaction }); },
     saveAttachment: async (attachment: PromptAttachment, signal?: AbortSignal) => {

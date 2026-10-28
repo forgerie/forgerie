@@ -100,6 +100,7 @@ export interface Lists {
 export type PrefsChange =
   | { type: "favorite"; key: string; on: boolean }
   | { type: "show"; keys: readonly string[]; on: boolean }
+  /** A `provider/id` key, or a model chain's name: a chain names models of its own, so the lists stay as they are. */
   | { type: "default"; key: string }
   | { type: "defaultLevel"; level: string }
   /** The title model is not on the lists: hiding or unstarring a model leaves it alone. */
@@ -118,6 +119,7 @@ export function applyChange(prefs: Lists, change: PrefsChange, models: readonly 
   if (change.type === "defaultLevel") return { ...prefs, favorites: [...prefs.favorites], defaultThinkingLevel: change.level };
   if (change.type === "titleModel") return { ...prefs, favorites: [...prefs.favorites], titleModel: change.key };
   if (change.type === "chains") return { ...prefs, favorites: [...prefs.favorites], modelChains: change.chains };
+  if (change.type === "default" && !change.key.includes("/")) return { ...prefs, favorites: [...prefs.favorites], defaultModel: change.key };
   if (change.type === "default") {
     const favorites = prefs.favorites.length === 0 || favoriteKeysOf(prefs.favorites).has(change.key) ? [...prefs.favorites] : [...prefs.favorites, change.key];
     return { ...kept, favorites, visible: shownWith(prefs.visible, change.key), defaultModel: change.key };
@@ -148,10 +150,16 @@ export function applyChange(prefs: Lists, change: PrefsChange, models: readonly 
  *   session's own model writes it.
  * - `chosen`: the chosen model writes it.
  */
-export type TitleModelState = "unset" | "unavailable" | "chosen";
+export type TitleModelState = "unset" | "unavailable" | "chosen" | "chain" | "unknownChain";
 
-export function titleModelState(titleModel: string | null | undefined, models: readonly ModelId[]): TitleModelState {
+/**
+ * A title model without a provider names a model chain:
+ * - `chain`: the chain's models write it, in order.
+ * - `unknownChain`: no chain has that name.
+ */
+export function titleModelState(titleModel: string | null | undefined, models: readonly ModelId[], chains: ModelChains = {}): TitleModelState {
   if (!titleModel) return "unset";
+  if (!titleModel.includes("/")) return Object.hasOwn(chains, titleModel) ? "chain" : "unknownChain";
   return models.some((model) => keyOf(model) === titleModel) ? "chosen" : "unavailable";
 }
 
@@ -164,6 +172,10 @@ export const TITLE_MODEL_COPY = {
   /** Shown around the model's key, in code. */
   unavailable: ["No signed-in provider offers ", ", so each session's own model writes its title."],
   chosen: "Writes the title of each new session from its first prompt. A change applies to the next new session.",
+  /** Shown before the chain's models, in order. */
+  chain: "Writes each new session's title from its first prompt, trying ",
+  /** Shown around the chain's name, in code. */
+  unknownChain: ["No model chain is named ", ". Choose a chain or a model, or create the chain under Model chains."],
 } as const;
 
 /** `provider/id` split at the first slash: a provider has none, an ID may. */
