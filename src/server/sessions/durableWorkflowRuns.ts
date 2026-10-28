@@ -13,6 +13,7 @@ import { childParentSubmission } from "./durableChildParentInput.js";
 import { WorkflowProposalSchema, WorkflowProposalToolSchema, type WorkflowProposal, type WorkflowProposalTool } from "../../shared/workflowProposals.js";
 import { admitChild, completionProblem, declaredWorker, reviewRoundRefusal, stageForChild, stopOf, stopRequestProblem } from "../../shared/workflowStops.js";
 import { gateWaitsInTx } from "./durableGateRecords.js";
+import { latestChildRequest } from "./childRequestIds.js";
 import { assertProseOnly, parseWorkflow, WorkflowError, workflowInputs, workflowPrompt, workflowRouteText, type ProseWorkflow, type WorkflowInventory, type WorkflowLibrary } from "../resources/workflowLibrary.js";
 
 export const WORKFLOW_DOC_KIND = "forgerie.workflow-runs";
@@ -814,12 +815,8 @@ async function reconcileReportFailures(tx: Tx, parent: ConversationId, run: Work
     if (child.state.kind === "working") {
       const conversationId = child.conversationId;
       if (!Check(childIdSchema, conversationId)) throw new Error("Invalid workflow child identity");
-      // The reporter may fail after a retry input rather than after the original admitted request.
-      let submission: SubmissionRecord | undefined;
-      for (const request of [3, 2, 1, 0]) {
-        submission = await tx.submissionByRequest(conversationId, request === 0 ? `child:${String(id)}` : `child:${String(id)}:retry:${String(request)}`);
-        if (submission !== undefined) break;
-      }
+      // The reporter may fail after a retry or model-chain switch input rather than after the original request.
+      const submission: SubmissionRecord | undefined = await latestChildRequest(id, (requestId) => tx.submissionByRequest(conversationId, requestId));
       child.state = submission === undefined ? { kind: "settled", outcome: "failed", result: reason, delivered: false }
         : await submissionState(tx, submission);
       if (child.state.kind === "working") continue;

@@ -98,7 +98,7 @@ Forgerie reads these frontmatter keys: `name`, `description`, `model` (with an o
 
 ### Model chains
 
-Define ordered lists once in the active [Forgerie config](config.md), not in each agent file:
+Define ordered lists once in the active [Forgerie config](config.md), not in each agent file. A chain holds 1 to 16 entries:
 
 ```json
 {
@@ -160,7 +160,7 @@ Cooldowns are shared by all sessions in the daemon and saved in `$PI_WEB_DATA_DI
 
 Spawn and send inputs can belong to the same child run. That failed run has one durable retry owner, claimed in the parent's Children document. Other reporters wait for that owner, keep the same final outcome, and suppress their duplicate report. A steer that joins a retry keeps its existing owner and remaining budget. Stop cancels the owner and its observers. If the owner reporter faults while its input is still queued or placed, observers keep waiting for that input to settle. Both records keep the child's actual final outcome, not the earlier provider error.
 
-Each retry or switch submits “Continue where you stopped; the previous model was unavailable.” with a new durable request ID. The reporter checkpoints its progress and absolute deadline and sleeps with Durable's clock. The model change, fallback record, and delivery checkpoint commit together. Restart keeps the deadline and does not repeat an admitted switch or retry. A switch waits for any already-running turn before changing its model. `/children` exposes the latest switch as `fallback: {from, to, reason}` and a pending wait as `retry: {attempt, max: 3, error, until}`. During a chain's one-minute wait, `attempt` is 1; during exhaustion, it counts the three budget waits. The child remains busy during backoff, and Stop cancels it.
+Each retry or switch submits “Continue where you stopped; the previous model was unavailable.” with a new durable request ID. The reporter checkpoints its progress and absolute deadline and sleeps with Durable's clock. The model change, fallback record, and delivery checkpoint commit together. Restart keeps the deadline and does not repeat an admitted switch or retry. A switch waits for any already-running turn before changing its model. `/children` exposes the latest switch as `fallback: {from, to, reason}` and a pending wait as `retry: {attempt, max: 3, error, until}`. During a chain's one-minute wait, `attempt` is 1; during exhaustion, it counts the three budget waits. `max: 3` is that exhaustion budget, not a limit on switches: a chain can reach a higher request attempt, at most two per entry plus the budget. Workflow recovery looks up every request attempt up to 64 and uses the latest one, so a reporter that fails after a later switch still records that switch's result. The child remains busy during backoff, and Stop cancels it.
 
 Run history stores `fallbacks` on the resumed run. The final parent report names the fallback, for example `(ran on openai/gpt-5 after anthropic/claude-opus-4: usage limit)`. When the budget ends, it includes a redacted, bounded diagnostic, not just `model_error`. A failed input is not a dead child: if it still runs other work, the report warns the parent not to start a replacement for the same files.
 

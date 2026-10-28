@@ -37,6 +37,7 @@ import type { WorktreeActionResult, WorktreeDiscardPreview } from "../../shared/
 import type { DurableChildWorktrees } from "./durableChildWorktrees.js";
 import { planChildRuntime, runtimeGaps, childIsWriter, missingToolsRefusal, type ChildRuntimePlan, type ChildSkill } from "./durableChildRuntime.js";
 import { readsImages, watchdogDiffTool } from "./durableChildTools.js";
+import { childRequestId } from "./childRequestIds.js";
 import { associateWorkflowChild, settleWorkflowChild, deliveredWorkflowChild, undeliveredWorkflowChild, workflowChildRefusal, workflowWorkerModel, REVIEWER_AGENT } from "./durableWorkflowRuns.js";
 import { deliverInputUntilPlaced, type InputPlacementState } from "./durableInputPlacement.js";
 import { childParentInputExtension, childParentSubmission, submitChildParentInput } from "./durableChildParentInput.js";
@@ -166,7 +167,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       const attempted = await runtime.snapshot(AgentDoc, conversationId, context);
       const attemptedModel = attempted?.model === undefined ? undefined : `${attempted.model.provider}/${attempted.model.modelId}`;
       const submission = await child.submit({ type: "input", content, whenBusy: attempt > 0 || followUp ? "followUp" : "steer",
-        requestId: attempt === 0 ? `child:${String(reporter.id)}` : `child:${String(reporter.id)}:retry:${String(attempt)}` }, context);
+        requestId: childRequestId(reporter.id, attempt) }, context);
       const selected = await resolve(runtime.conversationId, context);
       await selected.flushRunRecords?.();
       const settled = await submission.wait(context);
@@ -211,7 +212,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
             progress.delegated = true;
             return { status: "running", checkpoint: { phase: "observe", run, owner: claim.owner } };
           }
-          if (claim === undefined) doc.retryOwners = { ...doc.retryOwners, [run]: { owner: reporter.id, conversationId, requestId: attempt === 0 ? `child:${String(reporter.id)}` : `child:${String(reporter.id)}:retry:${String(attempt)}` } };
+          if (claim === undefined) doc.retryOwners = { ...doc.retryOwners, [run]: { owner: reporter.id, conversationId, requestId: childRequestId(reporter.id, attempt) } };
           const agent = doc.agents[name];
           let models: string[];
           try { models = current === undefined ? [] : chainModels(agent?.modelReference, chains, parseModelChoice(current) ?? settings ?? {}); }
@@ -301,7 +302,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
             await tx.appendEntry(conversationId, { kind: "forgerie.child-fallback", data: fallback });
           }
           const claim = doc.retryOwners?.[run];
-          if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
+          if (claim !== undefined) claim.requestId = childRequestId(reporter.id, attempt);
           const common = { attempt, error, failure, ...(nextProgress === undefined ? {} : { progress: nextProgress }) };
           return { status: "running", checkpoint: deadline === undefined ? { ...common, phase: "deliver" }
             : { ...common, phase: "retry", until: deadline, run, ...(nextAttempt === undefined ? {} : { retryAttempt: nextAttempt }) } };
@@ -317,7 +318,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       await runtime.commit(async (tx) => {
         const claim = run === undefined ? undefined : (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
         // Publish the next receipt before admission. A steer joining that retry inherits this owner and budget.
-        if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
+        if (claim !== undefined) claim.requestId = childRequestId(reporter.id, attempt);
         return { status: "running", checkpoint: { phase: "deliver", attempt, error, ...(failure === undefined ? {} : { failure }), ...(firstDelivery === undefined ? {} : { firstDelivery }), ...(progress === undefined ? {} : { progress }) } };
       }, context);
     },
@@ -362,7 +363,7 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
     // Preserve an answer already committed before Stop. Backoff cancellation itself settles as stopped.
     if (task.state.checkpoint.phase === "deliver") {
       const attempt = task.state.checkpoint.attempt ?? 0;
-      const submission = await tx.submissionByRequest(task.input.conversationId, attempt === 0 ? `child:${String(task.id)}` : `child:${String(task.id)}:retry:${String(attempt)}`);
+      const submission = await tx.submissionByRequest(task.input.conversationId, childRequestId(task.id, attempt));
       if (submission !== undefined && submission.status !== "queued" && submission.status !== "placed") await settleWorkflowChild(tx, runtime.conversationId, task.id, submission);
     }
     if (accepted !== undefined) await deliveredWorkflowChild(tx, runtime.conversationId, task.id);

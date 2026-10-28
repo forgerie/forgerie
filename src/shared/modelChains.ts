@@ -5,7 +5,12 @@ import { KNOWN_THINKING_LEVELS, parseModelReference, type ThinkingLevel } from "
 /** IDs may contain slashes and colons (for example local/qwen:32b). */
 export const ModelSpecSchema = Type.String({ pattern: "^[^\\s/:]+/[^\\s/:][^\\s/]*(?:/[^\\s/:][^\\s/]*)*$" });
 export const ModelChainReferenceSchema = Type.String({ pattern: `^[a-z0-9][a-z0-9-]*(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?$` });
-export const ModelChainsSchema = Type.Record(Type.String({ pattern: "^[a-z0-9][a-z0-9-]*$" }), Type.Array(ModelSpecSchema, { minItems: 1 }), { additionalProperties: false });
+/**
+ * A run makes at most 2 attempts per entry (one wait, one switch) plus the 3-step exhaustion budget, so 16 entries
+ * keep every attempt under MAX_CHILD_ATTEMPT (64) in src/server/sessions/childRequestIds.ts.
+ */
+export const MAX_MODEL_CHAIN_LENGTH = 16;
+export const ModelChainsSchema = Type.Record(Type.String({ pattern: "^[a-z0-9][a-z0-9-]*$" }), Type.Array(ModelSpecSchema, { minItems: 1, maxItems: MAX_MODEL_CHAIN_LENGTH }), { additionalProperties: false });
 export type ModelChains = Static<typeof ModelChainsSchema>;
 export interface ModelChoice { model: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel }
 export function parseModelChoice(spec: string): ModelChoice | null {
