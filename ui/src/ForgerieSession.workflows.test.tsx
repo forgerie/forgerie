@@ -67,18 +67,30 @@ async function sessionWithProposal(status: SessionStatus = idle) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }));
   await act(async () => root.render(<ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />));
-  await until(() => document.querySelector(".pinned-dock") !== null);
+  await until(() => ledgeRow() !== null);
   return { posts };
 }
+const ledgeRow = () => document.querySelector("section.ledge[data-open] .ledge-row");
 
 describe("a workflow the agent proposes", () => {
-  it("pins the card above the composer, keeps a line in the thread, and starts from the sheet", async () => {
+  it("waits in the ledge at the input, keeps a line in the thread, and starts from the sheet", async () => {
     const api = await sessionWithProposal();
-    const dock = document.querySelector(".pinned-dock");
-    expect(dock?.getAttribute("aria-label")).toBe("1 waiting for you");
-    expect(dock?.textContent).toContain("4 stages · 3 workers · 2 stops");
-    expect(document.body.textContent).toContain(`${PROPOSAL.name}waits for your review, pinned below the thread`);
-    await act(async () => { button("Review")?.click(); });
+    // The ledge holds it as a summary row; the pinned dock is for questions, stops and gated actions.
+    expect(document.querySelector(".pinned-dock")).toBeNull();
+    expect(ledgeRow()?.querySelector(".ledge-row-kind")?.textContent).toBe("Workflow");
+    expect(ledgeRow()?.querySelector(".ledge-row-title")?.textContent).toBe(PROPOSAL.name);
+    expect(button("Fold 1 proposal away")?.getAttribute("aria-expanded")).toBe("true");
+    // The thread keeps one line, which opens to the overview.
+    const line = document.querySelector(`[data-proposal="${PROPOSAL.id}"]`);
+    expect(line?.textContent).toContain(`${PROPOSAL.name}waits for your review at the input`);
+    expect(line?.textContent).toContain("4 stages · 3 workers · 2 stops");
+    // Show in chat brings the line into view and opens it.
+    const scrolled = vi.fn();
+    (line as HTMLElement).scrollIntoView = scrolled;
+    await act(async () => { ledgeRow()?.querySelector<HTMLButtonElement>(".ledge-row-main")?.click(); });
+    await until(() => scrolled.mock.calls.length === 1);
+    expect(line?.querySelector("details")?.hasAttribute("open")).toBe(true);
+    await act(async () => { ledgeRow()?.querySelector<HTMLButtonElement>(".ledge-row-button")?.click(); });
     await until(() => document.querySelector("dialog[open] .numbered-sections") !== null);
     // The plan is the page, and the rail holds the route with each worker's model.
     expect(document.querySelector("dialog[open] .split-sheet-title")?.textContent).toBe("Port the settings page to the shared store.");
@@ -88,8 +100,18 @@ describe("a workflow the agent proposes", () => {
       body: { cwd: "/work", inputs: { task: PROPOSAL.inputs["task"], rounds: 2 }, requestId: expect.any(String) } }]);
     await until(() => document.querySelector("dialog[open]") === null);
     await until(() => document.querySelector(".stage-strip")?.getAttribute("aria-label")?.startsWith(`Open the ${PROPOSAL.name} run`) === true);
-    expect(document.querySelector(".pinned-dock")).toBeNull();
+    // Decided, it leaves the ledge, and the thread shows its closed card.
+    await until(() => ledgeRow() === null);
     await until(() => document.querySelector(".decision-card-closed")?.textContent === "Started");
+  });
+
+  it("dismisses from the ledge's More menu", async () => {
+    const api = await sessionWithProposal();
+    await act(async () => { button(`More for ${PROPOSAL.name}`)?.click(); });
+    expect([...document.querySelectorAll("[role='menuitem']")].map((item) => item.textContent)).toEqual(["Show in chat", "Dismiss"]);
+    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>("[role='menuitem']")].find((item) => item.textContent === "Dismiss")?.click(); });
+    await until(() => api.posts.length === 1);
+    expect(api.posts[0]?.path).toBe(`/api/sessions/test/workflow-proposals/${PROPOSAL.id}/dismiss`);
   });
 
   it("holds Start while the agent's turn runs", async () => {

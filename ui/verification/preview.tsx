@@ -39,6 +39,8 @@ import type { ChildDetail } from "../src/childAgents/childWorkModel";
 import { REVIEW, DISCARD, CLEANUP, RUNS } from "../src/childAgents/fixtures/childWork";
 import { ChildEntryView } from "../src/childAgents/ChildEntryView";
 import { waitingItems, waitingLabel } from "../src/waitingOnYou";
+import { heldProposals, proposalNoun } from "../src/session/proposalLedge";
+import { ProposalLedge } from "../src/session/ProposalLedge";
 import { PinnedDock } from "../src/ui/PinnedDock";
 import { EventLine } from "../src/ui/EventLine";
 import { CHILDREN, STREAMING, TRANSCRIPT } from "../src/childAgents/fixtures/children";
@@ -813,15 +815,13 @@ function Preview() {
           onChanges={async (note) => { decideProposal(proposal.id, { kind: "changes", note, decidedAt: PROPOSAL.createdAt }); return true; }}
           onDismiss={() => decideProposal(proposal.id, { kind: "dismissed", decidedAt: PROPOSAL.createdAt })} />;
       })()}
-      <Thread beforeComposer={proposalPreview ? (() => {
-        const waiting = waitingItems(messages, [], flowProposals);
-        return <>
-          {waiting.length > 0 && <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map((item) => item.kind === "proposal"
-            ? <WorkflowEntryView key={item.id} entry={item.entry} proposal={flowProposals.find((candidate) => candidate.id === item.entry.proposalId)} proposalsRead
-              onReviewProposal={() => setFlowSheet(item.entry.proposalId)} /> : null)}</PinnedDock>}
-          {flowRun && <WorkflowRunStrip run={flowRun} onOpen={() => {}} />}
-        </>;
-      })() : pinnedPreview ? (() => {
+      <Thread ledge={proposalPreview ? (() => {
+        const held = heldProposals({ suggestions: [], view: { pending: {}, problems: {}, last: {}, drafts: {} }, messages, proposals: flowProposals });
+        return { count: held.length, noun: proposalNoun(held.length), keys: held.map((proposal) => proposal.key),
+          content: held.length === 0 ? null : <ProposalLedge proposals={held} actions={{ onFile: () => {}, onFileAndAct: () => {}, onDismiss: () => {}, onShow: () => {},
+            onReview: (entry) => setFlowSheet(entry.proposalId),
+            onDismissProposal: (id) => decideProposal(id, { kind: "dismissed", decidedAt: PROPOSAL.createdAt }) }} /> };
+      })() : undefined} beforeComposer={proposalPreview ? (flowRun && <WorkflowRunStrip run={flowRun} onOpen={() => {}} />) : pinnedPreview ? (() => {
         const waiting = waitingItems(messages, []);
         return waiting.length > 0 ? <PinnedDock label={waitingLabel(waiting.length)}>{waiting.map((item) => item.kind === "question"
           ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={async () => {}} onOpen={() => setChildView({ open: true, id: 21 })} /> : null)}</PinnedDock> : undefined;
@@ -830,7 +830,7 @@ function Preview() {
         const entry = (custom as { workflowEntry?: WorkflowEntry } | undefined)?.workflowEntry;
         if (entry?.kind !== "proposal") return undefined;
         const proposal = flowProposals.find((candidate) => candidate.id === entry.proposalId);
-        if (proposal?.state.kind === "open") return <EventLine tone="active" subject={entry.name} phrase="waits for your review, pinned below the thread" />;
+        if (proposal?.state.kind === "open") return <EventLine tone="active" subject={entry.name} phrase="waits for your review at the input" />;
         return <WorkflowEntryView entry={entry} proposal={proposal} proposalsRead onReviewProposal={() => setFlowSheet(entry.proposalId)} />;
       } : issuePreview ? (custom) => {
         const proposal = (custom as Partial<OldIssueProposalArtifact> | undefined)?.oldIssueProposal;

@@ -11,7 +11,7 @@ import { browserTransport } from "./sessionStore";
 import type { PiMessage, SessionStatus } from "./contracts";
 import type { Suggestion } from "./backlog/suggestions/suggestionsApi";
 import { answer } from "./backlog/suggestions/fixtures/serverLike";
-import { OPEN, look } from "./backlog/suggestions/fixtures/suggestions";
+import { FAILED_ACT, FILING, OPEN, look } from "./backlog/suggestions/fixtures/suggestions";
 
 let root: Root;
 let server: WebSocketServer | undefined;
@@ -45,8 +45,8 @@ const messages: PiMessage[] = [
 ];
 
 /** One chat on the routes, which answer from `state` as the server would. */
-async function chat({ cwd = "/work", projects = { "p-forgerie": "/work" } }: { cwd?: string; projects?: Record<string, string> } = {}) {
-  const state = { records: [record] };
+async function chat({ cwd = "/work", projects = { "p-forgerie": "/work" }, records = [record] }: { cwd?: string; projects?: Record<string, string>; records?: Suggestion[] } = {}) {
+  const state = { records };
   const posts: { path: string; body: unknown }[] = [];
   server = new WebSocketServer({ port: 0 });
   await new Promise<void>((resolve) => server!.once("listening", resolve));
@@ -77,9 +77,66 @@ async function chat({ cwd = "/work", projects = { "p-forgerie": "/work" } }: { c
   const view = () => <ForgerieSession id="test" known={{ id: "test", cwd }} onSwitchSession={switched}
     suggestionLinks={{ look, openSession: opened, openBacklog: vi.fn(), projectPath: (id) => projects[id], openBacklogItem }} />;
   await act(async () => root.render(view()));
-  await until(() => button("File and act") !== undefined);
+  await until(() => ledgeRow() !== null);
   return { state, posts, switched, opened, openBacklogItem, view };
 }
+
+const ledgeRow = () => document.querySelector<HTMLElement>("section.ledge[data-open] .ledge-row");
+const inLedge = (name: string) => [...ledgeRow()?.querySelectorAll<HTMLButtonElement>("button") ?? []].find((node) => node.textContent === name);
+const menuItem = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("[role='menuitem']")].find((node) => node.textContent?.startsWith(name));
+
+describe("a backlog suggestion in the ledge at the input", () => {
+  it("summarises it with File and File and act, files from there, and leaves once filed while the thread keeps the card", async () => {
+    const { posts } = await chat();
+    const row = ledgeRow()!;
+    expect(row.querySelector(".ledge-row-kind")?.textContent).toBe("Backlog");
+    expect(row.querySelector(".ledge-row-title")?.textContent).toBe(record.title);
+    // One proposal has room for a line about it.
+    expect(row.querySelector(".ledge-row-gist")?.textContent).toBe(record.body);
+    expect(inLedge("File")?.hasAttribute("data-tone")).toBe(false);
+    expect(inLedge("File and act")?.getAttribute("data-tone")).toBe("primary");
+    expect(inLedge("File and act")?.title).toBe("File it and start a background session on claude-haiku-4-5");
+    expect(button("Fold 1 proposal away")?.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => inLedge("File and act")!.click());
+    expect(posts).toEqual([{ path: `/api/backlog/suggestions/${record.id}/file-and-act`, body: { requestId: expect.any(String) } }]);
+    await until(() => ledgeRow() === null);
+    expect(button("Fold 1 proposal away")).toBeUndefined();
+    expect(document.querySelector("[data-suggestion] .decision-card")).not.toBeNull();
+  });
+
+  it("More shows the card in the chat and dismisses", async () => {
+    const { posts } = await chat();
+    const card = document.querySelector<HTMLElement>(`[data-suggestion="${record.id}"]`)!;
+    const scrolled = vi.fn();
+    card.scrollIntoView = scrolled;
+    await act(async () => button(`More for ${record.title}`)!.click());
+    expect([...document.querySelectorAll("[role='menuitem']")].map((item) => item.textContent)).toEqual(["File and act on another model…", "Show in chat", "Dismiss"]);
+    await act(async () => menuItem("Show in chat")!.click());
+    await until(() => scrolled.mock.calls.length === 1);
+    // The title is the same press.
+    await act(async () => ledgeRow()!.querySelector<HTMLButtonElement>(".ledge-row-main")!.click());
+    await until(() => scrolled.mock.calls.length === 2);
+    await act(async () => button(`More for ${record.title}`)!.click());
+    await act(async () => menuItem("Dismiss")!.click());
+    expect(posts.map((post) => post.path)).toEqual([`/api/backlog/suggestions/${record.id}/dismiss`]);
+    await until(() => ledgeRow() === null);
+  });
+
+  it("says why the last attempt failed, with Retry, and shows filing as work in flight", async () => {
+    const { posts } = await chat({ records: [{ ...FAILED_ACT, sessionId: "test" }] });
+    expect(ledgeRow()?.querySelector(".ledge-row-kind")?.textContent).toBe("Issue");
+    expect(ledgeRow()?.querySelector(".ledge-row-problem")?.textContent).toBe(FAILED_ACT.state.kind === "failed" ? FAILED_ACT.state.message : "");
+    expect(inLedge("File and act")).toBeUndefined();
+    await act(async () => inLedge("Retry")!.click());
+    // Retry repeats what failed: File and act.
+    expect(posts.map((post) => post.path)).toEqual([`/api/backlog/suggestions/${FAILED_ACT.id}/file-and-act`]);
+    await act(async () => root.unmount());
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    await chat({ records: [{ ...FILING, sessionId: "test" }] });
+    expect(ledgeRow()?.querySelector("[role='status']")?.textContent).toBe("Filing…");
+    expect(inLedge("File")).toBeUndefined();
+  });
+});
 
 describe("a backlog suggestion in the chat", () => {
   it("draws the server's record as a card, and counts it in the header", async () => {

@@ -77,7 +77,7 @@ import { foldChildEntries } from "./childAgents/childAgentsModel";
 import { ChildAgentsOpener } from "./childAgents/ChildAgentsOpener";
 import { ChildAgentsPanel } from "./childAgents/ChildAgentsPanel";
 import { ChildEntryView } from "./childAgents/ChildEntryView";
-import { activeRun, waitingStops, type ProposalEntry, type WorkflowInputs } from "./workflows/workflowsModel";
+import { activeRun, proposalGlance, waitingStops, type ProposalEntry, type WorkflowInputs } from "./workflows/workflowsModel";
 import { WorkflowEntryView } from "./workflows/WorkflowEntryView";
 import { WorkflowOpener } from "./workflows/WorkflowOpener";
 import { WorkflowPicker } from "./workflows/WorkflowPicker";
@@ -105,6 +105,10 @@ import { cardInputs } from "./backlog/suggestions/cardInputs";
 import { openerView } from "./backlog/suggestions/suggestionsModel";
 import type { SessionLook } from "./backlog/backlogModel";
 import { writeClipboardText } from "./clipboard";
+import { heldProposals, proposalNoun, type HeldProposal } from "./session/proposalLedge";
+import { ProposalLedge } from "./session/ProposalLedge";
+import { MarkdownFragment } from "./ui/MarkdownFragment";
+import { launchModel, modelWords } from "./backlog/suggestions/suggestionsModel";
 
 /** How this chat's backlog suggestions reach the rest of the app. Only an explicit Open or Show moves the reader. */
 export interface SuggestionLinks {
@@ -365,16 +369,21 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   const runs = flows.runs;
   const deciding = flows.deciding;
   // What waits on the reader is pinned above the composer; its place in the thread keeps one quiet line.
+  // Proposals wait in the ledge at the input instead, and their place keeps a line too.
   const proposals = flows.proposals;
   const records = held.records;
   // A failed read must not hide a real wait: the transcript's gated actions pin unless a record says they were decided.
   const gatedReadFailed = held.readError !== undefined;
-  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, proposals, { records, readFailed: gatedReadFailed }),
-    [folded, runs, proposals, records, gatedReadFailed, readOnly]);
+  const waiting = useMemo(() => readOnly ? [] : waitingItems(folded, runs, { records, readFailed: gatedReadFailed }),
+    [folded, runs, records, gatedReadFailed, readOnly]);
   // Several held calls, such as pushes that are all ready, take one choice. Each still runs as its own approval.
   const batch = useMemo(() => held.deciding !== undefined ? [] : batchApprovable(waiting.flatMap((item) => item.kind === "gated" ? [item.entry] : []), records, gatedReadFailed),
     [waiting, records, gatedReadFailed, held.deciding]);
   const pinned = useMemo(() => new Set(waiting.map(pinKey)), [waiting]);
+  // What the agent proposed that still waits, newest first, in the ledge at the input. A read-only session has no input.
+  const ledgeProposals = useMemo(() => readOnly ? [] : heldProposals({ suggestions: suggestionsView.suggestions, view: suggestionsView,
+    messages: folded, proposals, proposing: flows.proposing }), [readOnly, suggestionsView, folded, proposals, flows.proposing]);
+  const ledgeKeys = useMemo(() => new Set(ledgeProposals.map((proposal) => proposal.key)), [ledgeProposals]);
   // A gated action's card renders from its entry at once; the session's record says what became of it.
   const gatedView = useCallback((entry: GatedActionEntry, key?: string) => <GatedActionCard key={key} entry={entry}
     record={records?.find((record) => record.id === entry.id)} read={records !== undefined && !gatedReadFailed}
@@ -388,15 +397,16 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     onReviewProposal={readOnly ? undefined : () => setWorkflowSheet({ type: "proposal", entry })} />, [proposals, readOnly]);
   const renderWaiting = useCallback((item: (typeof waiting)[number]) => item.kind === "question"
     ? <ChildEntryView key={item.id} entry={item.entry} onAnswer={childrenAvailable ? childAgents.answer : undefined} onOpen={childrenAvailable ? openChildByName : undefined} />
-    : item.kind === "proposal" ? proposalView(item.entry, item.id)
     : item.kind === "gated" ? gatedView(item.entry, item.id)
     : <WorkflowEntryView key={item.id} entry={item.entry} run={runs.find((run) => run.id === item.entry.runId)} deciding={deciding === `${item.entry.runId}/${item.entry.stage}`}
       onDecide={(decision, note) => workflows.decide(item.entry.runId, item.entry.stage, decision, note)}
       onReview={childrenAvailable ? () => { childAgents.refresh(); setChildrenOpen(true); } : undefined} />, [childrenAvailable, childAgents, openChildByName, runs, deciding, workflows, proposalView, gatedView]);
   const systemArtifact = useCallback<SystemArtifactView>((custom) => {
     const flow = (custom as Partial<WorkflowEntryArtifact> | undefined)?.workflowEntry;
-    if (flow?.kind === "proposal") return pinned.has(`p:${flow.proposalId}`)
-      ? <EventLine tone="active" subject={flow.name} phrase="waits for your review, pinned below the thread" /> : proposalView(flow);
+    // A proposal held in the ledge keeps one line here, which opens to its overview; Show in chat brings it into view.
+    if (flow?.kind === "proposal") return ledgeKeys.has(`p:${flow.proposalId}`)
+      ? <div data-proposal={flow.proposalId}><EventLine tone="active" subject={flow.name} phrase="waits for your review at the input"
+        detail={<><MarkdownFragment text={flow.summary} /><p>{proposalGlance(flow.stages)}</p></>} /></div> : proposalView(flow);
     if (flow?.kind === "stop" && pinned.has(`s:${flow.runId}/${flow.stage}/${String(flow.round)}`)) {
       return <EventLine tone="active" subject={flow.stageName} phrase="waits for your decision, pinned below the thread" />;
     }
@@ -426,7 +436,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     if (event === undefined) return undefined;
     const onLoadOutput = sessionId && cwd ? () => loadProcessOutput(browserTransport.request, { id: sessionId, cwd }, event.id) : undefined;
     return <ProcessEventView event={event} onLoadOutput={onLoadOutput} />;
-  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, proposalView, gatedView]);
+  }, [sessionId, cwd, childAgents, childrenAvailable, openChildByName, readOnly, runs, deciding, workflows, pinned, ledgeKeys, proposalView, gatedView]);
   // Backlog suggestions: cards in the thread and the header's list read the server's records, never the transcript alone.
   const look = suggestionLinks?.look ?? NO_LOOK;
   const openSuggestionSession = suggestionLinks?.openSession;
@@ -466,18 +476,22 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
       links: { look, openSession: openSuggestionSession ?? (() => undefined), openLink, copy: writeClipboardText, openFile: openSuggestionFile },
       chat: { model: chatModel, thinkingLevel: chatThinking }, knownModels: suggestionModels, listModels: connected ? store.listModels : undefined, now: Date.now() })} /></div>;
   }, [suggestions, suggestionsView, look, openSuggestionSession, openSuggestionFile, chatModel, chatThinking, suggestionModels, connected, store]);
-  // Show in chat: bring the card into view once the thread has drawn it.
-  const [revealing, setRevealing] = useState<string>();
+  // Show in chat: bring the card into view once the thread has drawn it. A proposal's line opens to its overview.
+  const [revealing, setRevealing] = useState<{ attribute: "data-suggestion" | "data-proposal"; id: string }>();
   const revealSuggestionKey = revealSuggestion?.key;
   const revealSuggestionId = revealSuggestion?.suggestionId;
-  useEffect(() => { if (revealSuggestionId !== undefined) setRevealing(revealSuggestionId); }, [revealSuggestionId, revealSuggestionKey]);
+  useEffect(() => { if (revealSuggestionId !== undefined) setRevealing({ attribute: "data-suggestion", id: revealSuggestionId }); },
+    [revealSuggestionId, revealSuggestionKey]);
   useEffect(() => {
     if (revealing === undefined || !visible) return;
-    const card = document.querySelector(`[data-suggestion="${CSS.escape(revealing)}"]`);
+    const card = document.querySelector(`[${revealing.attribute}="${CSS.escape(revealing.id)}"]`);
     if (card === null) return;
+    card.querySelector("details")?.setAttribute("open", "");
     card.scrollIntoView({ block: "center" });
     setRevealing(undefined);
   }, [revealing, visible, messages, suggestionsView]);
+  const showProposal = useCallback((proposal: HeldProposal) => setRevealing(proposal.type === "suggestion"
+    ? { attribute: "data-suggestion", id: proposal.id } : { attribute: "data-proposal", id: proposal.id }), []);
   const running = activeRun(runs);
   // Flagged guesses never pin in the dock and never ask for a response; the header counts them quietly.
   // Before the log is read, the session's status says how many there are.
@@ -625,6 +639,20 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
       <SessionDoorsProvider cwd={cwd} open={openDoor}>
       <Thread earlier={state.earlier} followTail={!state.transcript.isRunning && state.connection.type !== "loading"} ask={ask} mentions={mentions} chatDraft={chatDraft} systemArtifact={systemArtifact} toolArtifact={toolArtifact}
         reveal={reveal}
+        ledge={readOnly ? undefined : { count: ledgeProposals.length, noun: proposalNoun(ledgeProposals.length), keys: ledgeProposals.map((proposal) => proposal.key),
+          content: ledgeProposals.length === 0 ? null : <ProposalLedge proposals={ledgeProposals} actions={{
+            onFile: (suggestionId) => { void suggestions.file(suggestionId); }, onFileAndAct: (suggestionId) => { void suggestions.fileAndAct(suggestionId); },
+            onDismiss: (suggestionId) => { void suggestions.dismiss(suggestionId); }, onShow: showProposal,
+            onReview: (proposalEntry) => setWorkflowSheet({ type: "proposal", entry: proposalEntry }),
+            onDismissProposal: (proposalId) => { void workflows.dismissProposal(proposalId); },
+          }} otherModel={connected ? { listModels: store.listModels,
+            launch: (suggestionId) => {
+              const record = suggestionList?.find((candidate) => candidate.id === suggestionId);
+              const launch = record ? launchModel(record, suggestionsView.models[suggestionId], { model: chatModel, thinkingLevel: chatThinking }, suggestionModels) : undefined;
+              return { model: launch?.model, thinkingLevel: launch?.thinkingLevel, words: modelWords(launch?.model) ?? "this chat's model" };
+            },
+            onPick: (suggestionId, model) => { suggestions.setModel(suggestionId, model); void suggestions.fileAndAct(suggestionId); },
+          } : undefined} /> }}
         beforeComposer={<>
           {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}
             onStep={found.type === "message" ? found.onStep : () => undefined} />}
@@ -739,7 +767,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
         problems={suggestionsView.problems} drafts={suggestionsView.drafts} look={look} knownModels={suggestionModels} now={Date.now()} actions={{
           onFile: (suggestionId) => { void suggestions.file(suggestionId); }, onFileAndAct: (suggestionId) => { void suggestions.fileAndAct(suggestionId); },
           onRestore: (suggestionId) => { void suggestions.restore(suggestionId); },
-          onShow: (suggestionId) => { setSuggestionsOpen(false); setRevealing(suggestionId); },
+          onShow: (suggestionId) => { setSuggestionsOpen(false); setRevealing({ attribute: "data-suggestion", id: suggestionId }); },
           onOpenSession: (sessionId) => { setSuggestionsOpen(false); openSuggestionSession?.(sessionId); },
           onOpenFile: openSuggestionFile ? (projectId, path) => { setSuggestionsOpen(false); openSuggestionFile(projectId, path); } : undefined,
           onOpenBacklog: suggestionLinks?.openBacklog ? () => { setSuggestionsOpen(false); suggestionLinks.openBacklog?.(); } : undefined,
