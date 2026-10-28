@@ -40,3 +40,27 @@ describe("child model failures", () => {
     expect(planChildModelFailure({ models: ["a/one"], current: "a/one", error: "quota", now: 0, cooldowns: {} })).toEqual({ kind: "report" });
   });
 });
+
+describe("single-model legacy compatibility", () => {
+  // Frozen pre-chain predicate. New fallback classification must not change this contract.
+  const transient = /overloaded|\b5\d{2}\b|auth_unavailable|server[ _-]?busy|high demand|at capacity|rate[ _-]?limit|too many requests|\b429\b|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
+  const permanent = /invalid.*(?:api[ _-]?key|credentials)|insufficient_quota|quota exceeded|billing|out of budget|usage limit reached|context.*(?:window|limit)|too many tokens/i;
+  it.each([
+    "HTTP 429. Try again in ~17 min.", "overloaded; Server requested 120s retry delay (max: 60s)",
+    "HTTP 503 unavailable", "WebSocket closed", "auth_unavailable", "insufficient_quota 503", "quota exceeded 429",
+    "billing exhausted 503", "Invalid API key 429", "Context window limit overloaded", "too many tokens 429",
+    "unexpected response", "Try again in ~17 min.", "Server requested 120s retry delay (max: 60s)",
+    "Invalid request: expected at least 500 tokens", "Invalid request: file /models/500/config.json",
+    "Invalid request: tool rebilling_report is not defined", "enforced_spend_limit_reached 429",
+  ])("keeps the old predicate and full retry schedule for %s", (error) => {
+    const retry = !permanent.test(error) && transient.test(error);
+    let progress;
+    for (const delay of [30_000, 120_000, 300_000, undefined]) {
+      const plan = planChildModelFailure({ models: ["a/one"], current: "a/one", error, now: 0, cooldowns: {}, ...(progress === undefined ? {} : { progress }) });
+      if (retry && delay !== undefined) {
+        expect(plan).toMatchObject({ kind: "retry", delay });
+        if (plan.kind === "retry") progress = plan.progress;
+      } else expect(plan).toEqual({ kind: "report" });
+    }
+  });
+});

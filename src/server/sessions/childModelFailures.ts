@@ -2,7 +2,9 @@ import { parseModelChoice, modelKey, selectChainModel, type ModelCooldowns } fro
 
 export const CHILD_RETRY_DELAYS = [30_000, 120_000, 300_000] as const;
 export type ChildModelFailure = "switch-now" | "wait-then-switch" | "fatal";
-const TRANSIENT = /overloaded|\b5\d{2}\b|auth_unavailable|server[ _-]?busy|high demand|at capacity|rate[ _-]?limit|too many requests|\b429\b|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
+const LEGACY_TRANSIENT = /overloaded|\b5\d{2}\b|auth_unavailable|server[ _-]?busy|high demand|at capacity|rate[ _-]?limit|too many requests|\b429\b|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
+const LEGACY_PERMANENT = /invalid.*(?:api[ _-]?key|credentials)|insufficient_quota|quota exceeded|billing|out of budget|usage limit reached|context.*(?:window|limit)|too many tokens/i;
+const TRANSIENT = LEGACY_TRANSIENT;
 const SWITCH = /quota|billing|credits|out of budget|spend(?:ing)?[ _-]?limit|usage[ _-]?limit|GoUsageLimitError|FreeUsageLimitError|available balance|try again in\s*~?\s*[\d.]+\s*min|model.*(?:not[ _-]?found|does not exist|not available|was not found)|unknown model|(?:invalid|incorrect|expired|revoked).*?(?:api[ _-]?key|credentials)|(?:api[ _-]?key|credentials).*(?:invalid|incorrect|expired|revoked)|authentication.*(?:failed|invalid)/i;
 export function classifyChildModelError(error: string): ChildModelFailure {
   if (/context.*(?:window|limit|length)|too many tokens|maximum.*tokens/i.test(error)) return "fatal";
@@ -39,8 +41,14 @@ export type ChildFailurePlan = { kind: "report" } | { kind: "retry"; delay: numb
 /** One-model chains deliberately retain the old transient-only retry policy. */
 export function planChildModelFailure(input: { models: string[]; current: string; error: string; now: number; cooldowns: ModelCooldowns; progress?: ChainProgress }): ChildFailurePlan {
   const { models, current, error, now, cooldowns } = input;
-  const failure = classifyChildModelError(error);
   const progress = structuredClone(input.progress ?? { failed: [], waited: [], budget: 0 });
+  // This predicate intentionally predates fallback classification, including its historical text matching.
+  if (models.length === 1) {
+    if (LEGACY_PERMANENT.test(error) || !LEGACY_TRANSIENT.test(error)) return { kind: "report" };
+    const delay = CHILD_RETRY_DELAYS[progress.budget++];
+    return delay === undefined ? { kind: "report" } : { kind: "retry", delay, progress, retryAttempt: progress.budget };
+  }
+  const failure = classifyChildModelError(error);
   if (failure === "fatal") return { kind: "report" };
   if (models.length > 1 && progress.exhausted !== true) {
     if (failure === "wait-then-switch" && !progress.waited.includes(modelKey(current))) {
@@ -60,7 +68,6 @@ export function planChildModelFailure(input: { models: string[]; current: string
       ? { kind: "retry", delay, progress, retryAttempt: progress.budget }
       : { kind: "switch", to: choice.model, delay, progress, retryAttempt: progress.budget };
   }
-  if (models.length === 1 && failure !== "wait-then-switch") return { kind: "report" };
   const delay = CHILD_RETRY_DELAYS[progress.budget++];
   return delay === undefined ? { kind: "report" } : { kind: "retry", delay, progress, retryAttempt: progress.budget };
 }

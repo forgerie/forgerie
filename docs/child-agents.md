@@ -148,9 +148,11 @@ After the provider SDK and Durable's own generation retries end, Forgerie classi
 | Failure | Chain with two or more entries | Single model / chain of one |
 | --- | --- | --- |
 | Rate limit, 429, overloaded, 529, 5xx, `auth_unavailable`, closed WebSocket, disconnected stream, or transport error | Wait once for 60 seconds and retry the same model. A second failure switches to the next available entry. | Retry after 30 seconds, 2 minutes, and 5 minutes, then report. |
-| Quota, billing, insufficient credits, `insufficient_quota`, spend limit, usage limit, ChatGPT “Try again in ~N min”, requested retry delay above 60 seconds, model missing, unknown model, invalid key or credentials | Switch at once. | Report at once. |
-| Context window, too many tokens, or any other error | Report at once. | Report at once. |
+| Quota, billing, insufficient credits, `insufficient_quota`, spend limit, usage limit, ChatGPT “Try again in ~N min”, requested retry delay above 60 seconds, model missing, unknown model, invalid key or credentials | Switch at once. | Use the legacy transient predicate below. |
+| Context window, too many tokens, or any other error | Report at once. | Use the legacy transient predicate below. |
 | All remaining entries are cooling or have failed | Use the 30-second / 2-minute / 5-minute budget on the entry whose cooldown ends first, then report the actual error. | Keep the existing transient-only policy above. |
+
+A single model keeps the pre-chain transient predicate and the 30-second / 2-minute / 5-minute schedule exactly. Invalid credentials, `insufficient_quota`, “quota exceeded”, billing, “out of budget”, “usage limit reached”, context-window/limit errors, and “too many tokens” exclude retry. Otherwise the old transient text matching applies. For example, `HTTP 429. Try again in ~17 min.` and `overloaded; Server requested 120s retry delay` still retry on one model, although a multi-model chain switches at once.
 
 A running child moves forward through the chain; it does not switch back when an earlier model recovers. To keep that rule, exhaustion considers the current and later entries only. A new spawn can start at the beginning again. If every entry is cooling at spawn, it selects the earliest reset and waits for the first 30-second budget deadline before sending the original task. The budget probes that selected model even if its cooldown has not ended; it is a finite recovery budget, not a promise to wait until billing or quota resets.
 
