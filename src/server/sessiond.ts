@@ -63,6 +63,7 @@ import { ChildRunStore } from "./sessions/childRunStore.js";
 import { registerChildRunRoutes } from "./sessions/childRunRoutes.js";
 import { registerDecisionRoutes, registerGatedActionRoutes } from "./sessions/decisionRoutes.js";
 import { registerWorkflowRoutes } from "./sessions/workflowRoutes.js";
+import { ModelCooldownRegistry } from "./sessions/modelCooldownRegistry.js";
 import { LiveChildSessionIndex, createDurableChildHost } from "./sessions/durableChildHost.js";
 import { bundledForgerieAgentsPath } from "./sessions/bundledForgerieSkills.js";
 import { SessionNotificationStore } from "./sessions/sessionNotificationStore.js";
@@ -283,6 +284,11 @@ async function createSessionDaemonRuntime() {
     codemodeEnabled: config.codemode,
     ...(liveChildren === undefined ? {} : { durableChildAgents: createDurableChildHost({
       childToolsDeny: config.childToolsDeny,
+      modelChains: () => {
+        try { return loadPiWebConfig({ env: daemonEnvironment, onWarning: (message) => { app.log.warn(message); } }).config.modelChains ?? {}; }
+        catch (error) { app.log.warn({ err: error }, "Cannot read model chains; ignoring chains"); return {}; }
+      },
+      modelCooldowns: new ModelCooldownRegistry(join(piWebDataDir(daemonEnvironment), "model-cooldowns.json"), (error) => { app.log.warn({ err: error }, "Cannot read model cooldown registry"); }),
       // The user's own agent files, shared by every Pi profile.
       homeAgentsDir: join(homedir(), ".agents"),
       // Forgerie's built-in agents (worker, scout, reviewer, researcher, ...).

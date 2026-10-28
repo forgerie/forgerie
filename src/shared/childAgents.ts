@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import type { ChildFallback } from "./childFallback.js";
 import type { ChildRetry } from "./childRetry.js";
 import type { ChildWorktreeSummary } from "./sessionWorktree.js";
 
@@ -22,6 +23,7 @@ export interface DurableChildSummary extends ChildActivity {
   createdAt: number;
   worktree?: ChildWorktreeSummary;
   retry?: ChildRetry;
+  fallback?: ChildFallback;
   /** Open questions, oldest first. */
   questions: { questionId: string; question: string; askedAt: number }[];
   /** The oldest question that waits for the parent agent's answer or escalation. The child does nothing until then. */

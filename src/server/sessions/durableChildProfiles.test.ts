@@ -59,3 +59,13 @@ describe("agent folders for a session", () => {
     expect((await ChildAgentCatalog.forSession(root, agentDir, { home: join(root, "missing") }).find("researcher"))?.prompt).toBe("From profile.");
   });
 });
+
+describe("model chain references in agent files", () => {
+  it("retains a chain reference and thinking suffix for spawn-time resolution", () => {
+    expect(parseChildAgentFile("---\nmodel: worker:high\n---\nWork.")).toMatchObject({ modelReference: "worker:high", thinkingLevel: "high" });
+    expect(parseChildAgentFile("---\nmodel: local/qwen:32b:max\n---\nWork.")).toMatchObject({ modelReference: "local/qwen:32b:max", model: { provider: "local", modelId: "qwen:32b" }, thinkingLevel: "max" });
+  });
+  it("keeps skipping the unsupported fallbackModels key", () => {
+    expect(parseChildAgentFile("---\nmodel: worker\nfallbackModels: a/one,b/two\n---\nWork.")).toBeUndefined();
+  });
+});

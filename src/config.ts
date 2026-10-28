@@ -1,3 +1,4 @@
+import { ModelChainsSchema } from "./shared/modelChains.js";
 import { Check } from "typebox/value";
 import { AzureDevopsGlobalConfigSchema, type AzureDevopsGlobalConfig } from "./shared/azureDevopsConfig.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -35,6 +36,7 @@ export interface LoadedEffectivePiWebConfig extends Omit<LoadedPiWebConfig, "con
 export interface LoadOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  onWarning?: (message: string) => void;
 }
 
 export function defaultPiWebConfigPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -142,7 +144,7 @@ export function loadPiWebConfig(options: LoadOptions = {}): LoadedPiWebConfig {
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!isRecord(parsed)) throw new Error(`Forgerie config must be a JSON object: ${path}`);
 
-  return { path, exists: true, config: parsePiWebConfig(parsed, path) };
+  return { path, exists: true, config: parsePiWebConfig(parsed, path, options.onWarning) };
 }
 
 export function effectivePiWebConfig(options: LoadOptions = {}): LoadedEffectivePiWebConfig {
@@ -216,6 +218,7 @@ function readExistingConfigObject(path: string): Record<string, unknown> {
 
 function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
   return {
+    ...(config.modelChains !== undefined ? { modelChains: config.modelChains } : {}),
     ...(config.azureDevops !== undefined ? { azureDevops: config.azureDevops } : {}),
     ...(config.host !== undefined ? { host: config.host } : {}),
     ...(config.port !== undefined ? { port: config.port } : {}),
@@ -232,8 +235,12 @@ function piWebConfigRecord(config: PiWebConfig): Record<string, unknown> {
   };
 }
 
-function parsePiWebConfig(value: Record<string, unknown>, path: string): PiWebConfig {
+function parsePiWebConfig(value: Record<string, unknown>, path: string, onWarning?: (message: string) => void): PiWebConfig {
+  const chains = value["modelChains"];
+  const validChains = chains !== undefined && Check(ModelChainsSchema, chains);
+  if (chains !== undefined && !validChains) (onWarning ?? ((message) => { process.emitWarning(message, { code: "FORGERIE_MODEL_CHAINS" }); }))(`Invalid Forgerie config modelChains in ${path}; ignoring all model chains. Names must match [a-z0-9][a-z0-9-]* and each list must contain provider/model-id[:thinking] entries.`);
   return {
+    ...(validChains ? { modelChains: chains } : {}),
     ...(value["azureDevops"] !== undefined ? { azureDevops: parseAzureDevopsConfig(value["azureDevops"], path) } : {}),
     ...(value["host"] !== undefined ? { host: parseString(value["host"], "host", path) } : {}),
     ...(value["port"] !== undefined ? { port: parsePort(value["port"], "port", path) } : {}),

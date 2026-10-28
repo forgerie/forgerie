@@ -1,3 +1,4 @@
+import { ChildFallbackSchema } from "../../shared/childFallback.js";
 import { createHash } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { LiveDoc, UsageDoc, UserEntry, type CommitPublication, type ConversationId, type Cursor, type Harness,
@@ -14,6 +15,7 @@ import { activeWorkflowRun, workflowActiveFromCommit } from "./durableWorkflowRu
 const positive = Type.Integer({ minimum: 1 });
 const liveSchema = Type.Object({ run: Type.Optional(Type.Object({ taskId: Type.Unsafe<TaskId>(positive), inputs: Type.Array(Type.Unsafe<SubmissionId>(positive)) })) });
 const metadataSchema = Type.Object({ agents: Type.Record(Type.String(), Type.Object({ conversationId: Type.Unsafe<ConversationId>(positive), agent: Type.Union([Type.String(), Type.Null()]),
+  fallbacks: Type.Optional(Type.Array(ChildFallbackSchema)),
   agentFile: Type.Optional(Type.Object({ path: Type.String(), sha256: Type.String() })) })) });
 const modelSchema = Type.Object({ model: Type.Object({ provider: Type.String(), modelId: Type.String() }) });
 const userSchema = Type.Object({ model: Type.Array(Type.Object({ role: Type.Literal("user"), timestamp: Type.Integer({ minimum: 0 }) })) });
@@ -160,7 +162,7 @@ export class DurableChildRunRecords {
     const metadata = child.metadata;
     const id = createHash("sha256").update(`${this.ref.id}/${String(metadata.conversationId)}/${String(submissionId)}`).digest("hex");
     child.active = { run: { id, ...(this.workflowRunId === undefined ? {} : { workflowRunId: this.workflowRunId }), session: { ...this.ref }, child: { name: metadata.name, conversationId: metadata.conversationId, agent: metadata.agent,
-      ...(metadata.agentFile === undefined ? {} : { agentFile: metadata.agentFile }) }, model: null, startedAt,
+      ...(metadata.agentFile === undefined ? {} : { agentFile: metadata.agentFile }) }, model: null, ...(metadata.fallbacks === undefined ? {} : { fallbacks: structuredClone(metadata.fallbacks) }), startedAt,
       state: { kind: "running" }, turns: 0, usage: baseline === null ? null : { models: {}, tools: {} } },
       checkpoint: { submissionId, rootTaskId, generationTaskId: rootTaskId, baseline } };
     this.persist(child.active);

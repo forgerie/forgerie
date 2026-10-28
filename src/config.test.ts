@@ -397,3 +397,21 @@ describe("Azure CLI configuration", () => {
     expect(() => loadPiWebConfig(testOptions())).toThrow("Forgerie config azureDevops");
   });
 });
+
+describe("model chains config", () => {
+  it("reads chains fresh and keeps file-only chains across Settings saves", async () => {
+    await writeFile(configPath, JSON.stringify({ modelChains: { worker: ["a/one:high", "b/two"] } }));
+    expect(loadPiWebConfig(testOptions()).config.modelChains).toEqual({ worker: ["a/one:high", "b/two"] });
+    savePiWebConfig({ port: 9000 }, testOptions());
+    expect(loadPiWebConfig(testOptions()).config.modelChains).toEqual({ worker: ["a/one:high", "b/two"] });
+    await writeFile(configPath, JSON.stringify({ modelChains: { worker: ["c/three"] } }));
+    expect(loadPiWebConfig(testOptions()).config.modelChains).toEqual({ worker: ["c/three"] });
+  });
+  it.each([null, { worker: [] }, { "Bad name": ["a/one"] }, { good: ["a/one"], bad: ["missing-provider"] }])("logs invalid chains and ignores the whole map: %j", async (modelChains) => {
+    await writeFile(configPath, JSON.stringify({ modelChains, port: 9000 }));
+    const warnings: string[] = [];
+    const loaded = loadPiWebConfig({ ...testOptions(), onWarning: (message) => { warnings.push(message); } });
+    expect(loaded.config).toEqual({ port: 9000 });
+    expect(warnings).toHaveLength(1); expect(warnings[0]).toContain("ignoring all model chains");
+  });
+});

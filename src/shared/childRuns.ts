@@ -1,3 +1,4 @@
+import { ChildFallbackSchema } from "./childFallback.js";
 import { Type, type Static } from "typebox";
 import { DurableUsageSchema, DurableUsageStateSchema } from "./durableUsage.js";
 
@@ -15,6 +16,7 @@ export const ChildRunSchema = Type.Object({
   child: Type.Object({ name: Type.String(), conversationId: Type.Integer({ minimum: 1 }), agent: Type.Union([text, Type.Null()]),
     agentFile: Type.Optional(Type.Object({ path: text, sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }) })) }),
   model: Type.Union([model, Type.Null()]),
+  fallbacks: Type.Optional(Type.Array(ChildFallbackSchema)),
   startedAt: count,
   state: Type.Union([
     Type.Object({ kind: Type.Literal("running") }),

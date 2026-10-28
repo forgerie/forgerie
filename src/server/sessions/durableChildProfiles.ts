@@ -1,3 +1,4 @@
+import { parseModelReference, type ThinkingLevel } from "../../shared/thinkingLevels.js";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -7,8 +8,9 @@ export interface ChildAgentProfile {
   name: string;
   description: string;
   source: { path: string; sha256: string };
+  modelReference?: string;
   model?: { provider: string; modelId: string };
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  thinkingLevel?: ThinkingLevel;
   /** Tool names from the file; undefined offers every child tool. */
   tools?: readonly string[];
   /** The file body. */
@@ -25,7 +27,7 @@ export interface ChildAgentProfile {
   inheritSkills: boolean;
 }
 
-const THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const THINKING = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 type Thinking = NonNullable<ChildAgentProfile["thinkingLevel"]>;
 const isThinking = (value: string): value is Thinking => THINKING.has(value);
 
@@ -81,10 +83,10 @@ export function parseChildAgentFile(text: string | Buffer, path = "agent.md"): C
   if (fields.get("disabled") === "true" || fields.has("fallbackModels")) return undefined;
   const name = fields.get("name") ?? path.split("/").at(-1)?.replace(/\.md$/, "") ?? "";
   if (name === "") return undefined;
-  let modelSpec = fields.get("model");
+  const reference = fields.get("model");
+  let modelSpec = reference;
   let thinkingLevel = fields.get("thinking");
-  const suffix = modelSpec === undefined ? undefined : /^(.*):(off|minimal|low|medium|high|xhigh)$/.exec(modelSpec);
-  if (suffix !== null && suffix !== undefined) { modelSpec = suffix[1]; thinkingLevel = suffix[2]; }
+  if (modelSpec !== undefined) { const parsed = parseModelReference(modelSpec); modelSpec = parsed.model; thinkingLevel = parsed.thinkingLevel ?? thinkingLevel; }
   const slash = modelSpec?.indexOf("/") ?? -1;
   const list = (key: string) => fields.get(key)?.split(",").map((item) => item.trim()).filter((item) => item !== "");
   const tools = list("tools");
@@ -92,6 +94,7 @@ export function parseChildAgentFile(text: string | Buffer, path = "agent.md"): C
     name,
     source: { path, sha256: createHash("sha256").update(text).digest("hex") },
     description: fields.get("description") ?? "",
+    ...(reference === undefined ? {} : { modelReference: reference }),
     ...(modelSpec !== undefined && slash > 0 ? { model: { provider: modelSpec.slice(0, slash), modelId: modelSpec.slice(slash + 1) } } : {}),
     ...(thinkingLevel !== undefined && isThinking(thinkingLevel) ? { thinkingLevel } : {}),
     ...(tools === undefined || tools.length === 0 ? {} : { tools }),

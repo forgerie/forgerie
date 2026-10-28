@@ -23,7 +23,11 @@ import {
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { Check } from "typebox/value";
 import { Type as Schema } from "typebox";
-import { parseModelReference, type ThinkingLevel } from "../../shared/thinkingLevels.js";
+import type { ThinkingLevel } from "../../shared/thinkingLevels.js";
+import { ChildFallbackSchema, type ChildFallback } from "../../shared/childFallback.js";
+import { childModelReference, modelKey, parseModelChoice, resolveModelChain, selectChainModel, type ModelChains } from "../../shared/modelChains.js";
+import { childModelCooldown, planChildModelFailure, unavailableChildModel, type ChainProgress } from "./childModelFailures.js";
+import type { ModelCooldownRegistry } from "./modelCooldownRegistry.js";
 import { ChildRetrySchema, type ChildRetry } from "../../shared/childRetry.js";
 import type { DurableSdkTools, DurableSdkToolsOptions } from "./durableSdkTools.js";
 import type { ChildAgentCatalog, ChildAgentProfile } from "./durableChildProfiles.js";
@@ -50,20 +54,22 @@ export const isChildEntryKind = (kind: string): boolean => CHILD_ENTRY_KINDS.has
 
 // defineDoc needs JSON-compatible type aliases; interfaces lack the index signature.
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
-type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number; worktreeId?: string; agentFile?: { path: string; sha256: string } };
+type ChildRecord = { conversationId: ConversationId; reported: EntryId[]; agent: string | null; createdAt: number; worktreeId?: string; agentFile?: { path: string; sha256: string }; modelReference?: string; fallbacks?: ChildFallback[] };
 type QuestionRouting = { kind: "parent" } | { kind: "user"; escalation: "irreversible" | "external"; guess: string; why: string }
   | { kind: "answered"; by: "parent" | "user"; provisional: boolean };
 // No routing field means a user-facing question created before parent-first routing.
 type ChildQuestion = { child: ConversationId; childName: string; question: string; answer: string | null; askedAt: number; closed?: boolean; routing?: QuestionRouting; resolvedBy?: string };
-type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string; workflowSend?: boolean };
-type ReporterState = { phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string }
-  | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" };
+type ReporterInput = { name: string; conversationId: ConversationId; message: string; followUp: boolean; worktreeId?: string; workflowSend?: boolean; initialRetry?: { error: string; until: number } };
+type ReporterPolicy = { firstDelivery?: boolean; progress?: ChainProgress };
+type ReporterState = ReporterPolicy & ({ phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string; retryAttempt?: number }
+  | { phase: "switch"; attempt: number; error: string; to: string; run: string; until?: number; retryAttempt?: number }
+  | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; suppressed?: "duplicate" | "aborted" });
 type ChildRetryOwner = { owner: TaskId; conversationId: ConversationId; requestId: string };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
 
 export const CHILD_AGENTS_DOC_KIND = "forgerie.durable-children";
 const Children = defineDoc<{ agents: Record<string, ChildRecord>; reporters: Record<string, TaskId>;
-  failureRuns?: Record<string, string>; retryOwners?: Record<string, ChildRetryOwner>;
+  failureRuns?: Record<string, string>; failureModels?: Record<string, string>; retryOwners?: Record<string, ChildRetryOwner>;
   continuations?: Record<string, { from: number; text: string; conversationId: number }> }>({
   kind: CHILD_AGENTS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ agents: {}, reporters: {} }),
@@ -86,61 +92,62 @@ const Anchor = defineTask<null, { phase: "done" }, null>({
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });
 
-const CHILD_RETRY_DELAYS = [30_000, 120_000, 300_000] as const;
-
-// Do not treat credentials, quota, billing or context limits as temporary transport failures.
-const TRANSIENT_CHILD_ERROR = /overloaded|\b5\d{2}\b|auth_unavailable|server[ _-]?busy|high demand|at capacity|rate[ _-]?limit|too many requests|\b429\b|service[ _-]?unavailable|(?:internal|server)[ _-]?error|websocket.*(?:closed|error)|stream.*(?:disconnect|ended|closed)|connection.*(?:reset|closed|lost|refused)|socket hang up|fetch failed|network.*error|timed? out|timeout|EAI_AGAIN|ECONNRESET|upstream.*(?:connect|error)/i;
-const PERMANENT_CHILD_ERROR = /invalid.*(?:api[ _-]?key|credentials)|insufficient_quota|quota exceeded|billing|out of budget|usage limit reached|context.*(?:window|limit)|too many tokens/i;
-function transientChildError(detail: string): boolean {
-  return !PERMANENT_CHILD_ERROR.test(detail) && TRANSIENT_CHILD_ERROR.test(detail);
+function chainModels(reference: string | undefined, chains: ModelChains, parent: { model?: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel }, thinking?: ThinkingLevel): string[] {
+  const spec = reference ?? (parent.model === undefined ? undefined : `${parent.model.provider}/${parent.model.modelId}`);
+  return spec === undefined ? [] : resolveModelChain(spec, chains, thinking ?? parent.thinkingLevel);
 }
-
-/**
- * Workflow declaration > requested > agent file > the session's. Null is the user's choice of the default: the agent
- * file's model, and the agent's request is ignored. A thinking suffix overrides agent-file thinking.
- */
-function workflowWorkerModelChoice(declared: string | null | undefined, requested?: string, profile?: Pick<ChildAgentProfile, "model" | "thinkingLevel">): {
-  spec: string | undefined; choice: { model: { provider: string; modelId: string } | undefined; thinkingLevel: ThinkingLevel | undefined } | null;
-} {
-  if (declared === null) return { spec: undefined, choice: { model: profile?.model, thinkingLevel: profile?.thinkingLevel } };
-  const spec = declared ?? requested;
-  const parsed = spec === undefined ? undefined : modelChoice(spec);
-  return { spec, choice: parsed === null ? null : {
-    model: parsed?.model ?? profile?.model,
-    thinkingLevel: parsed?.thinkingLevel ?? profile?.thinkingLevel,
-  } };
+function fallbackNote(fallbacks: readonly ChildFallback[]): string {
+  return fallbacks.length === 0 ? "" : ` (ran on ${fallbacks.at(-1)?.to ?? ""} after ${fallbacks.map((item) => `${item.from}: ${item.reason}`).join("; ")})`;
 }
-
 /** Apply a declared model only between turns. The caller may wait, or keep a user steer in the current turn. */
-async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childId: ConversationId, name: string, catalog?: ChildAgentCatalog): Promise<TaskId | undefined> {
+async function applyWorkflowWorkerModel(tx: Tx, parentId: ConversationId, childId: ConversationId, name: string, selected: DurableChildExtensionOptions = {}): Promise<TaskId | undefined> {
   const declared = await workflowWorkerModel(tx, parentId, name);
   if (declared === undefined) return undefined;
-  const record = (await tx.doc(Children, parentId)).agents[name];
-  const profile = record?.agent == null ? undefined : await catalog?.find(record.agent);
-  const { choice } = workflowWorkerModelChoice(declared, undefined, profile);
-  if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${declared ?? "default"}`);
+  const children = await tx.doc(Children, parentId);
+  const record = children.agents[name];
+  const profile = record?.agent == null ? undefined : await selected.catalog?.find(record.agent);
+  const reference = childModelReference(declared, undefined, profile);
   const parent = await tx.doc(AgentDoc, parentId);
-  const model = choice.model ?? parent.model;
-  const thinkingLevel = choice.thinkingLevel ?? parent.thinkingLevel ?? "off";
+  const chains = selected.modelChains?.() ?? {};
+  const models = chainModels(reference, chains, parent, profile?.thinkingLevel);
+  const cooldowns = await selected.modelCooldowns?.snapshot() ?? {};
+  const chosen = models.length === 0 ? undefined : selectChainModel(models, cooldowns, selected.now?.() ?? Date.now());
+  const choice = chosen === undefined ? null : parseModelChoice(chosen.model);
+  const model = choice?.model ?? parent.model;
+  const thinkingLevel = choice?.thinkingLevel ?? parent.thinkingLevel ?? "off";
   const configured = await tx.doc(AgentDoc, childId);
-  if (configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel) return undefined;
+  const unchanged = configured.model?.provider === model?.provider && configured.model?.modelId === model?.modelId && (configured.thinkingLevel ?? "off") === thinkingLevel;
   const busy = (await tx.doc(LiveDoc, childId)).run?.taskId;
-  if (busy !== undefined) return busy;
-  await configure(tx, childId, { model: model ?? null, thinkingLevel });
+  if (busy !== undefined) return unchanged ? undefined : busy;
+  // A chain's reporter still owns the run during backoff. Do not let a send reset its model or history.
+  if (models.length > 1) for (const id of Object.values(children.reporters)) {
+    const task = await tx.task(id);
+    if (task === undefined || task.state.status === "terminal" || !("checkpoint" in task.state)) continue;
+    const input = task.input;
+    const checkpoint = task.state.checkpoint;
+    if (typeof input !== "object" || input === null || Array.isArray(input) || input["conversationId"] !== childId
+      || typeof checkpoint !== "object" || checkpoint === null || Array.isArray(checkpoint)) continue;
+    if (checkpoint["phase"] === "retry" || checkpoint["phase"] === "switch" || (checkpoint["phase"] === "deliver" && typeof checkpoint["attempt"] === "number" && checkpoint["attempt"] > 0)) return unchanged ? undefined : id;
+  }
+  if (!unchanged) await configure(tx, childId, { model: model ?? null, thinkingLevel });
+  if (record !== undefined) {
+    if (reference === undefined) delete record.modelReference; else record.modelReference = reference;
+    record.fallbacks = chosen === undefined || models[0] === chosen.model ? [] : [{ from: modelKey(models[0] ?? chosen.model), to: modelKey(chosen.model), reason: cooldowns[modelKey(models[0] ?? chosen.model)]?.reason ?? "model cooling" }];
+  }
   return undefined;
 }
 
 const REPORTER_KIND = "forgerie.child-reporter";
 function childReporter(resolve: (conversationId: ConversationId, context: Context) => Promise<DurableChildExtensionOptions>) {
   return defineTask<ReporterInput, ReporterState, null>({
-  name: REPORTER_KIND, version: 1, initial: () => ({ phase: "deliver" }),
+  name: REPORTER_KIND, version: 1, initial: (input) => input.initialRetry === undefined ? { phase: "deliver" } : { phase: "retry", attempt: 1, retryAttempt: 1, ...input.initialRetry, firstDelivery: true, progress: { failed: [], waited: [], budget: 1, exhausted: true } },
   phases: {
     deliver: async (reporter, runtime, context) => {
       const { name, conversationId, message, followUp } = reporter.input;
       const child = await runtime.conversation(conversationId, context);
       if (child === undefined) throw new Error(`Child conversation ${String(conversationId)} is missing`);
       const attempt = reporter.state.checkpoint.attempt ?? 0;
-      const content = attempt === 0 ? message : `Continue where you stopped; the last request failed with: ${reporter.state.checkpoint.error ?? "model_error"}`;
+      const content = attempt === 0 || reporter.state.checkpoint.firstDelivery === true ? message : `Continue where you stopped; the last request failed with: ${reporter.state.checkpoint.error ?? "model_error"}`;
       if (reporter.input.workflowSend === true && attempt === 0) {
         const selected = await resolve(runtime.conversationId, context);
         // A model switch must not affect later tool rounds of an already running turn. Wait for that turn,
@@ -149,33 +156,66 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           let busy: TaskId | undefined;
           await runtime.commit(async (tx) => {
             if (await tx.submissionByRequest(conversationId, `child:${String(reporter.id)}`) !== undefined) return;
-            busy = await applyWorkflowWorkerModel(tx, runtime.conversationId, conversationId, name, selected.catalog);
+            busy = await applyWorkflowWorkerModel(tx, runtime.conversationId, conversationId, name, selected);
           }, context);
           if (busy === undefined) break;
           await runtime.waitForTask(busy, context);
         }
       }
+      const attempted = await runtime.snapshot(AgentDoc, conversationId, context);
+      const attemptedModel = attempted?.model === undefined ? undefined : `${attempted.model.provider}/${attempted.model.modelId}`;
       const submission = await child.submit({ type: "input", content, whenBusy: attempt > 0 || followUp ? "followUp" : "steer",
         requestId: attempt === 0 ? `child:${String(reporter.id)}` : `child:${String(reporter.id)}:retry:${String(attempt)}` }, context);
       const selected = await resolve(runtime.conversationId, context);
       await selected.flushRunRecords?.();
       const settled = await submission.wait(context);
-      const detail = settled.status === "unanswered" && settled.detail !== undefined ? (typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail)) : undefined;
-      const delay = CHILD_RETRY_DELAYS[attempt];
-      if (settled.status === "unanswered" && settled.reason === "model_error") {
+      let detail = settled.status === "unanswered" && settled.detail !== undefined ? (typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail)) : undefined;
+      let missingRun: string | undefined;
+      if (settled.status === "unanswered" && settled.reason === "no_model") {
+        // Unlike provider errors, Durable puts this diagnostic on the generation receipt, not the submission.
+        await runtime.commit(async (tx) => {
+          const task = (await tx.scanTasks({ conversationId, kind: GenerationTask.definition.name, status: "terminal", order: "descending" }, 1)).items[0];
+          if (task?.state.status === "terminal" && task.state.outcome.status === "failed" && attemptedModel !== undefined && unavailableChildModel(task.state.outcome.error.message) === attemptedModel) {
+            detail = task.state.outcome.error.message; missingRun = `generation:${String(task.id)}`;
+          }
+        }, context);
+      }
+      if (settled.status === "unanswered" && (settled.reason === "model_error" || settled.reason === "no_model")) {
+        const settings = await runtime.snapshot(AgentDoc, conversationId, context);
+        const current = (settled.reason === "no_model" && detail !== undefined ? unavailableChildModel(detail) : undefined)
+          ?? (await runtime.snapshot(Children, runtime.conversationId, context))?.failureModels?.[String(settled.id)]
+          ?? (settings?.model === undefined ? undefined : `${settings.model.provider}/${settings.model.modelId}${settings.thinkingLevel === undefined ? "" : `:${settings.thinkingLevel}`}`);
+        const until = detail === undefined ? undefined : childModelCooldown(detail, runtime.now());
+        if (current !== undefined && until !== undefined) {
+          try { await selected.modelCooldowns?.mark(modelKey(current), until, detail ?? "model_error"); }
+          catch (error) { runtime.report(error); } // A cooldown disk failure must not hide the child's provider outcome.
+        }
+        const cooldowns = { ...await selected.modelCooldowns?.snapshot() ?? {}, ...(current === undefined || until === undefined ? {} : { [modelKey(current)]: { until, reason: detail ?? "model_error" } }) };
+        const chains = selected.modelChains?.() ?? {};
         const progress = { delegated: false };
         await runtime.commit(async (tx) => {
           const doc = await tx.doc(Children, runtime.conversationId);
-          const run = doc.failureRuns?.[String(settled.id)] ?? `input:${String(settled.id)}`;
+          const run = doc.failureRuns?.[String(settled.id)] ?? missingRun ?? `input:${String(settled.id)}`;
           const claim = doc.retryOwners?.[run];
           if (claim !== undefined && claim.owner !== reporter.id) {
             progress.delegated = true;
             return { status: "running", checkpoint: { phase: "observe", run, owner: claim.owner } };
           }
-          if (claim === undefined) doc.retryOwners = { ...doc.retryOwners, [run]: { owner: reporter.id, conversationId, requestId: `child:${String(reporter.id)}` } };
-          if (detail !== undefined && transientChildError(detail) && delay !== undefined) {
+          if (claim === undefined) doc.retryOwners = { ...doc.retryOwners, [run]: { owner: reporter.id, conversationId, requestId: attempt === 0 ? `child:${String(reporter.id)}` : `child:${String(reporter.id)}:retry:${String(attempt)}` } };
+          const agent = doc.agents[name];
+          let models: string[];
+          try { models = current === undefined ? [] : chainModels(agent?.modelReference, chains, parseModelChoice(current) ?? settings ?? {}); }
+          catch (error) { runtime.report(error); models = current === undefined ? [] : [current]; } // A deleted chain keeps the admitted model.
+          const checkpoint = reporter.state.checkpoint;
+          const plan = current === undefined || detail === undefined || models.length === 0 ? { kind: "report" as const }
+            : planChildModelFailure({ models, current, error: detail, now: runtime.now(), cooldowns,
+              progress: checkpoint.progress ?? { failed: [], waited: [], budget: attempt } });
+          if (plan.kind !== "report") {
             progress.delegated = true;
-            return { status: "running", checkpoint: { phase: "retry", attempt: attempt + 1, error: detail, until: runtime.now() + delay, run } };
+            const common = { attempt: attempt + 1, error: detail ?? "model_error", run, progress: plan.progress };
+            return { status: "running", checkpoint: plan.kind === "retry"
+              ? { ...common, phase: "retry", retryAttempt: plan.retryAttempt, until: runtime.now() + plan.delay }
+              : { ...common, phase: "switch", to: plan.to, ...(plan.delay === undefined ? {} : { until: runtime.now() + plan.delay }), ...(plan.retryAttempt === undefined ? {} : { retryAttempt: plan.retryAttempt }) } };
           }
           return undefined;
         }, context);
@@ -192,24 +232,80 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           // A failed input is not a dead child: a later steer or retry can still be running. Say so, or the parent
           // starts a replacement that edits the same files.
           const stillRunning = (await tx.doc(LiveDoc, conversationId)).run !== undefined;
-          return next(`[subagent ${name} failed: ${settled.reason}${detail === undefined ? "" : `: ${detail}`}${stillRunning ? `. ${childStillRunningNote(name)}` : ""}]`);
+          const fallbacks = (await tx.doc(Children, runtime.conversationId)).agents[name]?.fallbacks ?? [];
+          return next(`[subagent ${name} failed: ${settled.reason}${detail === undefined ? "" : `: ${detail}`}${stillRunning ? `. ${childStillRunningNote(name)}` : ""}]${fallbackNote(fallbacks)}`);
         }
         if (settled.type !== "input") return next();
         const agent = (await tx.doc(Children, runtime.conversationId)).agents[name];
         const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0];
         if (agent === undefined || agent.reported.includes(settled.answer)) return next(undefined, agent?.reported.includes(settled.answer) === true ? "duplicate" : "aborted");
         agent.reported.push(settled.answer);
-        return next(`[subagent ${name} answered, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}${worktreeReport === undefined ? "" : `\n\n${worktreeReport}`}`);
+        return next(`[subagent ${name} answered${fallbackNote(agent.fallbacks ?? [])}, no reply needed] ${textOf(isAssistant(answer) ? answer : undefined)}${worktreeReport === undefined ? "" : `\n\n${worktreeReport}`}`);
       }, context);
     },
+    switch: async (reporter, runtime, context) => {
+      const { attempt, error, to, run, until, retryAttempt, progress } = reporter.state.checkpoint;
+      const { conversationId, name } = reporter.input;
+      for (;;) {
+        const selected = await resolve(runtime.conversationId, context);
+        const chains = selected.modelChains?.() ?? {};
+        const cooldowns = await selected.modelCooldowns?.snapshot() ?? {};
+        let busy: TaskId | undefined;
+        await runtime.commit(async (tx) => {
+          busy = (await tx.doc(LiveDoc, conversationId)).run?.taskId;
+          if (busy !== undefined) return undefined;
+          const settings = await tx.doc(AgentDoc, conversationId);
+          const from = settings.model === undefined ? "unknown" : `${settings.model.provider}/${settings.model.modelId}`;
+          const doc = await tx.doc(Children, runtime.conversationId);
+          const record = doc.agents[name];
+          // Re-read after waiting for a live steer, or after restart. Another session may have cooled the target.
+          // An exhausted budget deliberately probes its pinned cooling model instead.
+          let target = to;
+          let nextProgress = progress;
+          let deadline = until;
+          let nextAttempt = retryAttempt;
+          if (progress?.exhausted !== true && settings.model !== undefined) {
+            let models: string[];
+            try { models = chainModels(record?.modelReference, chains, settings); }
+            catch (cause) { runtime.report(cause); models = [from]; }
+            const plan = planChildModelFailure({ models, current: from, error, now: runtime.now(), cooldowns, ...(progress === undefined ? {} : { progress }) });
+            if (plan.kind === "report") {
+              const claim = doc.retryOwners?.[run];
+              const settled = claim === undefined ? undefined : await tx.submissionByRequest(conversationId, claim.requestId);
+              if (settled !== undefined) await settleWorkflowChild(tx, runtime.conversationId, reporter.id, settled);
+              return { status: "running", checkpoint: { phase: "report", report: `[subagent ${name} failed: model_error: ${error}]${fallbackNote(record?.fallbacks ?? [])}` } };
+            }
+            if (plan.kind === "retry") return { status: "running", checkpoint: { phase: "retry", attempt, error, run,
+              progress: plan.progress, until: runtime.now() + plan.delay, retryAttempt: plan.retryAttempt } };
+            target = plan.to; nextProgress = plan.progress; nextAttempt = plan.retryAttempt;
+            deadline = plan.delay === undefined ? undefined : runtime.now() + plan.delay;
+          }
+          const choice = parseModelChoice(target);
+          if (choice === null) throw new Error(`Invalid fallback model: ${target}`);
+          await configure(tx, conversationId, { model: choice.model, thinkingLevel: choice.thinkingLevel ?? "off" });
+          const fallback = { from, to: modelKey(target), reason: error };
+          if (from !== fallback.to) {
+            if (record !== undefined) record.fallbacks = [...record.fallbacks ?? [], fallback];
+            await tx.appendEntry(conversationId, { kind: "forgerie.child-fallback", data: fallback });
+          }
+          const claim = doc.retryOwners?.[run];
+          if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
+          const common = { attempt, error, ...(nextProgress === undefined ? {} : { progress: nextProgress }) };
+          return { status: "running", checkpoint: deadline === undefined ? { ...common, phase: "deliver" }
+            : { ...common, phase: "retry", until: deadline, run, ...(nextAttempt === undefined ? {} : { retryAttempt: nextAttempt }) } };
+        }, context);
+        if (busy === undefined) return;
+        await runtime.waitForTask(busy, context);
+      }
+    },
     retry: async (reporter, runtime, context) => {
-      const { attempt, error, until, run } = reporter.state.checkpoint;
+      const { attempt, error, until, run, progress, firstDelivery } = reporter.state.checkpoint;
       await runtime.sleep(until, context);
       await runtime.commit(async (tx) => {
         const claim = run === undefined ? undefined : (await tx.doc(Children, runtime.conversationId)).retryOwners?.[run];
         // Publish the next receipt before admission. A steer joining that retry inherits this owner and budget.
         if (claim !== undefined) claim.requestId = `child:${String(reporter.id)}:retry:${String(attempt)}`;
-        return { status: "running", checkpoint: { phase: "deliver", attempt, error } };
+        return { status: "running", checkpoint: { phase: "deliver", attempt, error, ...(firstDelivery === undefined ? {} : { firstDelivery }), ...(progress === undefined ? {} : { progress }) } };
       }, context);
     },
     observe: async (reporter, runtime, context) => {
@@ -375,6 +471,11 @@ export interface DurableChildExtensions {
 export interface DurableChildExtensionOptions {
   /** Agent files a spawn may name. Without one, every child is a general helper. */
   catalog?: ChildAgentCatalog;
+  /** Daemon-owned config reader and shared persistent cooldown registry. */
+  modelChains?: () => ModelChains;
+  /** Uses the Harness clock when a host supplies a custom clock. */
+  now?: () => number;
+  modelCooldowns?: Pick<ModelCooldownRegistry, "snapshot" | "mark">;
   /** Names and descriptions shown in the tool description; resolved when the session opens. */
   agents?: readonly Pick<ChildAgentProfile, "name" | "description">[];
   /** The project's AGENTS.md text, for children whose agent file inherits project context. */
@@ -441,6 +542,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
               if (retry !== undefined && inputs.includes(retry.id)) { run = key; break; }
             }
             doc.failureRuns = { ...doc.failureRuns, ...Object.fromEntries(inputs.map((id) => [String(id), run])) };
+            const settings = await tx.doc(AgentDoc, api.conversationId);
+            const model = settings.model ?? { provider: message.provider, modelId: message.model };
+            const spec = `${model.provider}/${model.modelId}${settings.thinkingLevel === undefined ? "" : `:${settings.thinkingLevel}`}`;
+            doc.failureModels = { ...doc.failureModels, ...Object.fromEntries(inputs.map((id) => [String(id), spec])) };
           }, ctx);
         },
       }),
@@ -486,7 +591,7 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         agent: Type.Optional(Type.String({ description: "Agent file name for spawn." })),
         isolation: Type.Optional(Type.Union([Type.Literal("shared"), Type.Literal("worktree")], { description: "Working directory for spawn. Default worktree for writers and general helpers, shared for read-only agents." })),
         allowMissingTools: Type.Optional(Type.Boolean({ description: "Spawn despite unavailable tools named by the agent file. Default false." })),
-        model: Type.Optional(Type.String({ description: "Model for spawn as provider/model-id, optionally with :thinking-level. Omit it: the child then runs on its agent file's model. Set it only when the user asks for a model, or after the agent file's model failed. It overrides the agent file." })),
+        model: Type.Optional(Type.String({ description: "Model for spawn as a configured model chain name or provider/model-id, optionally with :thinking-level. Omit it: the child then runs on its agent file's model. Set it only when the user asks for a model, or after the agent file's model failed. It overrides the agent file." })),
       }),
       Type.Object({ action: Type.Literal("answer"), name: Type.String({ minLength: 1 }), questionId: Type.String({ minLength: 1 }), answer: Type.String({ minLength: 1, maxLength: 65536 }), reason: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
       Type.Object({ action: Type.Literal("escalate"), questionId: Type.String({ minLength: 1 }), kind: Type.Union([Type.Literal("irreversible"), Type.Literal("external"), Type.Literal("contradicts"), Type.Literal("stuck")]), guess: Type.String({ minLength: 1, maxLength: 65536 }), why: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
@@ -529,12 +634,16 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         if (held !== undefined) return { content: [{ type: "text" as const, text: held }], isError: true };
         // A model the workflow declares for this worker is the user's choice: it wins over the agent's argument.
         const declared = action === "spawn" ? await api.commit((tx) => workflowWorkerModel(tx, api.conversationId, name), context) : undefined;
-        const { spec, choice } = workflowWorkerModelChoice(declared, action === "spawn" ? args.model : undefined);
-        if (choice === null) return { content: [{ type: "text" as const, text: `Write model as provider/model-id, optionally with :thinking-level. Got ${spec ?? ""}${declared === undefined ? "" : " from the workflow file"}.` }], isError: true };
         if (existing?.worktreeId !== undefined) await requireWorktrees(selected.worktrees).assertWritable(existing.worktreeId);
         const profile = action === "spawn" && args.agent !== undefined ? await selected.catalog?.find(args.agent) : undefined;
         if (action === "spawn" && args.agent !== undefined && profile === undefined) {
           return { content: [{ type: "text" as const, text: `No agent named ${args.agent}.${agentList === "" ? "" : ` Choose one of:\n${agentList}`}` }], isError: true };
+        }
+        const chains = selected.modelChains?.() ?? {};
+        if (action === "spawn") {
+          const reference = childModelReference(declared, args.model, profile);
+          try { if (reference !== undefined) resolveModelChain(reference, chains); }
+          catch (error) { return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }], isError: true }; }
         }
         // A send re-reads the child's agent file, so a child spawned under an older runtime or file gets the current one.
         const sentProfile = action === "send" && existing?.agent != null ? await selected.catalog?.find(existing.agent) : undefined;
@@ -557,6 +666,9 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
         const checkout = action === "spawn" && isolation === "worktree"
           ? await requireWorktrees(selected.worktrees).prepare(String(api.taskId)) : undefined;
         const result = await api.commit(async (tx) => {
+          // Worktree preparation can outlive a config edit or another session's provider failure.
+          const chains = selected.modelChains?.() ?? {};
+          const cooldowns = await selected.modelCooldowns?.snapshot() ?? {};
           const refusal = await workflowChildRefusal(tx, api.conversationId, name, await reviewers(tx));
           if (refusal !== undefined) return refusal;
           const state = await tx.doc(Children, api.conversationId);
@@ -570,10 +682,12 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
             // Re-read in the allocation commit, so a route edit during worktree preparation wins too.
             const current = await workflowWorkerModel(tx, api.conversationId, name);
-            const { spec, choice } = workflowWorkerModelChoice(current, args.model, profile);
-            if (choice === null) throw new WorkflowError(400, `Invalid workflow model for ${name}: ${spec ?? ""}`);
-            const chosenModel = choice.model;
-            const chosenThinking = choice.thinkingLevel;
+            const reference = childModelReference(current, args.model, profile);
+            const models = chainModels(reference, chains, parentAgent, profile?.thinkingLevel);
+            const chosen = models.length === 0 ? undefined : selectChainModel(models, cooldowns, selected.now?.() ?? Date.now());
+            const choice = chosen === undefined ? null : parseModelChoice(chosen.model);
+            const chosenModel = choice?.model;
+            const chosenThinking = choice?.thinkingLevel;
             const plan = runtime ?? planChildRuntime(profile, availableNames(selected), []);
             await configure(tx, child.id, {
               ...(checkout === undefined ? {} : { cwd: checkout.path }),
@@ -586,6 +700,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             (await tx.doc(AgentDoc, child.id)).extensions = [ChildTools.name, ...gateNames];
             state.agents[name] = { conversationId: child.id, reported: [], agent: profile?.name ?? null, createdAt: Date.now(),
               ...(profile === undefined ? {} : { agentFile: profile.source }),
+              ...(reference === undefined ? {} : { modelReference: reference }),
+              ...(chosen === undefined || models[0] === chosen.model ? {} : { fallbacks: [{ from: modelKey(models[0] ?? chosen.model), to: modelKey(chosen.model), reason: cooldowns[modelKey(models[0] ?? chosen.model)]?.reason ?? "model cooling" }] }),
               ...(checkout === undefined ? {} : { worktreeId: checkout.id }) };
           } else if (!Object.hasOwn(state.agents, name)) return `No child named ${name}.`;
           const agent = state.agents[name];
@@ -598,7 +714,12 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             (await tx.doc(AgentDoc, agent.conversationId)).extensions = [ChildTools.name, ...gateNames];
             if (sentProfile !== undefined) agent.agentFile = sentProfile.source;
           }
-          const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(action === "send" ? { workflowSend: true } : {}), ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
+          const configured = await tx.doc(AgentDoc, agent.conversationId);
+          const configuredModels = action === "spawn" ? chainModels(agent.modelReference, chains, configured) : [];
+          const exhausted = action === "spawn" && configuredModels.length > 1 && selectChainModel(configuredModels, cooldowns, selected.now?.() ?? Date.now()).exhausted;
+          const earliest = exhausted ? selectChainModel(configuredModels, cooldowns, selected.now?.() ?? Date.now()).model : undefined;
+          const initialRetry = earliest === undefined ? undefined : { error: cooldowns[modelKey(earliest)]?.reason ?? "All models are cooling", until: (selected.now?.() ?? Date.now()) + 30_000 };
+          const reporter = await tx.createTask(Reporter, { name, conversationId: agent.conversationId, message, followUp: false, ...(initialRetry === undefined ? {} : { initialRetry }), ...(action === "send" ? { workflowSend: true } : {}), ...(agent.worktreeId === undefined ? {} : { worktreeId: agent.worktreeId }) }, background);
           state.reporters[String(api.taskId)] = reporter;
           await associateWorkflowChild(tx, api.conversationId, agent.conversationId, reporter, name);
           if (action === "send") {
@@ -621,17 +742,8 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
   return extensions;
 }
 
-/**
- * provider/model-id with an optional :thinking-level, as agent files write it. Null when it cannot be read.
- * A colon that is not a thinking level belongs to the model id (local/qwen:32b). The workflow routes check
- * their own model fields strictly; this reader stays as lenient as every other spawn needs.
- */
-export function modelChoice(spec: string): { model: { provider: string; modelId: string }; thinkingLevel?: ThinkingLevel } | null {
-  const { model: id, thinkingLevel: level } = parseModelReference(spec);
-  const slash = id.indexOf("/");
-  if (slash <= 0 || slash === id.length - 1) return null;
-  return { model: { provider: id.slice(0, slash), modelId: id.slice(slash + 1) }, ...(level === undefined ? {} : { thinkingLevel: level }) };
-}
+/** Model spec parser shared by agent files, spawns and workflow overrides; non-thinking colons stay in the ID. */
+export const modelChoice = parseModelChoice;
 
 /**
  * How a child checks its work. Over 10-12 to 10-15, workflow builders ran the full suite 377 times (18 hours), up to
@@ -685,9 +797,9 @@ export async function listChildren(harness: Harness, parent: ConversationId, con
   }, worktrees);
 }
 
-interface ChildRowsState { agents: Record<string, Pick<ChildRecord, "conversationId" | "agent" | "createdAt" | "worktreeId">>; reporters: Record<string, TaskId> }
+interface ChildRowsState { agents: Record<string, Pick<ChildRecord, "conversationId" | "agent" | "createdAt" | "worktreeId" | "fallbacks">>; reporters: Record<string, TaskId> }
 const childRowsSchema = Schema.Unsafe<ChildRowsState>(Schema.Object({
-  agents: Schema.Record(Schema.String(), Schema.Object({ conversationId: Schema.Integer({ minimum: 1 }), agent: Schema.Union([Schema.String(), Schema.Null()]), createdAt: Schema.Number(), worktreeId: Schema.Optional(Schema.String()) })),
+  agents: Schema.Record(Schema.String(), Schema.Object({ conversationId: Schema.Integer({ minimum: 1 }), agent: Schema.Union([Schema.String(), Schema.Null()]), createdAt: Schema.Number(), worktreeId: Schema.Optional(Schema.String()), fallbacks: Schema.Optional(Schema.Array(ChildFallbackSchema)) })),
   reporters: Schema.Record(Schema.String(), Schema.Integer({ minimum: 1 })),
 }));
 const questionRowsSchema = Schema.Unsafe<{ items: Record<string, ChildQuestion> }>(Schema.Object({ items: Schema.Record(Schema.String(), Schema.Object({
@@ -734,11 +846,13 @@ async function childRows(state: ChildRowsState | undefined, questionState: { ite
   const questions = Object.entries(questionState?.items ?? {});
   const children = await Promise.all(Object.entries(agents).map(async ([name, agent]) => {
     const retry = retries.get(agent.conversationId);
+    const fallback = agent.fallbacks?.at(-1);
     return {
       name, conversationId: Number(agent.conversationId), agent: agent.agent, createdAt: agent.createdAt,
       ...await read.activity(agent.conversationId),
       busy: retry !== undefined || await read.busy(agent.conversationId),
       ...(retry === undefined ? {} : { retry }),
+      ...(fallback === undefined ? {} : { fallback }),
       ...(agent.worktreeId === undefined ? {} : { worktree: await requireWorktrees(worktrees).summary(agent.worktreeId) }),
       questions: questions.filter(([, question]) => question.child === agent.conversationId && question.answer === null && question.closed !== true && (question.routing === undefined || question.routing.kind === "user"))
         .map(([questionId, question]) => ({ questionId, question: question.question, askedAt: question.askedAt }))
@@ -818,7 +932,7 @@ export async function messageChild(harness: Harness, parent: Conversation, conve
     const selected = await options?.resolveOptions?.(parent.id, context) ?? options;
     // A user steer joins the busy turn immediately and keeps that turn's model. An idle send applies the
     // current declaration first; it does not inherit the previous turn's model or thinking level.
-    await parent.commit((tx) => applyWorkflowWorkerModel(tx, parent.id, child.id, name, selected?.catalog), context);
+    await parent.commit((tx) => applyWorkflowWorkerModel(tx, parent.id, child.id, name, selected), context);
     await child.submit({ type: "input", content: text, whenBusy: "steer" }, context);
     await noteInParent(parent, `[the user told child ${name} directly] ${text}`, { child: conversationId, childName: name, action: "message" }, context);
   });
@@ -998,7 +1112,7 @@ function reporterRetry(task: Awaited<ReturnType<Harness["getTask"]>>): ChildRetr
   if (task === undefined || task.state.status === "terminal" || !("checkpoint" in task.state)) return undefined;
   const checkpoint = task.state.checkpoint;
   if (typeof checkpoint !== "object" || checkpoint === null || Array.isArray(checkpoint) || checkpoint["phase"] !== "retry") return undefined;
-  const retry = { attempt: checkpoint["attempt"], max: 3, error: checkpoint["error"], until: checkpoint["until"] };
+  const retry = { attempt: checkpoint["retryAttempt"] ?? checkpoint["attempt"], max: 3, error: checkpoint["error"], until: checkpoint["until"] };
   return Check(ChildRetrySchema, retry) ? retry : undefined;
 }
 

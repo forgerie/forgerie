@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { KNOWN_THINKING_LEVELS } from "./thinkingLevels.js";
+import { ModelChainReferenceSchema, ModelSpecSchema } from "./modelChains.js";
 
 export const WORKFLOW_RETENTION_DAYS = 90;
 export const WorkflowValueSchema = Type.Union([Type.String({ maxLength: 65536 }), Type.Boolean(), Type.Number()]);
@@ -11,8 +11,7 @@ export const WorkflowInputSchema = Type.Object({
   default: Type.Optional(WorkflowValueSchema),
 }, { additionalProperties: false });
 /** Wire format for a worker model override. Null restores the default: the agent file's model, else the session's. */
-export const WorkflowModelSchema = Type.Union([Type.String({ minLength: 1, maxLength: 128,
-  pattern: `^[^\\s/:]+/[^\\s/:]+(?:/[^\\s/:]+)*(?::(?:${KNOWN_THINKING_LEVELS.join("|")}))?$` }), Type.Null()]);
+export const WorkflowModelSchema = Type.Union([Type.String({ ...ModelSpecSchema, maxLength: 128 }), Type.String({ ...ModelChainReferenceSchema, maxLength: 128 }), Type.Null()]);
 export const WorkflowModelsSchema = Type.Record(Type.String({ pattern: "^[a-z][a-z0-9-]{0,31}$" }), WorkflowModelSchema);
 export type WorkflowModels = Static<typeof WorkflowModelsSchema>;
 /** A worker the stage expects. The agent decides how and when to start it. */

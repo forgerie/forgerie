@@ -1,3 +1,4 @@
+import type { ModelChains } from "./modelChains.js";
 import type { BacklogSuggestionsChangedEvent } from "./backlogSuggestions.js";
 import type { WorkflowGlance } from "./workflowGlance.js";
 import type { AttentionHint } from "./attentionHints.js";
@@ -91,6 +92,8 @@ export interface PiWebConfigValues {
    * not available with credentials, the session's own model is used.
    */
   sessionTitleModel?: string;
+  /** Ordered model lists for Durable child agents. Read fresh at spawn and fallback. */
+  modelChains?: ModelChains;
   /** Desired Pi-compatible agent profile and companion CLI (Pi by default). */
   agent?: PiWebAgentConfig;
 }

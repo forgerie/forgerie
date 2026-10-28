@@ -75,6 +75,8 @@ function sessionRef(value: unknown): DurableChildSessionRef | undefined {
 }
 
 export interface DurableChildHostOptions {
+  modelChains?: DurableChildExtensionOptions["modelChains"];
+  modelCooldowns?: DurableChildExtensionOptions["modelCooldowns"];
   /** The user's own agent folder, normally `~/.agents`. Its files rank below project files and above profile files. */
   homeAgentsDir?: string;
   /** Built-in agent folders, after project and profile files, in order. */
@@ -100,7 +102,7 @@ export function createDurableChildHost(options: DurableChildHostOptions = {}): D
         ...(options.homeAgentsDir === undefined ? {} : { home: options.homeAgentsDir }),
         ...(options.builtinAgentsDirs === undefined ? {} : { builtin: options.builtinAgentsDirs }) });
       const agents = await catalog.list();
-      return durableChildExtensions({ ...(riskLabels === undefined ? {} : {riskLabels}), catalog, agents, projectContext, ...(commit === undefined ? {} : { commit }),
+      return durableChildExtensions({ ...(options.modelChains === undefined ? {} : { modelChains: options.modelChains }), ...(options.modelCooldowns === undefined ? {} : { modelCooldowns: options.modelCooldowns }), ...(riskLabels === undefined ? {} : {riskLabels}), catalog, agents, projectContext, ...(commit === undefined ? {} : { commit }),
         ...(sessionTools === undefined ? {} : { sessionTools }), childToolsDeny: options.childToolsDeny ?? [], ...(sessionSkills === undefined ? {} : { sessionSkills }), ...(flushRunRecords === undefined ? {} : { flushRunRecords }), ...(worktrees === undefined ? {} : { worktrees }), extraTools: [...options.extraTools ?? [], ...extraTools ?? []] });
     },
     liveChanged(ref, live) {

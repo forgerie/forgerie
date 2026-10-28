@@ -159,7 +159,7 @@ function openService(hostsWorkflows = true): PiSessionService {
   return new PiSessionService(hub, { agentDir, modelRuntime: models,
     sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }), archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60000,
     ...(autonomy === undefined ? {} : { workflowAutonomy: () => autonomy ?? WAIT_FOR_USER }),
-    ...(hostsWorkflows ? { durableChildAgents: createDurableChildHost({ extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }) } : {}),
+    ...(hostsWorkflows ? { durableChildAgents: createDurableChildHost({ modelChains: () => ({ worker: ["faux/faux-declared", "faux/faux-1"] }), extraTools: [work], index: new LiveChildSessionIndex(join(agentDir, "live.json")), runRecords: store, onRunRecordError: (error) => { errors.push(error); }, ...(worktrees === undefined ? {} : { worktrees }) }) } : {}),
   });
 }
 async function until<T>(check: () => Promise<T | false | undefined>): Promise<T> {
@@ -290,6 +290,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
   it.each([
     { source: "saved", model: "faux/faux-1:high" }, { source: "proposal", model: "faux/faux-1:high" },
     { source: "saved", model: null }, { source: "proposal", model: null },
+    { source: "saved", model: "worker:high" }, { source: "proposal", model: "worker:high" },
   ] as const)("starts a $source workflow with model $model, validates it, and preserves retry identity", async ({ source, model }) => {
     let server = app();
     try {
@@ -305,7 +306,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
         url = `/sessions/${ref.id}/workflow-proposals/${proposal.id}/start`;
       }
       const payload = { cwd: root, ...(source === "saved" ? { name: "staged" } : {}), inputs: {}, requestId: "models-start", models: { alpha: model } };
-      for (const models of [{ missing: null }, { alpha: "bad" }, { alpha: "/id" }, { alpha: "provider/" }, { alpha: "provider/id:" }, { alpha: "provider/id:bogus" }, { alpha: "provider/id:HIGH" }, { alpha: "provider/id has spaces" }, { alpha: 1 }]) {
+      for (const models of [{ missing: null }, { alpha: "bad name" }, { alpha: "/id" }, { alpha: "provider/" }, { alpha: "provider//id" }, { alpha: "worker:bogus" }, { alpha: "worker:HIGH" }, { alpha: "provider/id has spaces" }, { alpha: 1 }]) {
         expect((await server.inject({ method: "POST", url, payload: { ...payload, models } })).statusCode).toBe(400);
       }
       const response = await server.inject({ method: "POST", url, payload });
@@ -320,7 +321,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
       const messages = (await service.messages(ref)).messages;
       expect(messages.some((message) => Check(Type.Object({ role: Type.Literal("user"), content: Type.Unknown() }), message) && textOf(message.content).includes(`model ${model ?? "from its agent file"}`))).toBe(true);
       const modelUrl = `/sessions/${ref.id}/workflow-runs/${run.id}/workers/alpha/model`;
-      for (const model of ["bad", "provider/", "provider/id:", "provider/id:bogus", "provider/id:HIGH", 1, {}]) {
+      for (const model of ["bad name", "provider/", "provider//id", "worker:bogus", "worker:HIGH", 1, {}]) {
         expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root, model } })).statusCode).toBe(400);
       }
       expect((await server.inject({ method: "POST", url: modelUrl, payload: { cwd: root } })).statusCode).toBe(400);
@@ -373,7 +374,7 @@ describe("saved prose workflows through production Durable sessions and HTTP", (
         const children = (await service.workflowRuns(ref))[0]?.children;
         return children?.length === count && children.every((child) => child.state.kind === "settled" && child.state.delivered !== false);
       });
-      await change("alpha", "faux/faux-declared");
+      await change("alpha", "worker");
       await ask("MODEL-SPAWN-alpha");
       await until(() => Promise.resolve(started === 1));
       expect(modelRequests).toEqual([{ name: "alpha", model: "faux-declared", phase: "user" }]);
