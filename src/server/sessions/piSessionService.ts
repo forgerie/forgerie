@@ -1419,7 +1419,9 @@ export class PiSessionService implements SessionRouteService {
     if (trigger !== "manual" && (!this.autoRecap() || unread === undefined)) return { kind: "skipped" };
     if (trigger === "automatic" && unread !== undefined && this.now().getTime() < Date.parse(unread.completedAt) + RECAP_DELAY_MS) return { kind: "skipped" };
     if (await this.archiveStore.isArchived(ref.id) || await this.sessionWorktrees?.store.readOnly(ref) !== undefined) return { kind: "skipped" };
-    const session = await this.getOrOpen(ref);
+    // A timer never opens a runtime: nothing would release it, and a restart would open every unread session at once.
+    // A closed session gets its recap when the user opens it.
+    const session = trigger === "automatic" ? this.activeForRef(ref)?.runtime.session : await this.getOrOpen(ref);
     if (!(session instanceof DurableAgentSession)) return { kind: "skipped" };
     const handle = session.journal.handle;
     const trackedChild = await verifiedTrackedSubsessionLink(this.sessionManager, {
@@ -4515,6 +4517,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async closeActive(sessionId: string, notificationPolicy: NotificationClosePolicy = CLEAR_RUNTIME_NOTIFICATIONS): Promise<void> {
+    this.recaps.cancelSession(sessionId);
     if (notificationPolicy.kind === "clear" && (notificationPolicy.reason === "archive" || notificationPolicy.reason === "delete")) {
       await this.pullRequestWatches?.stop(sessionId, "Session archived or deleted.");
       await this.actionRunWatches?.stop(sessionId, "Session archived or deleted.");

@@ -9,6 +9,8 @@ import { isHostEntryKind } from "./durableHostEntries.js";
 import { recapExchanges } from "./sessionRecapGenerator.js";
 import { SessionBindings } from "./durableSessionBindings.js";
 
+const LEGACY_MESSAGE_KIND = "forgerie.legacy-message";
+
 export async function readRecapHistory(handle: DurableSessionHandle) {
   const entries: EntryRecord[] = [];
   let cursor: Cursor | undefined;
@@ -21,7 +23,10 @@ export async function readRecapHistory(handle: DurableSessionHandle) {
   const lastRecap = parsed.success ? parsed.data : undefined;
   const messagesOf = (values: EntryRecord[]) => values.flatMap(entry => {
     const reply = endTurnReplyMessage(entry);
-    return reply !== undefined ? [reply] : isTranscriptEntry(entry.kind) && !isHostEntryKind(entry.kind) ? entry.model ?? [] : [];
+    if (reply !== undefined) return [reply];
+    // Imported history is ordinary conversation: the browser shows it, so the recap reads it too.
+    if (entry.kind === LEGACY_MESSAGE_KIND) return entry.model ?? [];
+    return isTranscriptEntry(entry.kind) && !isHostEntryKind(entry.kind) ? entry.model ?? [] : [];
   });
   const messages = messagesOf(entries);
   const exchanges = recapExchanges(messages);

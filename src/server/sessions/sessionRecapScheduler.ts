@@ -51,6 +51,12 @@ export class SessionRecapScheduler {
     clearTimeout(this.timers.get(key)); this.timers.delete(key);
     if (abort) this.flights.get(key)?.controller.abort();
   }
+  /** Closing a runtime ends its recap work in every cwd: a timer must not reopen what the user stopped. */
+  cancelSession(id: string): void {
+    const prefix = `${JSON.stringify([id]).slice(0, -1)},`;
+    for (const [key, timer] of this.timers) if (key.startsWith(prefix)) { clearTimeout(timer); this.timers.delete(key); }
+    for (const [key, flight] of this.flights) if (key.startsWith(prefix)) flight.controller.abort();
+  }
   request(ref: RecapIdentity, trigger: RecapTrigger): Promise<RecapResult> {
     if (this.stopped) return Promise.resolve({ kind: "skipped" });
     const key = keyOf(ref), existing = this.flights.get(key);

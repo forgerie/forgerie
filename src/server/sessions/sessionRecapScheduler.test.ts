@@ -88,3 +88,23 @@ it("keeps a future persisted completion scheduled across the platform timer limi
   expect(generate).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1); expect(generate).toHaveBeenCalledOnce(); scheduler.dispose();
 });
+
+it("stopping a session cancels its timers in every cwd and aborts its request, leaving other sessions alone", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  const signals: AbortSignal[] = [];
+  const generate = vi.fn((target: { id: string }, _trigger: string, signal: AbortSignal) => {
+    signals.push(signal);
+    return target.id === ref.id && signals.length === 1 ? new Promise<RecapResult>(resolve => { signal.addEventListener("abort", () => { resolve({ kind: "written" }); }); }) : Promise.resolve<RecapResult>({ kind: "written" });
+  });
+  const scheduler = new SessionRecapScheduler(generate);
+  const pending = scheduler.request(ref, "open");
+  await vi.advanceTimersByTimeAsync(0);
+  scheduler.schedule({ ...summary, cwd: "/other" });
+  scheduler.schedule({ ...summary, sessionId: "neighbour" });
+  scheduler.cancelSession(ref.id);
+  expect(signals[0]?.aborted).toBe(true);
+  expect(await pending).toEqual({ kind: "skipped" });
+  await vi.advanceTimersByTimeAsync(RECAP_DELAY_MS);
+  expect(generate.mock.calls.map(([target]) => target.id)).toEqual([ref.id, "neighbour"]);
+  scheduler.dispose();
+});

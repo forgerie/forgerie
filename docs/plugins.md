@@ -93,8 +93,10 @@ Forgerie checks unread completions after ten minutes. Automatic recaps require
 an idle, writable parent session with at least three completed user turns and,
 after its first recap, at least two new user turns. Opening an unread session
 can write its recap immediately under the same guards, without waiting for the
-ten-minute timer. Reading the completion or sending a message cancels its timer.
-Daemon restarts restore timers from the unread catalog.
+ten-minute timer. Reading the completion, sending a message or stopping the
+session cancels its timer. The timer only writes a recap for a session that is
+still open in the daemon; it never opens one. After a daemon restart, or after
+you stop a session, the recap is written when you open the session instead.
 
 Type `/recap` in the composer to write one now. It ignores the delay and turn
 counts, but requires at least one exchange and an idle session. While writing,

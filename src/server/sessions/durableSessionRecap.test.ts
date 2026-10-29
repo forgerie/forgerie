@@ -62,3 +62,15 @@ it("discards when a new run starts before its first transcript entry", async () 
     expect(await commitSessionRecap(f.handle, answer.id, data, undefined, data.model)).toBe(false);
   } finally { await f.harness.close(context); }
 });
+it("reads imported legacy history as conversation turns", async () => {
+  const f = await fixture();
+  try {
+    for (let turn = 0; turn < 3; turn++) {
+      await f.conversation.commit(tx => tx.appendEntry(f.conversation.id, { kind: "forgerie.legacy-message", model: [{ role: "user", content: `Imported request ${String(turn)}`, timestamp: turn }], data: { sdkEntryId: `u${String(turn)}` } }), context);
+      await f.conversation.commit(tx => tx.appendEntry(f.conversation.id, { kind: "forgerie.legacy-message", model: [fauxAssistantMessage(`Imported answer ${String(turn)}`)], data: { sdkEntryId: `a${String(turn)}` } }), context);
+    }
+    const history = await readRecapHistory(f.handle);
+    expect(history).toMatchObject({ completedTurns: 3, hasExchange: true });
+    expect(history.messages).toHaveLength(6);
+  } finally { await f.harness.close(context); }
+});
