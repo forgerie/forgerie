@@ -3,44 +3,32 @@ import { InboxDoc, LiveDoc, UsageDoc, type Cursor, type EntryRecord, type Tx } f
 import type { Usage } from "@earendil-works/pi-ai";
 import { RECAP_ENTRY_KIND, recapDataSchema, type RecapData } from "../../shared/sessionRecap.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
-import { endTurnReplyMessage } from "./endTurnReply.js";
-import { isTranscriptEntry } from "./durableSessionJournal.js";
-import { isHostEntryKind } from "./durableHostEntries.js";
 import { recapExchanges } from "./sessionRecapGenerator.js";
 import { SessionBindings } from "./durableSessionBindings.js";
-import { Check } from "typebox/value";
-import { Presentation, PresentationSchema } from "./durableParentDocuments.js";
 
-const LEGACY_MESSAGE_KIND = "forgerie.legacy-message";
+/** The parts of a projected SDK session entry that a recap reads. */
+export interface RecapBranchEntry { type: string; message?: unknown; customType?: string }
 
-export async function readRecapHistory(handle: DurableSessionHandle) {
+/**
+ * Conversation comes from the session's projected SDK branch, the same source as session search: only
+ * `message` entries with user or assistant text count. Custom messages, notifications, shell runs, branch
+ * summaries and compactions have their own entry types there, for native and imported history alike.
+ * Durable entries decide only freshness: the leaf, the newest entry, and the last saved recap.
+ */
+export async function readRecapHistory(handle: DurableSessionHandle, branch: readonly RecapBranchEntry[]) {
   const entries: EntryRecord[] = [];
   let cursor: Cursor | undefined;
   do {
     const page = await handle.conversation.entries({ order: "ascending" }, 256, cursor, context);
     entries.push(...page.items); cursor = page.next;
   } while (cursor !== undefined);
-  // Custom messages and shell runs are stored as user-role model messages and marked by a presentation
-  // envelope, as the browser reads them. They are not conversation, so the recap skips them too.
-  const presented = new Set<EntryRecord["id"]>();
-  for (const entry of entries) {
-    if (!(entry.model ?? []).some(message => message.role === "user")) continue;
-    const presentation = await handle.harness.snapshot(Presentation, handle.conversation.id, String(entry.id), context);
-    if (Check(PresentationSchema, presentation) && presentation.envelope !== undefined) presented.add(entry.id);
-  }
   const lastRecapEntry = [...entries].reverse().find(entry => entry.kind === RECAP_ENTRY_KIND);
   const parsed = recapDataSchema.safeParse(lastRecapEntry?.data);
   const lastRecap = parsed.success ? parsed.data : undefined;
-  const messagesOf = (values: EntryRecord[]) => values.flatMap(entry => {
-    const reply = endTurnReplyMessage(entry);
-    if (reply !== undefined) return [reply];
-    if (presented.has(entry.id)) return [];
-    // Imported history is ordinary conversation: the browser shows it, so the recap reads it too.
-    if (entry.kind === LEGACY_MESSAGE_KIND) return entry.model ?? [];
-    return isTranscriptEntry(entry.kind) && !isHostEntryKind(entry.kind) ? entry.model ?? [] : [];
-  });
-  const messages = messagesOf(entries);
+  const messagesOf = (values: readonly RecapBranchEntry[]) => values.flatMap(entry => entry.type === "message" ? [entry.message] : []);
+  const messages = messagesOf(branch);
   const exchanges = recapExchanges(messages);
+  const recapAt = branch.map(entry => entry.type === "custom_message" && entry.customType === RECAP_ENTRY_KIND).lastIndexOf(true);
   const view = await handle.conversation.viewState(context);
   const child = view.value.conversation.owner !== undefined;
   view.dispose();
@@ -49,7 +37,7 @@ export async function readRecapHistory(handle: DurableSessionHandle) {
     newestEntryId: String([...entries].reverse().find(entry => entry.kind !== RECAP_ENTRY_KIND)?.id ?? ""),
     lastRecap,
     completedTurns: exchanges.filter(exchange => exchange.assistant !== "").length,
-    newTurns: recapExchanges(messagesOf(entries.filter(entry => lastRecapEntry === undefined || entry.id > lastRecapEntry.id))).length,
+    newTurns: recapExchanges(messagesOf(branch.slice(recapAt + 1))).length,
     hasExchange: exchanges.length > 0,
   };
 }

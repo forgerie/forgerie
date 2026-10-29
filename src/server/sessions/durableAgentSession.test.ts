@@ -10,6 +10,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { durableSessionPaths } from "./durableSessionJournal.js";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readRecapHistory } from "./durableSessionRecap.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
 import { createEndTurnToolDefinition } from "./endTurnTool.js";
 
@@ -660,6 +661,17 @@ describe("SDK-compatible Durable execution", () => {
     expect(provider.state.callCount).toBe(1);
     expect(session.messages.filter((message) => message.role === "user")).toHaveLength(1);
     expect(JSON.stringify((await session.journal.conversation.context(context)).messages)).toContain("Read this next turn.");
+  });
+  it("keeps turn-triggering notifications out of recap history", async () => {
+    const { provider, session, events } = await fixture();
+    provider.setResponses([fauxAssistantMessage("first answer"), fauxAssistantMessage("notification handled")]);
+    await session.prompt("start work");
+    await session.sendCustomMessage({ customType: "test:notification", content: "HIDDEN NATIVE NOTIFICATION", display: false }, { triggerTurn: true });
+    await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "assistant")).toHaveLength(2); });
+    await session.journal.project();
+    const history = await readRecapHistory(session.journal.handle, session.sessionManager.getBranch());
+    expect(JSON.stringify(history.messages)).not.toContain("HIDDEN NATIVE NOTIFICATION");
+    expect(history.completedTurns).toBe(1);
   });
   it("does not hide a real user input that has the same content as a notification", async () => {
     const { provider, session, events } = await fixture();

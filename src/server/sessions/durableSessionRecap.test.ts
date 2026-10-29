@@ -5,14 +5,15 @@ import { Harness, MemoryStorage, createRegistry, UsageDoc, LiveDoc, GenerationTa
 import { expect, it } from "vitest";
 import { RECAP_ENTRY_KIND, type RecapData } from "../../shared/sessionRecap.js";
 import { DurableParentReadModel } from "./durableParentReadModel.js";
-import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
-import { Presentation } from "./durableParentDocuments.js";
+import { commitSessionRecap, readRecapHistory, type RecapBranchEntry } from "./durableSessionRecap.js";
 import { buildRecapPrompt } from "./sessionRecapGenerator.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { responseFromBranch } from "./sessionResponse.js";
 
 const data: RecapData = { goal: "Ship a fix", done: ["Implemented"], left: ["Not deployed"], next: null, trigger: "manual",
   model: "faux/faux-1", messageCount: 2, coversThroughEntryId: "2", runEndedAt: "2026-01-01T00:00:00.000Z", generatedAt: "2026-01-01T00:10:00.000Z" };
+const message = (role: "user" | "assistant" | "bashExecution", content: string): RecapBranchEntry => ({ type: "message", message: { role, content: [{ type: "text", text: content }] } });
+const recapCard: RecapBranchEntry = { type: "custom_message", customType: RECAP_ENTRY_KIND };
 async function fixture() {
   const harness = await Harness.open(new MemoryStorage(), { models: createModels(), registry: createRegistry() }, context);
   const conversation = await harness.root(context);
@@ -37,7 +38,7 @@ it("appends a data-only recap that reaches browser history without entering cont
     expect(messages.at(-1)).toMatchObject({ role: "custom", customType: RECAP_ENTRY_KIND, details: data });
     expect((await f.reader.statistics(context)).assistantMessages).toBe(1);
     expect((await f.harness.snapshot(UsageDoc, f.conversation.id, context))?.models[data.model]?.totalTokens).toBe(50);
-    const history = await readRecapHistory(f.handle);
+    const history = await readRecapHistory(f.handle, [message("user", "Please fix it"), message("assistant", "Implemented, not deployed"), recapCard]);
     expect(history).toMatchObject({ completedTurns: 1, newTurns: 0, lastRecap: data, newestEntryId: String(answer.id) });
     expect(history.messages).toHaveLength(2);
     expect(responseFromBranch([{ type: "custom_message", customType: RECAP_ENTRY_KIND, content: "While you were away", details: data }]).response.kind).toBe("none");
@@ -64,39 +65,24 @@ it("discards when a new run starts before its first transcript entry", async () 
     expect(await commitSessionRecap(f.handle, answer.id, data, undefined, data.model)).toBe(false);
   } finally { await f.harness.close(context); }
 });
-it("reads imported legacy history as conversation turns", async () => {
+it("reads only user and assistant messages from the projected branch, and counts new turns after the last recap", async () => {
   const f = await fixture();
   try {
-    for (let turn = 0; turn < 3; turn++) {
-      await f.conversation.commit(tx => tx.appendEntry(f.conversation.id, { kind: "forgerie.legacy-message", model: [{ role: "user", content: `Imported request ${String(turn)}`, timestamp: turn }], data: { sdkEntryId: `u${String(turn)}` } }), context);
-      await f.conversation.commit(tx => tx.appendEntry(f.conversation.id, { kind: "forgerie.legacy-message", model: [fauxAssistantMessage(`Imported answer ${String(turn)}`)], data: { sdkEntryId: `a${String(turn)}` } }), context);
-    }
-    const history = await readRecapHistory(f.handle);
-    expect(history).toMatchObject({ completedTurns: 3, hasExchange: true });
-    expect(history.messages).toHaveLength(6);
-  } finally { await f.harness.close(context); }
-});
-it("skips custom messages and shell runs that are stored as user messages, imported or native", async () => {
-  const f = await fixture();
-  try {
-    await f.user(); await f.answer();
-    const presented = (kind: string, content: string, envelope: { type: "custom" | "bashExecution"; customType?: string; display?: boolean; command?: string }) =>
-      f.conversation.commit(async tx => {
-        const entry = await tx.appendEntry(f.conversation.id, { kind, model: [{ role: "user", content, timestamp: 2 }], data: { sdkEntryId: content } });
-        (await tx.doc(Presentation, f.conversation.id, String(entry.id), null)).envelope = envelope;
-      }, context);
-    await presented("forgerie.legacy-message", "hidden extension note", { type: "custom", customType: "note", display: false });
-    await f.answer();
-    await presented("forgerie.legacy-message", "Ran `ls`\n```\nsecret.txt\n```", { type: "bashExecution", command: "ls" });
-    await f.answer();
-    await presented("pi.user", "visible extension card", { type: "custom", customType: "card", display: true });
-    await f.answer();
-    await f.conversation.commit(tx => tx.appendEntry(f.conversation.id, { kind: "forgerie.legacy-message", model: [{ role: "system", content: "imported system prompt", timestamp: 3 }], data: { sdkEntryId: "s" } }), context);
-    const history = await readRecapHistory(f.handle);
-    const text = JSON.stringify(history.messages);
-    expect(text).not.toContain("hidden extension note"); expect(text).not.toContain("secret.txt");
-    expect(text).not.toContain("visible extension card");
-    expect(buildRecapPrompt(history.messages)?.prompt).not.toContain("imported system prompt");
-    expect(history.completedTurns).toBe(1);
+    const branch: RecapBranchEntry[] = [
+      message("user", "Imported request"), message("assistant", "Imported answer"),
+      { type: "custom_message", customType: "note", message: { role: "user", content: "hidden extension note" } },
+      message("bashExecution", "secret.txt"), message("assistant", "Listed the files"),
+      { type: "branch_summary", message: { role: "user", content: "imported branch summary" } },
+      { type: "compaction", message: { role: "user", content: "compacted history" } },
+      recapCard,
+      message("user", "Validate it"), message("assistant", "Tested"),
+      { type: "custom_message", customType: "notice", message: { role: "user", content: "HIDDEN NATIVE NOTIFICATION" } },
+      message("user", "Deploy it"), message("assistant", "Deployed"),
+    ];
+    const history = await readRecapHistory(f.handle, branch);
+    const prompt = buildRecapPrompt(history.messages)?.prompt ?? "";
+    for (const hidden of ["hidden extension note", "secret.txt", "imported branch summary", "compacted history", "HIDDEN NATIVE NOTIFICATION"]) expect(prompt).not.toContain(hidden);
+    expect(prompt).toContain("Imported answer");
+    expect(history).toMatchObject({ completedTurns: 3, newTurns: 2, hasExchange: true });
   } finally { await f.harness.close(context); }
 });

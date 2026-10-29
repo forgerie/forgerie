@@ -1427,7 +1427,8 @@ export class PiSessionService implements SessionRouteService {
     const trackedChild = await verifiedTrackedSubsessionLink(this.sessionManager, {
       sessionId: session.sessionId, sessionFile: session.sessionFile, sessionManager: session.sessionManager, cwd: ref.cwd,
     });
-    const history = await readRecapHistory(handle);
+    await session.journal.project();
+    const history = await readRecapHistory(handle, session.sessionManager.getBranch());
     if (trigger !== "manual" && this.recapUnread(ref)?.completionOrder !== unread?.completionOrder) return { kind: "skipped" };
     if (trigger === "manual" && !history.hasExchange) return { kind: "failed", message: "A recap needs at least one exchange." };
     if (trigger === "manual" && this.hasActiveWork(session)) return { kind: "failed", message: "Wait for this run to finish, then try /recap again." };
