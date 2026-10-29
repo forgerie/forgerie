@@ -83,11 +83,15 @@ privacy and server-only key setup. The annotations are a later integration stage
 
 ## While you were away
 
-A session can add a **While you were away** panel after its last reply. It
-states the goal, completed work, unfinished work, and the next step. **Needs
-you** comes from current gated actions, open question forms, child questions,
-and workflow stops, not from the model. Resolving an obligation removes it
-from the panel, including panels kept in history.
+A session can add a **While you were away** note after its last reply: two or
+three sentences, at most 360 characters, on what the session is about, where
+it stands, and what comes next. A rule on its start edge sets it apart from the
+reply text. When something waits on you, the rule turns live and a **Needs
+you** line follows the summary. That line comes from current gated actions,
+open question forms, child questions, and workflow stops, not from the model.
+Resolving an obligation removes it from the note, including notes kept in
+history. Recaps saved in the older goal, done, left and next form show only
+their goal and next step.
 
 Forgerie checks unread completions after ten minutes. Automatic recaps require
 an idle, writable parent session with at least three completed user turns and,
@@ -100,12 +104,11 @@ you stop a session, the recap is written when you open the session instead.
 
 Type `/recap` in the composer to write one now. It ignores the delay and turn
 counts, but requires at least one exchange and an idle session. While writing,
-a quiet line replaces the pending panel. Manual and on-open failures show a
+a quiet line replaces the pending note. Manual and on-open failures show a
 short error; an automatic failure retries once after 30 seconds, then stops.
 
 Each recap uses up to eight recent visible exchanges, bounded to about 32 KB.
 Tools, thinking, skill blocks and file blocks are excluded. A source line names
-the model, the number of messages, and (except for manual recaps) how long the
-run had ended unread. Recaps stay where they were written when the chat
+the model and the number of messages. Recaps stay where they were written when the chat
 continues. They are display-only Durable entries and do not enter model context.
 [Configure automatic recaps](config.md#session-recaps) with `autoRecap`.

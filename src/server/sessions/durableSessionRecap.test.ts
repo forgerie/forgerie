@@ -10,7 +10,7 @@ import { buildRecapPrompt } from "./sessionRecapGenerator.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { responseFromBranch } from "./sessionResponse.js";
 
-const data: RecapData = { goal: "Ship a fix", done: ["Implemented"], left: ["Not deployed"], next: null, trigger: "manual",
+const data: RecapData = { summary: "Shipping a fix. It is implemented, not deployed.", trigger: "manual",
   model: "faux/faux-1", messageCount: 2, coversThroughEntryId: "2", runEndedAt: "2026-01-01T00:00:00.000Z", generatedAt: "2026-01-01T00:10:00.000Z" };
 const message = (role: "user" | "assistant" | "bashExecution", content: string): RecapBranchEntry => ({ type: "message", message: { role, content: [{ type: "text", text: content }] } });
 const recapCard: RecapBranchEntry = { type: "custom_message", customType: RECAP_ENTRY_KIND };

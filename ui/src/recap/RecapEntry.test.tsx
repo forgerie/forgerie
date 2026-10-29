@@ -7,24 +7,34 @@ import { RecapEntry } from "./RecapEntry";
 import { RecapRequest } from "./RecapRequest";
 import { RecapPanel } from "../ui/RecapPanel";
 import { fromHistory, convertMessage } from "../transcript";
-import { recapNeeds, recapOf, recapSource } from "./recapModel";
+import { recapNeeds, recapOf, recapSource, recapSummary } from "./recapModel";
 import type { GatedAction } from "../gatedActions/gatedActionsModel";
 
-const data: RecapData = { goal: "Ship a fix", done: ["Implemented", "Tested"], left: ["Not deployed", "Check the installation"], next: null,
-  trigger: "automatic", model: "provider/small", messageCount: 8, coversThroughEntryId: "8", runEndedAt: "2026-01-01T00:00:00.000Z", generatedAt: "2026-01-01T00:10:00.000Z" };
+const meta = { trigger: "automatic", model: "provider/small", messageCount: 8, coversThroughEntryId: "8", runEndedAt: "2026-01-01T00:00:00.000Z", generatedAt: "2026-01-01T00:10:00.000Z" } as const;
+const data: RecapData = { summary: "Shipping a fix. It is implemented and tested, not deployed.", ...meta };
 let root: Root;
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); root = createRoot(document.body.appendChild(document.createElement("div"))); });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });
-it("uses the molecule, its computed summary and source, and removes live Needs you when resolved", async () => {
+it("shows the brief summary on a rule, a live Needs you line only while something waits, and a short source", async () => {
   await act(async () => root.render(<RecapEntry data={data} needs="Approve the push" />));
-  expect(document.querySelector('section[aria-label="While you were away"]')).not.toBeNull();
-  expect(document.querySelector(".recap-panel-summary")?.textContent).toBe("2 done, 2 left");
-  expect(document.querySelector(".recap-panel-needs")?.textContent).toContain("Approve the push");
-  expect(document.querySelector(".afterword-source")?.textContent).toBe("Written by provider/small from the last 8 messages, 10 minutes after this run ended unread.");
+  const note = document.querySelector('section[aria-label="While you were away"]');
+  expect(note?.hasAttribute("data-needs")).toBe(true);
+  expect(document.querySelector(".away-note-summary")?.textContent).toBe("Shipping a fix. It is implemented and tested, not deployed.");
+  expect(document.querySelector(".away-note-needs")?.textContent).toContain("Approve the push");
+  expect(document.querySelector(".afterword-source")?.textContent).toBe("Written by provider/small from the last 8 messages.");
   await act(async () => root.render(<RecapEntry data={data} />));
-  expect(document.querySelector(".recap-panel-needs")).toBeNull();
-  expect(document.querySelector(".recap-panel-summary")?.textContent).toBe("2 done, 2 left, nothing needs you");
-  expect(document.querySelector('[data-field="next"]')).toBeNull();
+  expect(document.querySelector(".away-note-needs")).toBeNull();
+  expect(document.querySelector(".away-note")?.hasAttribute("data-needs")).toBe(false);
+  expect(document.querySelector(".recap-panel")).toBeNull();
+});
+it("condenses a recap saved in the old shape to its goal and next step", async () => {
+  const legacy = { goal: "Ship a fix", done: ["Implemented"], left: ["Not deployed"], next: "Deploy it", ...meta };
+  expect(recapOf({ role: "custom", customType: "forgerie.recap", content: "", details: legacy })).toEqual(legacy);
+  expect(recapSummary(legacy)).toBe("Ship a fix. Deploy it.");
+  expect(recapSummary({ ...legacy, goal: "Ship a fix.", next: null })).toBe("Ship a fix.");
+  await act(async () => root.render(<RecapEntry data={legacy} />));
+  expect(document.querySelector(".away-note-summary")?.textContent).toBe("Ship a fix. Deploy it.");
+  expect(document.body.textContent).not.toContain("Not deployed");
 });
 it("keeps recap markdown fences backward compatible", async () => {
   await act(async () => root.render(<RecapPanel code={"goal: Fix it\ndone: Implemented\nneeds you: Approve\nnext: Deploy"} />));
@@ -35,7 +45,7 @@ it("shows one writing line and live tally, then a short error instead", async ()
   await act(async () => root.render(<RecapRequest state={{ kind: "writing" }} />));
   expect(document.querySelector('[role="status"]')?.textContent).toBe("Writing a recap of the last 8 messages…");
   expect(document.querySelector('.block-run-block[data-tone="live"]')).not.toBeNull();
-  expect(document.querySelector(".recap-panel")).toBeNull();
+  expect(document.querySelector(".away-note")).toBeNull();
   await act(async () => root.render(<RecapRequest state={{ kind: "failed", message: "Could not write a recap. Try /recap again." }} />));
   expect(document.querySelector('[role="status"]')).toBeNull();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("Try /recap again");

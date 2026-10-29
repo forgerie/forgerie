@@ -5,7 +5,7 @@ import { createReadTracker } from "./readReceipt";
 import type { RecapData } from "@shared/sessionRecap";
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
-const recap: RecapData = { goal: "Ship a fix", done: ["Implemented"], left: ["Not deployed"], next: null, trigger: "manual",
+const recap: RecapData = { summary: "Ship a fix", trigger: "manual",
   model: "provider/small", messageCount: 2, coversThroughEntryId: "2", runEndedAt: "2026-01-01T00:00:00.000Z", generatedAt: "2026-01-01T00:10:00.000Z" };
 const messages = [{ role: "user", content: "Fix it" }, { role: "assistant", content: [{ type: "text", text: "Implemented, not deployed" }] }];
 async function fixture(unread = false, fail = false) {
@@ -35,7 +35,7 @@ it("intercepts /recap locally, shows progress, and keeps the saved recap as syst
   await expect.poll(() => api.store.getSnapshot().commands.type).toBe("ready");
   expect(api.store.getSnapshot().commands).toMatchObject({ type: "ready", commands: [{ name: "recap" }] });
   api.release(); await writing;
-  await expect.poll(() => api.store.getSnapshot().transcript.messages.some(message => message.recap?.goal === "Ship a fix")).toBe(true);
+  await expect.poll(() => api.store.getSnapshot().transcript.messages.some(message => message.recap !== undefined && "summary" in message.recap && message.recap.summary === "Ship a fix")).toBe(true);
   expect(api.requests.some(url => url.pathname.endsWith("/commands/run"))).toBe(false);
   expect(api.requests.filter(url => url.pathname.endsWith("/recap"))).toHaveLength(1);
 });

@@ -5,7 +5,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 
 const user = (content: string) => ({ role: "user", content });
 const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
-const content = { goal: "Ship a fix", done: ["Implemented"], left: ["Not deployed; validation not run"], next: null };
+const content = { summary: "Fixing the browser path. The fix is implemented but not deployed; validation has not run." };
 describe("recap history and output", () => {
   it("uses visible text only and merges adjacent user messages", () => {
     expect(recapExchanges([user("<skill name=\"x\">secret</skill>Request<file>private</file>"), user("correction"),
@@ -45,8 +45,8 @@ describe("recap history and output", () => {
   });
   it("accepts fenced JSON and rejects malformed, excessive, or invented fields", () => {
     expect(parseRecapOutput(`\n\`\`\`json\n${JSON.stringify(content)}\n\`\`\``)).toEqual(content);
-    for (const value of [{ ...content, goal: "a".repeat(161) }, { ...content, done: Array(5).fill("one") },
-      { ...content, next: "a".repeat(201) }, { ...content, left: [""] }, { ...content, needs: "approval" }, { goal: "x" }]) {
+    for (const value of [{ summary: "a".repeat(361) }, { summary: " " }, { ...content, needs: "approval" },
+      { goal: "Ship a fix", done: ["Implemented"], left: [], next: null }]) {
       expect(parseRecapOutput(JSON.stringify(value))).toBeUndefined();
     }
     expect(parseRecapOutput("not json")).toBeUndefined();

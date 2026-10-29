@@ -9,10 +9,7 @@ import type { RecapArtifact, RecapRequestState } from "./recapModel";
 export const name = "While you were away";
 export const note = "Saved session recaps and the transient writing/error line, in the production transcript and reply-text gutter";
 const data: RecapData = {
-  goal: "Find what Grok Bot can do that the core assistant cannot, and which gaps are worth closing",
-  done: ["Gap table from three researchers and one scout", "Corrected the browser finding: the assistant does browse, through the agent-browser skill, but the first call always fails because it is not on the service PATH"],
-  left: ["Add agent-browser and chromium to assistantToolPath in flake.nix", "Add the correction to ~/.cache/research/grokbot-vs-assistant-20261022T155215/"],
-  next: "Choose which of the two to do first. Browser takeover and saved logins stay open as the real gaps.",
+  summary: "Finding what Grok Bot can do that the core assistant cannot. The gap table is done, and the browser gap is a PATH problem, not a missing skill. Next is choosing between the PATH fix and the notes correction.",
   trigger: "automatic", model: "anthropic/claude-haiku-5-5", messageCount: 8, coversThroughEntryId: "8",
   runEndedAt: "2026-10-22T15:52:15.000Z", generatedAt: "2026-10-22T16:02:15.000Z",
 };
@@ -32,9 +29,9 @@ export default function Ideal() { return <Scenario />; }
 export function NeedsYou() { return <Scenario needs="Approve git push origin main for the flake.nix PATH fix. The fix is committed and tests pass." />; }
 export function Loading() { return <Scenario request={{ kind: "writing" }} />; }
 export function Failed() { return <Scenario request={{ kind: "failed", message: "Could not write a recap. Try /recap again." }} />; }
-export function LongText() { return <Scenario recap={{ ...data, done: Array(4).fill("Implemented the browser fix and verified a first call. Deployment remains incomplete."),
-  left: [`/home/${"longunbrokenpath".repeat(12)}`, ...Array(3).fill("Run the remaining validation before deployment; this caveat stays in the recap.")] }} />; }
-export function GoalOnly() { return <Scenario recap={{ ...data, goal: "Review the plan", done: [], left: [], next: null, trigger: "manual" }} />; }
+export function LongText() { return <Scenario recap={{ ...data, summary: `Fixed /home/${"longunbrokenpath".repeat(12)} and verified a first call. Deployment and the remaining validation are still open.` }} />; }
+export function Legacy() { return <Scenario recap={{ goal: "Review the plan", done: ["Read it"], left: ["Comment"], next: "Send the comments", trigger: "manual", model: data.model,
+  messageCount: 4, coversThroughEntryId: "4", runEndedAt: data.runEndedAt, generatedAt: data.generatedAt }} />; }
 
 export const checks = {
   NeedsYou: {

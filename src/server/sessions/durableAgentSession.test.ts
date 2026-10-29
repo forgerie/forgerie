@@ -1128,7 +1128,7 @@ it("writes a recap on the title chain's first available entry instead of the ses
     await vi.waitFor(async () => { expect((await service.status(ref)).isStreaming).toBe(false); });
     expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
     const sessionCalls = provider.state.callCount;
-    recapProvider.setResponses([fauxAssistantMessage(JSON.stringify({ goal: "Fix the browser path", done: ["Implemented"], left: ["Not deployed"], next: null }))]);
+    recapProvider.setResponses([fauxAssistantMessage(JSON.stringify({ summary: "Fixing the browser path. Implemented, not deployed." }))]);
     const written = await service.recap(ref, "manual");
     expect(written, JSON.stringify({ written, recapCalls: recapProvider.state.callCount, sessionCalls: provider.state.callCount - sessionCalls })).toEqual({ kind: "written" });
     expect(recapProvider.state.callCount).toBe(1);
@@ -1154,7 +1154,7 @@ it("writes a recap through the real HTTP service, charges usage, and never inser
     expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
     const before = await session.journal.conversation.context(context);
     const calls = provider.state.callCount;
-    const recap = { goal: "Fix the browser path", done: ["Implemented"], left: ["Not deployed"], next: null };
+    const recap = { summary: "Fixing the browser path. Implemented, not deployed." };
     const recapReply = fauxAssistantMessage(JSON.stringify(recap));
     recapReply.usage = { ...recapReply.usage, input: 30, output: 20, totalTokens: 50 };
     const tokensBefore = session.journal.usage.models["faux/faux-1"]?.totalTokens ?? 0;
@@ -1173,9 +1173,9 @@ it("writes a recap through the real HTTP service, charges usage, and never inser
       await session.prompt(text); await session.journal.conversation.waitForIdle(context);
     }
     await vi.waitFor(async () => { expect((await service.unreadCatalog()).sessions).toHaveLength(1); });
-    provider.setResponses([fauxAssistantMessage(JSON.stringify({ ...recap, done: ["Implemented", "Tested"] }))]);
+    provider.setResponses([fauxAssistantMessage(JSON.stringify({ summary: "Fixing the browser path. Implemented and tested, not deployed." }))]);
     expect(await service.recap(ref, "open")).toEqual({ kind: "written" });
-    expect((await service.messages(ref)).messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { trigger: "open", done: ["Implemented", "Tested"] } });
+    expect((await service.messages(ref)).messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { trigger: "open", summary: "Fixing the browser path. Implemented and tested, not deployed." } });
     expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
   } finally { await app.close(); await service.dispose(); }
 });

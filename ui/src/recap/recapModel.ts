@@ -11,14 +11,17 @@ export type RecapArtifact = { recap: RecapData };
 export function recapOf(message: PiMessage): RecapData | undefined {
   if (message.role !== "custom" || message.customType !== RECAP_ENTRY_KIND) return undefined;
   // SDK projections add their own identity stamps; only the declared recap fields belong to the card.
-  return recapDataSchema.strip().safeParse(message.details).data;
+  return recapDataSchema.safeParse(message.details).data;
 }
+/** The text a reader sees. A legacy recap shrinks to its goal and next step. */
+export function recapSummary(data: RecapData): string {
+  if ("summary" in data) return data.summary;
+  const sentence = (text: string) => /[.!?]$/u.test(text) ? text : `${text}.`;
+  return [data.goal, data.next].flatMap(part => part === null ? [] : [sentence(part)]).join(" ");
+}
+/** One quiet line of provenance under the note; the note itself carries the content. */
 export function recapSource(data: RecapData): string {
-  const source = `Written by ${data.model} from the last ${data.messageCount} messages`;
-  if (data.trigger === "manual") return `${source}.`;
-  const minutes = Math.max(0, Math.floor((Date.parse(data.generatedAt) - Date.parse(data.runEndedAt)) / 60_000));
-  const duration = minutes < 1 ? "less than a minute" : `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  return `${source}, ${duration} after this run ended unread.`;
+  return `Written by ${data.model} from the last ${data.messageCount} messages.`;
 }
 
 /** Reader obligations come from the existing live stores, never the recap writer. */
