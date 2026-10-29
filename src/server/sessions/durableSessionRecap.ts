@@ -8,6 +8,8 @@ import { isTranscriptEntry } from "./durableSessionJournal.js";
 import { isHostEntryKind } from "./durableHostEntries.js";
 import { recapExchanges } from "./sessionRecapGenerator.js";
 import { SessionBindings } from "./durableSessionBindings.js";
+import { Check } from "typebox/value";
+import { Presentation, PresentationSchema } from "./durableParentDocuments.js";
 
 const LEGACY_MESSAGE_KIND = "forgerie.legacy-message";
 
@@ -18,12 +20,21 @@ export async function readRecapHistory(handle: DurableSessionHandle) {
     const page = await handle.conversation.entries({ order: "ascending" }, 256, cursor, context);
     entries.push(...page.items); cursor = page.next;
   } while (cursor !== undefined);
+  // Custom messages and shell runs are stored as user-role model messages and marked by a presentation
+  // envelope, as the browser reads them. They are not conversation, so the recap skips them too.
+  const presented = new Set<EntryRecord["id"]>();
+  for (const entry of entries) {
+    if (!(entry.model ?? []).some(message => message.role === "user")) continue;
+    const presentation = await handle.harness.snapshot(Presentation, handle.conversation.id, String(entry.id), context);
+    if (Check(PresentationSchema, presentation) && presentation.envelope !== undefined) presented.add(entry.id);
+  }
   const lastRecapEntry = [...entries].reverse().find(entry => entry.kind === RECAP_ENTRY_KIND);
   const parsed = recapDataSchema.safeParse(lastRecapEntry?.data);
   const lastRecap = parsed.success ? parsed.data : undefined;
   const messagesOf = (values: EntryRecord[]) => values.flatMap(entry => {
     const reply = endTurnReplyMessage(entry);
     if (reply !== undefined) return [reply];
+    if (presented.has(entry.id)) return [];
     // Imported history is ordinary conversation: the browser shows it, so the recap reads it too.
     if (entry.kind === LEGACY_MESSAGE_KIND) return entry.model ?? [];
     return isTranscriptEntry(entry.kind) && !isHostEntryKind(entry.kind) ? entry.model ?? [] : [];

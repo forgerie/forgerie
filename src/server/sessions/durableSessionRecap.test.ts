@@ -6,6 +6,8 @@ import { expect, it } from "vitest";
 import { RECAP_ENTRY_KIND, type RecapData } from "../../shared/sessionRecap.js";
 import { DurableParentReadModel } from "./durableParentReadModel.js";
 import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
+import { Presentation } from "./durableParentDocuments.js";
+import { buildRecapPrompt } from "./sessionRecapGenerator.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { responseFromBranch } from "./sessionResponse.js";
 
@@ -72,5 +74,29 @@ it("reads imported legacy history as conversation turns", async () => {
     const history = await readRecapHistory(f.handle);
     expect(history).toMatchObject({ completedTurns: 3, hasExchange: true });
     expect(history.messages).toHaveLength(6);
+  } finally { await f.harness.close(context); }
+});
+it("skips custom messages and shell runs that are stored as user messages, imported or native", async () => {
+  const f = await fixture();
+  try {
+    await f.user(); await f.answer();
+    const presented = (kind: string, content: string, envelope: { type: "custom" | "bashExecution"; customType?: string; display?: boolean; command?: string }) =>
+      f.conversation.commit(async tx => {
+        const entry = await tx.appendEntry(f.conversation.id, { kind, model: [{ role: "user", content, timestamp: 2 }], data: { sdkEntryId: content } });
+        (await tx.doc(Presentation, f.conversation.id, String(entry.id), null)).envelope = envelope;
+      }, context);
+    await presented("forgerie.legacy-message", "hidden extension note", { type: "custom", customType: "note", display: false });
+    await f.answer();
+    await presented("forgerie.legacy-message", "Ran `ls`\n```\nsecret.txt\n```", { type: "bashExecution", command: "ls" });
+    await f.answer();
+    await presented("pi.user", "visible extension card", { type: "custom", customType: "card", display: true });
+    await f.answer();
+    await f.conversation.commit(tx => tx.appendEntry(f.conversation.id, { kind: "forgerie.legacy-message", model: [{ role: "system", content: "imported system prompt", timestamp: 3 }], data: { sdkEntryId: "s" } }), context);
+    const history = await readRecapHistory(f.handle);
+    const text = JSON.stringify(history.messages);
+    expect(text).not.toContain("hidden extension note"); expect(text).not.toContain("secret.txt");
+    expect(text).not.toContain("visible extension card");
+    expect(buildRecapPrompt(history.messages)?.prompt).not.toContain("imported system prompt");
+    expect(history.completedTurns).toBe(1);
   } finally { await f.harness.close(context); }
 });
