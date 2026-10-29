@@ -154,6 +154,8 @@ The build test bundled the whole app, about a minute of CPU, to check index.html
 
 `App.archiveNext`, `ForgerieSession.drafts`, and `sessionStore.dialog` passed alone in the same session: 27 of 27, slowest case 4.2 s against the 5 s default, at load 114. That fits CPU contention. It does not rule out a race.
 
+After both changes, a full `npm --prefix ui test` at load 60 to 83 took 1,115.7 s and failed 18 of 3,278 tests in 9 files. The corpus file (27 s) and the build test (9 s) passed. Fourteen failures were 5 s test deadlines or 3 s polls in `App.archiveNext`, `ForgerieSession.workflows`, and the `gates/` files, plus `gates/parts.test.tsx` at its 120 s deadline. Four were fast assertion failures: `sessionStore.dialog` (295 ms), `sessionStore.open`, `picker/catalogStore`, and `ComposerEditor`. Six of those files then ran alone twice with `--maxWorkers=1` at load 58 to 81. Only `App.archiveNext` failed: its walk through three sessions failed both times, and its undo case once. That case opens the whole app three times inside one 5 s deadline, so it is too slow on its own on this host, not only under contention.
+
 ### Browser acceptance
 
 Use the UI's production components and fixture APIs for previews. Do not intercept network requests or replace a production renderer with a copied mockup. `ui/gates/` checks component ownership, parts, tokens, and decomposition. Remove a pending entry when its offence disappears; never add an entry to hide a new offence.
