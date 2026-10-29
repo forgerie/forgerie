@@ -159,7 +159,8 @@ export type TitleModelState = "unset" | "unavailable" | "chosen" | "chain" | "un
  */
 export function titleModelState(titleModel: string | null | undefined, models: readonly ModelId[], chains: ModelChains = {}): TitleModelState {
   if (!titleModel) return "unset";
-  if (!titleModel.includes("/")) return Object.hasOwn(chains, titleModel) ? "chain" : "unknownChain";
+  // A chain may carry a level for every entry: `worker:high`.
+  if (!titleModel.includes("/")) return Object.hasOwn(chains, parseFavorite(titleModel).id) ? "chain" : "unknownChain";
   return models.some((model) => keyOf(model) === titleModel) ? "chosen" : "unavailable";
 }
 

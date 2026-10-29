@@ -18,14 +18,13 @@ function useClock(fixed: number | undefined): number {
 }
 
 /**
- * Shape: a session's model chain waits before it moves past a model that is unavailable, as one quiet line above the
- * input: how long is left, the model it waits for, and the model it moves to next. What the provider answered is the
- * line's tooltip. Stop ends the wait with the run, when the input bar has no Stop of its own.
+ * Shape: a session's model chain waits after a model was unavailable, as one quiet line above the input: how long is
+ * left, the model it waits for, and the model it moves to next, as the server names it. A wait without `to` retries
+ * the same model, so the line names no other. What the provider answered is the line's tooltip. Stop ends the wait
+ * with the run, when the input bar has no Stop of its own.
  */
-export function ChainWaitStatus({ wait, next, models = [], now: fixed, onStop }: {
+export function ChainWaitStatus({ wait, models = [], now: fixed, onStop }: {
   wait: ChainWait;
-  /** The chain's entry after `wait.from`, when the chain is known. */
-  next?: string | undefined;
   models?: readonly SessionModel[] | undefined;
   /** A fixed time instead of the clock. */
   now?: number | undefined;
@@ -34,7 +33,7 @@ export function ChainWaitStatus({ wait, next, models = [], now: fixed, onStop }:
   const now = useClock(fixed);
   const left = chainWaitLeft(wait, now);
   const from = chainEntryLabel(wait.from, models);
-  const then = next === undefined ? undefined : chainEntryLabel(next, models);
+  const then = wait.to === undefined ? undefined : chainEntryLabel(wait.to, models);
   const seconds = Math.ceil(left / 1_000);
   return <ReadoutLine action={onStop ? <TextButton label="Stop" title="Stop the run instead of waiting" onPress={onStop} /> : undefined}>
     <span title={wait.error.trim() || undefined}>

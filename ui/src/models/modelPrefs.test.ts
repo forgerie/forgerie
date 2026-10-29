@@ -97,6 +97,7 @@ describe("changes", () => {
     expect(titleModelState("proxy/claude-3-5-haiku-20241022", models)).toBe("chosen");
     expect(titleModelState("worker", models, { worker: ["proxy/claude-3-5-haiku-20241022"] })).toBe("chain");
     expect(titleModelState("gone", models, { worker: ["proxy/claude-3-5-haiku-20241022"] })).toBe("unknownChain");
+    expect(titleModelState("worker:high", models, { worker: ["proxy/claude-3-5-haiku-20241022"] })).toBe("chain");
   });
 
   it("shows models without listing one twice", () => {

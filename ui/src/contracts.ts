@@ -92,8 +92,11 @@ export type PendingDialog = z.infer<typeof pendingDialogSchema>;
 export const DIALOG_INPUT_MAX_LENGTH = 4_000;
 export const doubleEscapeActionSchema = z.enum(["tree", "fork", "none"]);
 export type DoubleEscapeAction = z.infer<typeof doubleEscapeActionSchema>;
-/** The pause before a model chain moves past an entry: `from` is the entry it waits for, `until` the time in ms. */
-export const chainWaitSchema = z.object({ from: z.string(), error: z.string(), until: z.number() }) satisfies z.ZodType<ModelChainWait>;
+/**
+ * The pause before a model chain tries again: `from` is the entry it waits for, `until` the time in ms, and `to` the
+ * concrete `provider/id` it moves to next. Without `to`, the wait retries the same model.
+ */
+export const chainWaitSchema = z.object({ from: z.string(), error: z.string(), until: z.number(), to: z.string().min(1).optional() }) satisfies z.ZodType<ModelChainWait>;
 export type ChainWait = z.infer<typeof chainWaitSchema>;
 export const statusSchema = z.object({
   workflow: z.object({ name: z.string(), stages: z.array(z.enum(["done", "working", "waiting", "failed", "next"])),

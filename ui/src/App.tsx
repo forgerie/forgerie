@@ -4,7 +4,6 @@ import { browserTransport } from "./sessionStore";
 import { Activity, lazy, Suspense, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RelatedWorkRenderer } from "./projectGroups/relatedWork";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
-import type { ChainWaitRenderer } from "./models/chainWait";
 import type { SettingsPageRenderer } from "./ui/settings/SettingsView";
 import type { ModelChainsRenderer } from "./ui/settings/ModelsView";
 import { ForgerieSession } from "./ForgerieSession";
@@ -118,7 +117,7 @@ const DIALOG_ENTRY = { newSession: newStartupToken() };
  * `search` is session search, held by the binding above this app so its query and hits outlive every layout.
  * `triggers` is the triggers screen and its entry at the foot of the session list, held by the binding above this app.
  */
-export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, chainWait, search, triggers, backlogSettings, modelChains, newSessions, pendingSession }: {
+export function App({ shelves, projectScope, projectCatalog, projectFilter, projectSettings, relatedWork, resourceSettings, resourceLens, search, triggers, backlogSettings, modelChains, newSessions, pendingSession }: {
   /** The launch's read-only transcript, supplied by the app binding, never a server session transport. */
   pendingSession?: ((launch: Launch<LaunchDraft>, recovery: PendingSessionRecovery) => ReactNode) | undefined;
   /** Production and fixture launches use the same app-owned lifecycle. */
@@ -128,8 +127,6 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   backlogSettings?: SettingsPageRenderer | undefined;
   /** Settings → Models → Model chains. */
   modelChains?: ModelChainsRenderer | undefined;
-  /** A session's model chain wait, drawn with the app's chains. */
-  chainWait?: ChainWaitRenderer | undefined;
   projectFilter?: Omit<PickerFilter, "onManage"> | undefined; projectSettings?: SettingsPageRenderer | undefined; relatedWork?: RelatedWorkRenderer | undefined;
   resourceSettings?: SettingsPageRenderer | undefined; resourceLens?: ResourceLensRenderer | undefined;
 } = {}) {
@@ -594,7 +591,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     const visible = transcriptVisible && selectedId === id;
     return <Activity key={record.key} mode={visible ? "visible" : "hidden"}>
       <ForgerieSession entry={entry} visible={visible} id={id} known={entry.session} found={id === selectedId ? sessionFound : undefined}
-        relatedWork={relatedWork} resourceLens={resourceLens} chainWait={chainWait}
+        relatedWork={relatedWork} resourceLens={resourceLens}
         initialDraft={commandSelection?.session.id === id ? commandSelection.draft : undefined}
         initialError={commandSelection?.session.id === id ? commandSelection.error : undefined}
         drafts={drafts} onSwitchSession={switchSession}

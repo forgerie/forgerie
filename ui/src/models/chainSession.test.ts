@@ -4,7 +4,7 @@ import { statusSchema } from "../contracts";
 import { chainEntryLabel, chainReferenceOf, chainReferenceText, chainText } from "../modelChoice";
 import { convertMessage, fromHistory } from "../transcript";
 import { chainSwitchOf } from "./chainSwitch";
-import { chainWaitClock, chainWaitLeft, nextChainEntry } from "./chainWait";
+import { chainWaitClock, chainWaitLeft } from "./chainWait";
 import { CHAINS, MODELS } from "./fixtures/chains";
 
 const status = { isStreaming: true, isCompacting: false, isBashRunning: false, queuedMessages: [] };
@@ -37,18 +37,11 @@ describe("a chain's wait", () => {
     expect(chainWaitLeft({ until: 5_000 }, 1_000)).toBe(4_000);
   });
 
-  it("guesses the next model from the chain's order, matched without levels", () => {
-    expect(nextChainEntry(CHAINS, "worker", "anthropic/claude-opus-5-5")).toBe("openai/gpt-5");
-    expect(nextChainEntry(CHAINS, "worker", "openai/gpt-5:high")).toBe("openai/gpt-5-mini:low");
-    expect(nextChainEntry(CHAINS, "worker", "openai/gpt-5-mini")).toBeUndefined();
-    expect(nextChainEntry(CHAINS, "worker", "retired/model")).toBeUndefined();
-    expect(nextChainEntry(CHAINS, "gone", "openai/gpt-5")).toBeUndefined();
-    expect(nextChainEntry(undefined, "worker", "openai/gpt-5")).toBeUndefined();
-  });
-
   it("reads the chain and its wait from the session's status, and drops malformed ones without losing the status", () => {
-    const wait = { from: "openai/gpt-5", error: "429", until: 1_700_000_000_000 };
+    const wait = { from: "openai/gpt-5", error: "429", until: 1_700_000_000_000, to: "openai/gpt-5-mini" };
     expect(statusSchema.parse({ ...status, modelChain: "worker", chainWait: wait })).toMatchObject({ modelChain: "worker", chainWait: wait });
+    const retry = statusSchema.parse({ ...status, chainWait: { from: "openai/gpt-5", error: "429", until: 1 } }).chainWait;
+    expect(retry).toEqual({ from: "openai/gpt-5", error: "429", until: 1 });
     const broken = statusSchema.parse({ ...status, modelChain: 7, chainWait: { from: "x" } });
     expect(broken.modelChain).toBeUndefined();
     expect(broken.chainWait).toBeUndefined();
@@ -60,9 +53,9 @@ describe("a chain switch in the transcript", () => {
   const entry = (details: unknown, content: string = "") => ({ role: "custom", customType: MODEL_CHAIN_SWITCH_KIND, timestamp: 9, content, details });
   const notice = { from: "anthropic/claude-opus-5-5:high", to: "openai/gpt-5", error: "429 Too Many Requests" };
 
-  it("reads the notice from the entry's details, past the session file's own fields, or from its text", () => {
-    expect(chainSwitchOf(entry({ ...notice, entryId: "e1" }))).toEqual(notice);
-    expect(chainSwitchOf(entry(undefined, JSON.stringify(notice)))).toEqual(notice);
+  it("reads the notice from the root of the entry's details, past the session file's own fields, and never from its text", () => {
+    expect(chainSwitchOf(entry({ ...notice, entryId: "e1" }, "Switched from Claude Opus to GPT-5."))).toEqual(notice);
+    expect(chainSwitchOf(entry(undefined, JSON.stringify(notice)))).toBeUndefined();
     expect(chainSwitchOf(entry({ from: "a/b" }))).toBeUndefined();
     expect(chainSwitchOf({ role: "custom", customType: "forgerie:pull-request", details: notice })).toBeUndefined();
   });

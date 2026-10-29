@@ -163,7 +163,8 @@ function asMessage(message: PiMessage, id: string): TranscriptMessage | undefine
   }
   if (role === "custom" && message.customType === MODEL_CHAIN_SWITCH_KIND) {
     const chainSwitch = chainSwitchOf(message);
-    if (chainSwitch) return { id, role: "system", parts: [{ type: "text", text: `Switched from ${chainSwitch.from} to ${chainSwitch.to}. ${chainSwitch.error}`.trim() }],
+    // The server's own sentence is the row's text, for copy and search; the line draws from the notice.
+    if (chainSwitch) return { id, role: "system", parts: [{ type: "text", text: textOf(message) || `Switched to ${chainSwitch.to}: ${chainSwitch.from} was unavailable (${chainSwitch.error})` }],
       chainSwitch, key: keyOf(message) };
     // A switch this app cannot read still shows its text, as plain system text.
     const text = textOf(message);

@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeftIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { modelsResponseSchema, type SessionModel } from "../../contracts";
-import { chainText, compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
+import { chainReferenceOf, chainText, compactContextWindow, modelLabel, providerLabel } from "../../modelChoice";
 import { applyChange, keyOf, parseFavorite, resolveFavorites, splitKey, TITLE_MODEL_COPY, titleModelState, type Lists, type PrefsChange } from "../../models/modelPrefs";
 import { THINKING_LEVELS, type ModelPrefs, type ModelPrefsSave } from "@shared/modelPrefsContract";
 import type { ModelChainsSectionProps } from "../../models/ModelChainsSection";
@@ -231,7 +231,7 @@ function DefaultModel({ lists, models, locked, onChange }: {
   const anchor = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<PickerOpen>();
   // A default without a provider names a model chain.
-  const chain = lists.defaultModel && !lists.defaultModel.includes("/") ? lists.defaultModel : undefined;
+  const chain = chainReferenceOf(lists.defaultModel ?? undefined)?.name;
   const split = lists.defaultModel ? splitKey(lists.defaultModel) : undefined;
   const chosen = models.find((model) => keyOf(model) === lists.defaultModel) ?? (split ? { ...split, name: lists.defaultModel ?? undefined } : undefined);
   const start = startModel(lists, models);
@@ -269,7 +269,7 @@ function TitleModel({ lists, models, locked, onChange }: {
   const [open, setOpen] = useState<PickerOpen>();
   const key = lists.titleModel ?? undefined;
   const state = titleModelState(key, models, lists.modelChains);
-  const chain = state === "chain" || state === "unknownChain" ? key : undefined;
+  const chain = chainReferenceOf(key)?.name;
   const split = key ? splitKey(key) : undefined;
   const chosen = models.find((model) => keyOf(model) === key) ?? (split ? { ...split, name: key } : undefined);
   const binding: ModelBinding = {
@@ -281,7 +281,7 @@ function TitleModel({ lists, models, locked, onChange }: {
   };
   const [before, after] = TITLE_MODEL_COPY.unavailable;
   const [noChain, createIt] = TITLE_MODEL_COPY.unknownChain;
-  const entries = state === "chain" && key && lists.modelChains ? lists.modelChains[key] ?? [] : [];
+  const entries = chain !== undefined && lists.modelChains ? lists.modelChains[chain] ?? [] : [];
   const hint = state === "unavailable" ? <>{before}<code>{key}</code>{after}</>
     : state === "unknownChain" ? <>{noChain}<code>{key}</code>{createIt}</>
     : state === "chain" ? `${TITLE_MODEL_COPY.chain}${chainText(entries, models)}.` : TITLE_MODEL_COPY[state];

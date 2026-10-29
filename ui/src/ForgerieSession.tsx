@@ -10,7 +10,6 @@ import { FileTextIcon } from "lucide-react";
 import type { ResourceLensRenderer } from "./resources/resourceLens";
 import { ChainSwitchLine } from "./models/ChainSwitchLine";
 import { ChainWaitStatus } from "./models/ChainWaitStatus";
-import type { ChainWaitRenderer, ChainWaitView } from "./models/chainWait";
 import { contextUse } from "./contextUse";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type AssistantRuntime } from "@assistant-ui/react";
@@ -136,7 +135,7 @@ const actionRunApi = createActionRunApi(browserTransport.request);
 const NO_RUN_LINKS: readonly ActionRunLink[] = [];
 
 // Binding: the only React component that reads the Forgerie transport/store.
-export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, chainWait, found, suggestionLinks, revealSuggestion }: {
+export function ForgerieSession({ entry: retainedEntry, visible = true, id, known, onUnread, initialDraft, initialError, drafts, onSwitchSession, archive, worktree: catalogWorktree, pullRequests: catalogPulls, actionRuns: catalogRuns, worktrees, onNewSession, relatedWork, resourceLens, found, suggestionLinks, revealSuggestion }: {
   /** Where a suggestion's background session and the Backlog open. Absent: the card offers no Open. */
   suggestionLinks?: SuggestionLinks | undefined;
   /** A suggestion to bring into view, such as one the Backlog view showed in this chat. A new key asks again. */
@@ -148,8 +147,6 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
   relatedWork?: RelatedWorkRenderer | undefined;
   /** The session's Skills and prompts sheet, opened from its header menu. */
   resourceLens?: ResourceLensRenderer | undefined;
-  /** Draws a model chain's wait with the app's chains. Absent: the line names no next model. */
-  chainWait?: ChainWaitRenderer | undefined;
   /** The catalog's live view of this session's pull request link and watch. */
   pullRequests?: readonly PullLink[] | undefined;
   /** The catalog's live view of this session's linked Actions runs and their watches. */
@@ -548,9 +545,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     return () => controller.abort();
   }, [sheetOpen, workflowSheet?.type, store]);
   // A chain's wait. The input bar's own Stop shows while the run runs; otherwise the line carries one.
-  const wait = state.status?.chainWait;
-  const waitView: ChainWaitView | undefined = wait === undefined ? undefined : { wait, chain: state.status?.modelChain, models: sessionModels,
-    onStop: state.transcript.isRunning || state.connection.type !== "ready" ? undefined : () => { void onCancel(); } };
+  const chainWait = state.status?.chainWait;
+  const stopWait = state.transcript.isRunning || state.connection.type !== "ready" ? undefined : () => { void onCancel(); };
   const workerModels = useMemo<WorkerModels>(() => ({ known: sessionModels, list: store.listModels }), [sessionModels, store]);
   const sheetRun = workflowSheet?.type === "run" ? runs.find((run) => run.id === workflowSheet.runId) : undefined;
   /** Closes the proposal's sheet once its decision went through, unless the reader already moved on. */
@@ -694,7 +690,7 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
             {held.readError !== undefined && waiting.some((item) => item.kind === "gated")
               && <GatedActionsReadProblem error={held.readError} onRetry={() => { void gated.retry(); }} />}
           </PinnedDock>}
-          {waitView !== undefined && !readOnly && (chainWait?.(waitView) ?? <ChainWaitStatus wait={waitView.wait} models={waitView.models} onStop={waitView.onStop} />)}
+          {chainWait !== undefined && !readOnly && <ChainWaitStatus wait={chainWait} models={sessionModels} onStop={stopWait} />}
           {running !== undefined && <WorkflowRunStrip run={running} onOpen={() => setWorkflowSheet({ type: "run", runId: running.id })} />}
         </>}
         head={setup && <WorktreeSetupCard setup={setup} hookSeen={setup.log !== ""} branch={worktree?.branch} />}

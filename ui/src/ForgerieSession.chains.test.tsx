@@ -9,8 +9,6 @@ import { ForgerieSession } from "./ForgerieSession";
 import { browserTransport } from "./sessionStore";
 import type { PiMessage, SessionStatus } from "./contracts";
 import { ModelPrefsContext } from "./models/modelPrefsApi";
-import { ChainWait } from "./models/ChainWait.binding";
-import type { ChainWaitRenderer } from "./models/chainWait";
 import { chainPrefsSource } from "./models/fixtures/chainPrefs";
 import { MODELS } from "./models/fixtures/chains";
 
@@ -24,7 +22,6 @@ const idle: SessionStatus = { isStreaming: false, isCompacting: false, isBashRun
 const until = async (condition: () => boolean) => { await act(async () => { await expect.poll(condition, { timeout: 2000 }).toBe(true); }); };
 const trigger = () => document.querySelector<HTMLButtonElement>(".composer .model-trigger");
 const calls = (suffix: string) => request.mock.calls.filter(([path]) => new URL(path, "http://x").pathname.endsWith(suffix));
-const chainWait: ChainWaitRenderer = (view) => <ChainWait {...view} />;
 
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -64,9 +61,9 @@ afterEach(async () => {
   document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-async function render(renderer?: ChainWaitRenderer) {
+async function render() {
   await act(async () => root.render(<ModelPrefsContext.Provider value={chainPrefsSource()}>
-    <ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} chainWait={renderer} />
+    <ForgerieSession id="test" known={{ id: "test", cwd: "/work" }} onSwitchSession={() => {}} />
   </ModelPrefsContext.Provider>));
 }
 
@@ -84,9 +81,9 @@ it("shows the session's chain and active entry, and moves it to another chain fr
   expect(trigger()!.querySelector(".model-trigger-name")?.textContent).toBe("Claude Haiku 4.5");
 });
 
-it("counts down a chain's wait above the input, names the next model, and Stop ends it", async () => {
-  status = { ...status, model: MODELS[0], chainWait: { from: "anthropic/claude-opus-5-5:high", error: "429 Too Many Requests", until: Date.now() + 42_000 } };
-  await render(chainWait);
+it("counts down a chain's wait above the input, names the model the server moves to, and Stop ends it", async () => {
+  status = { ...status, model: MODELS[0], chainWait: { from: "anthropic/claude-opus-5-5:high", error: "429 Too Many Requests", until: Date.now() + 42_000, to: "openai/gpt-5" } };
+  await render();
   await until(() => document.querySelector(".readout-line")?.textContent?.includes("then GPT-5") === true);
   const line = document.querySelector(".readout-line")!;
   expect(line.textContent).toMatch(/^Waiting 0:4[12] for Claude Opus 5\.5 \(High\), then GPT-5Stop$/u);
@@ -95,7 +92,7 @@ it("counts down a chain's wait above the input, names the next model, and Stop e
   await until(() => calls("/abort").length === 1);
 });
 
-it("leaves Stop to the input bar while the run runs, and names no next model without the app's chains", async () => {
+it("leaves Stop to the input bar while the run runs, and names no other model for a same-model retry", async () => {
   status = { ...status, isStreaming: true, chainWait: { from: "openai/gpt-5", error: "", until: Date.now() + 30_000 } };
   await render();
   await until(() => document.querySelector(".readout-line")?.textContent?.startsWith("Waiting") === true);
