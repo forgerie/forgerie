@@ -18,13 +18,13 @@ afterEach(async () => { await act(async () => root.unmount()); document.body.rep
 it("shows the brief summary on a rule, a live Needs you line only while something waits, and a short source", async () => {
   await act(async () => root.render(<RecapEntry data={data} needs="Approve the push" />));
   const note = document.querySelector('section[aria-label="While you were away"]');
-  expect(note?.hasAttribute("data-needs")).toBe(true);
-  expect(document.querySelector(".away-note-summary")?.textContent).toBe("Shipping a fix. It is implemented and tested, not deployed.");
-  expect(document.querySelector(".away-note-needs")?.textContent).toContain("Approve the push");
+  expect(note?.hasAttribute("data-live")).toBe(true);
+  expect(document.querySelector(".ruled-brief-text")?.textContent).toBe("Shipping a fix. It is implemented and tested, not deployed.");
+  expect(document.querySelector(".ruled-brief-urgent")?.textContent).toContain("Approve the push");
   expect(document.querySelector(".afterword-source")?.textContent).toBe("Written by provider/small from the last 8 messages.");
   await act(async () => root.render(<RecapEntry data={data} />));
-  expect(document.querySelector(".away-note-needs")).toBeNull();
-  expect(document.querySelector(".away-note")?.hasAttribute("data-needs")).toBe(false);
+  expect(document.querySelector(".ruled-brief-urgent")).toBeNull();
+  expect(document.querySelector(".ruled-brief")?.hasAttribute("data-live")).toBe(false);
   expect(document.querySelector(".recap-panel")).toBeNull();
 });
 it("condenses a recap saved in the old shape to its goal and next step", async () => {
@@ -33,7 +33,7 @@ it("condenses a recap saved in the old shape to its goal and next step", async (
   expect(recapSummary(legacy)).toBe("Ship a fix. Deploy it.");
   expect(recapSummary({ ...legacy, goal: "Ship a fix.", next: null })).toBe("Ship a fix.");
   await act(async () => root.render(<RecapEntry data={legacy} />));
-  expect(document.querySelector(".away-note-summary")?.textContent).toBe("Ship a fix. Deploy it.");
+  expect(document.querySelector(".ruled-brief-text")?.textContent).toBe("Ship a fix. Deploy it.");
   expect(document.body.textContent).not.toContain("Not deployed");
 });
 it("keeps recap markdown fences backward compatible", async () => {
@@ -45,7 +45,7 @@ it("shows one writing line and live tally, then a short error instead", async ()
   await act(async () => root.render(<RecapRequest state={{ kind: "writing" }} />));
   expect(document.querySelector('[role="status"]')?.textContent).toBe("Writing a recap of the last 8 messages…");
   expect(document.querySelector('.block-run-block[data-tone="live"]')).not.toBeNull();
-  expect(document.querySelector(".away-note")).toBeNull();
+  expect(document.querySelector(".ruled-brief")).toBeNull();
   await act(async () => root.render(<RecapRequest state={{ kind: "failed", message: "Could not write a recap. Try /recap again." }} />));
   expect(document.querySelector('[role="status"]')).toBeNull();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("Try /recap again");

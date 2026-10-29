@@ -1,0 +1,15 @@
+/* A few sentences apart from the reply. Not a box: the decision card's start
+   rule, quiet at rest, live when an urgent line waits on the reader. */
+.ruled-brief {
+  display: grid; gap: var(--space-1); min-inline-size: 0;
+  padding: var(--space-1) 0 var(--space-1) var(--space-4);
+  border-inline-start: 0.125rem solid var(--line-focus);
+  overflow-wrap: anywhere;
+}
+.ruled-brief[data-live] { border-inline-start-color: var(--live); }
+.ruled-brief-title { color: var(--muted-foreground); font-size: var(--small-text); font-weight: 600; }
+.ruled-brief[data-live] .ruled-brief-title { color: var(--ink-live); }
+.ruled-brief-text { min-inline-size: 0; text-wrap: pretty; }
+.ruled-brief-urgent { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); min-inline-size: 0; }
+.ruled-brief-urgent-label { flex: none; color: var(--ink-live); font-size: var(--small-text); font-weight: 600; }
+.ruled-brief-urgent-text { flex: 1 1 14rem; min-inline-size: 0; font-weight: 600; }

@@ -57,7 +57,7 @@ One line per component: the name in backticks, its layer, and what it decides.
 - `AsideList` (molecule): lists findings outside the question, each with a high, medium or low pill that reads without colour.
 - `CheckResults` (molecule): shows what a run of checks found from `pass:`/`fail:`/`skip:` lines, each result at the trailing edge, an in-order meter and a count, and what was `unchecked:` as its own group.
 - `FindingList` (molecule): shows a review's defects worst first under a worded verdict, each with a severity pill, a location in the code face that can open its file, the problem and the fix.
-- `AwayNote` (molecule): a two or three sentence catch-up for a reader coming back to a session, on the decision card's start rule, which turns live with one "Needs you" line when something waits on the reader.
+- `RuledBrief` (molecule): two or three sentences set apart from the reply text by the decision card's start rule, with a quiet title; an optional urgent line, such as what needs the reader, turns the rule and title live.
 - `RecapPanel` (molecule): shows where work stands for a returning reader: goal, done, left and next, with what needs the reader first on the live wash, or "nothing needs you" in the header.
 - `VerdictLine` (molecule): a yes, no or partly answer and its reason, the word large with its own icon shape so it reads without colour.
 - `RevisionList` (molecule): lists revisions with a hash that copies, a subject, and a word plus a four-step meter for how far each got (local, pushed, landed, deployed).
