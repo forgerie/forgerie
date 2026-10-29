@@ -332,7 +332,10 @@ to disable automatic and on-open recaps. The daemon reads this setting for each
 request; no restart is needed. Manual `/recap` still works.
 
 Recaps use `sessionTitleModel` when that model is available with credentials,
-otherwise the session's model. Their token usage and cost count toward the
+otherwise the session's model. When `sessionTitleModel` names a chain, a recap
+uses the chain's first entry that is not cooling and is available with
+credentials. A recap makes one attempt: it does not move down the chain or
+record a cooldown when that attempt fails. Their token usage and cost count toward the
 session's usage. See [While you were away](plugins.md#while-you-were-away).
 
 ## Main-session model chains

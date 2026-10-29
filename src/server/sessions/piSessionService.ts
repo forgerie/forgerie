@@ -2,7 +2,7 @@ import { RECAP_DELAY_MS, type RecapResult, type RecapTrigger } from "../../share
 import { SessionRecapScheduler, canWriteRecap } from "./sessionRecapScheduler.js";
 import { buildRecapPrompt, generateSessionRecap } from "./sessionRecapGenerator.js";
 import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
-import { generateChainSessionName } from "./modelChainTitles.js";
+import { firstUsableChainModel, generateChainSessionName } from "./modelChainTitles.js";
 import { selectAvailableChainEntry, type ModelChainRuntime } from "./modelChainFailures.js";
 import { parseModelChoice, resolveModelChain } from "../../shared/modelChains.js";
 import { DurableDecisionWriter, issueDecision } from "./durableDecisionWriter.js";
@@ -1448,7 +1448,7 @@ export class PiSessionService implements SessionRouteService {
       child: trackedChild !== undefined || history.child, completedTurns: history.completedTurns, newTurns: history.newTurns,
       hasRecap: history.lastRecap !== undefined, covered: history.lastRecap?.coversThroughEntryId === history.newestEntryId,
       hasExchange: history.hasExchange }, trigger)) return { kind: "skipped" };
-    const input = buildRecapPrompt(history.messages), model = this.titleModelFor(session);
+    const input = buildRecapPrompt(history.messages), model = await this.recapModelFor(session);
     if (input === undefined || this.recapStopped(signal)) return { kind: "skipped" };
     if (model === undefined) return { kind: "failed", message: "Choose a model before writing a recap." };
     const result = await generateSessionRecap(session.agent.streamFunction, model, input.prompt, signal, failureKind => {
@@ -5459,6 +5459,25 @@ export class PiSessionService implements SessionRouteService {
       : this.modelRuntime.getAvailableSnapshot().find((candidate) => candidate.provider === parsed.provider && candidate.id === parsed.modelId);
     if (configured !== undefined) return configured;
     this.logger.info({ sessionId: session.sessionId, sessionTitleModel: spec, outcome: "title_model_unavailable" }, "session title model is unavailable; using the session's model");
+    return session.model;
+  }
+
+  /**
+   * A recap uses the title setting. A chain gives its first entry that is not cooling and is offered with credentials;
+   * otherwise, and for a plain model, this is titleModelFor. A recap makes one attempt and records no chain failure.
+   */
+  private async recapModelFor(session: PiAgentSession): Promise<PiAgentSession["model"]> {
+    let reference: string | undefined;
+    try { reference = this.sessionTitleModel?.(); } catch { return this.titleModelFor(session); }
+    if (reference === undefined || reference.includes("/")) return this.titleModelFor(session);
+    try {
+      const entry = await firstUsableChainModel(reference, this.chainRuntime, this.modelRuntime);
+      if (entry !== undefined) return entry;
+    } catch (error: unknown) {
+      this.logger.info({ sessionId: session.sessionId, sessionTitleModel: reference, error: errorMessage(error) }, "session title chain is unreadable; recap uses the session's model");
+      return session.model;
+    }
+    this.logger.info({ sessionId: session.sessionId, sessionTitleModel: reference, outcome: "title_chain_unavailable" }, "no title chain entry is available; recap uses the session's model");
     return session.model;
   }
 

@@ -1111,6 +1111,32 @@ it("combines native state with the host compaction boundary and following prompt
   }
 });
 
+it("writes a recap on the title chain's first available entry instead of the session's model", async () => {
+  const { session, provider, manager, services, directory } = await fixture();
+  const recapProvider = fauxProvider({ provider: "recap", models: [{ id: "r" }], tokensPerSecond: 100000 });
+  services.modelRuntime.registerNativeProvider(recapProvider.provider); await services.modelRuntime.refresh({ allowNetwork: false });
+  const service = new PiSessionService(new SessionEventHub(), { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(), autoRecap: () => false,
+    sessionTitleModel: () => "worker", modelChains: () => ({ worker: ["faux/missing", "recap/r"] }),
+    createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This fixture keeps its facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
+  try {
+    await service.start(directory);
+    provider.setResponses([fauxAssistantMessage("Implemented, not deployed")]);
+    await session.prompt("Fix the browser path");
+    await session.journal.conversation.waitForIdle(context);
+    const ref = { id: session.sessionId, cwd: directory };
+    await vi.waitFor(async () => { expect((await service.status(ref)).isStreaming).toBe(false); });
+    expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
+    const sessionCalls = provider.state.callCount;
+    recapProvider.setResponses([fauxAssistantMessage(JSON.stringify({ goal: "Fix the browser path", done: ["Implemented"], left: ["Not deployed"], next: null }))]);
+    const written = await service.recap(ref, "manual");
+    expect(written, JSON.stringify({ written, recapCalls: recapProvider.state.callCount, sessionCalls: provider.state.callCount - sessionCalls })).toEqual({ kind: "written" });
+    expect(recapProvider.state.callCount).toBe(1);
+    expect(provider.state.callCount).toBe(sessionCalls);
+    expect((await service.messages(ref)).messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { trigger: "manual", model: "recap/r" } });
+  } finally { await service.dispose(); }
+});
+
 it("writes a recap through the real HTTP service, charges usage, and never inserts it into the model conversation", async () => {
   const { session, provider, manager, services, directory } = await fixture();
   let autoRecap = false;
