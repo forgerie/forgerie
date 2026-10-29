@@ -139,6 +139,21 @@ On 2026-10-17, a bounded comparison on Nix Node 24.13.0 used the three previousl
 
 Two workers passed and were faster in this sample, which supports a conservative two-worker default. This is not a full-suite benchmark or proof that two workers are optimal. The shared host load varied, caches were not reset, and most test time was in the markdown corpus. Neither budget reproduced the historical timeouts. Contention is not proven to be the sole cause. Recheck with a representative full browser suite before increasing the default; keep command-line overrides available.
 
+### Slow on their own, not only under load
+
+On 2026-10-29 (issue #102), two files that timed out in full runs were slow by themselves. Both were measured alone with `--maxWorkers=1`, at a host load of 104 to 130 on 16 CPUs. CPU time is user plus system time of the Vitest process tree, which host load changes much less than wall time.
+
+| File | Before | After |
+| --- | --- | --- |
+| `ui/src/ui/markdownDocument.corpus.test.ts` | 2 of 528 failed at 30 s. 419.5 s wall, 273.6 s CPU. Slowest case 53.9 s. | 529 of 529 passed. 12.4 s wall, 10.3 s CPU. Slowest case 0.29 s. |
+| `ui/src/buildContents.test.ts` | Passed in 65.0 s against 120 s. 60.0 s CPU. | Passed in 5.4 s. 6.3 s CPU. |
+
+The corpus cause was a product defect. Tiptap's Markdown extension adds its tokenizers to marked's global instance for every editor and never removes them. Each later parse tried every earlier editor's tokenizers, so a case's cost grew with its position in the file. `ui/src/ui/editorMarkdown.ts` now gives each editor its own marked instance. The same leak made an editor without task lists read `- [ ] task` as a paragraph after a document editor had existed; `editorMarkdown.test.ts` covers that.
+
+The build test bundled the whole app, about a minute of CPU, to check index.html, `public/`, and `build.json`. It now builds the real configuration and HTML with a one-line module in place of `src/main.tsx`, and fails if that module does not replace the entry. `npm run build` still bundles the real app in `verify:ui` and CI. Deadlines are unchanged.
+
+`App.archiveNext`, `ForgerieSession.drafts`, and `sessionStore.dialog` passed alone in the same session: 27 of 27, slowest case 4.2 s against the 5 s default, at load 114. That fits CPU contention. It does not rule out a race.
+
 ### Browser acceptance
 
 Use the UI's production components and fixture APIs for previews. Do not intercept network requests or replace a production renderer with a copied mockup. `ui/gates/` checks component ownership, parts, tokens, and decomposition. Remove a pending entry when its offence disappears; never add an entry to hide a new offence.

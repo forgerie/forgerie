@@ -3,10 +3,27 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build } from "vite";
+import { build, type Plugin } from "vite";
 import { describe, expect, it } from "vitest";
 
 const uiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * These checks read what index.html, public/ and the build.json plugin produce, not the app's code.
+ * Bundling the real app (Mermaid, Shiki, KaTeX) took about a minute of CPU against this test's
+ * two-minute deadline (#102), and `npm run build` already bundles it. A one-line module stands in for it here.
+ */
+const appEntry = join(uiRoot, "src/main.tsx");
+const stoodIn = new Set<string>();
+const smallAppEntry: Plugin = {
+  name: "small-app-entry",
+  enforce: "pre",
+  load(id) {
+    if (id.split("?")[0] !== appEntry) return undefined;
+    stoodIn.add(appEntry);
+    return "export {};\n";
+  },
+};
 
 describe("production client build contents", () => {
   it("emits deployment-relative HTML and PWA URLs", { timeout: 120_000 }, async () => {
@@ -16,8 +33,11 @@ describe("production client build contents", () => {
         root: uiRoot,
         configFile: join(uiRoot, "vite.config.ts"),
         logLevel: "silent",
+        plugins: [smallAppEntry],
         build: { outDir, emptyOutDir: true },
       });
+      // If index.html names another entry, the stand-in misses it and the whole app is bundled again.
+      expect([...stoodIn]).toEqual([appEntry]);
 
       const html = await readFile(join(outDir, "index.html"), "utf8");
       expect(html).toContain("<title>Forgerie</title>");
