@@ -1,3 +1,5 @@
+import { readRecapHistory } from "./durableSessionRecap.js";
+import { buildRecapPrompt } from "./sessionRecapGenerator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,6 +76,18 @@ it.each(["original", "constructor"])("switches a main turn after quota failure, 
   expect(run.session().messages.filter(message => message.role === "user" && message.content === "Original task")).toHaveLength(1);
   expect(run.session().model?.id).toBe("b");
   expect(run.session().modelChain).toBe("worker");
+  const session = run.session();
+  const recapHistory = await readRecapHistory(session.journal.handle, async () => {
+    await session.journal.project();
+    return session.sessionManager.getBranch();
+  });
+  if (recapHistory === undefined) throw new Error("The completed turn must have a stable recap leaf");
+  const switchEntry = session.sessionManager.getBranch().find(entry => entry.type === "custom_message" && entry.customType === MODEL_CHAIN_SWITCH_KIND);
+  if (switchEntry?.type !== "custom_message") throw new Error("The switch notice must stay display-only");
+  const recapPrompt = buildRecapPrompt(recapHistory.messages)?.prompt;
+  expect(recapPrompt).toContain("Original task");
+  expect(recapPrompt).toContain("CHAIN-SUCCESS");
+  expect(recapPrompt).not.toContain(switchEntry.content);
   await run.restart(1_000_001);
   expect(run.session().modelChain).toBe("worker");
   expect(run.session().model?.id).toBe("b");
