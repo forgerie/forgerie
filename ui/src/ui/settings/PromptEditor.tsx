@@ -1,11 +1,11 @@
 import { useEditor, EditorContent, useEditorState, type Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
-import { Markdown } from "@tiptap/markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { BoldIcon, CodeIcon, Heading2Icon, ItalicIcon, ListIcon, ListOrderedIcon, QuoteIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { keepPromptTextLiteral } from "../../agents/promptMarkdown";
+import { editorMarkdown } from "../editorMarkdown";
 import "./settings.css";
 
 interface Format { key: string; label: string; icon: LucideIcon; active: (editor: Editor) => boolean; run: (editor: Editor) => void }
@@ -48,7 +48,7 @@ export function PromptEditor({ initial, readOnly, label, onChange }: {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
-      Markdown,
+      editorMarkdown(),
       Placeholder.configure({ placeholder: "Tell the agent what it is for and how to do the work." }),
     ],
     content: initial,

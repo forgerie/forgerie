@@ -1,9 +1,9 @@
 import { Editor, Extension, type Extensions } from "@tiptap/core";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
-import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
 import { diffLines } from "diff";
+import { editorMarkdown } from "./editorMarkdown";
 import { keepPromptTextLiteral } from "./markdownLiteral";
 import { frameMarkdownBody, splitFrontMatter } from "./markdownText";
 
@@ -19,7 +19,7 @@ const LiteralText = Extension.create({
 export function markdownExtensions(): Extensions {
   return [
     StarterKit.configure({ link: { openOnClick: false } }),
-    Markdown,
+    editorMarkdown(),
     TableKit,
     TaskList,
     TaskItem.configure({ nested: true }),
