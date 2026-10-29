@@ -668,8 +668,8 @@ describe("SDK-compatible Durable execution", () => {
     await session.prompt("start work");
     await session.sendCustomMessage({ customType: "test:notification", content: "HIDDEN NATIVE NOTIFICATION", display: false }, { triggerTurn: true });
     await vi.waitFor(() => { expect(ends(events).filter((message) => message.role === "assistant")).toHaveLength(2); });
-    await session.journal.project();
-    const history = await readRecapHistory(session.journal.handle, session.sessionManager.getBranch());
+    const history = await readRecapHistory(session.journal.handle, async () => { await session.journal.project(); return session.sessionManager.getBranch(); });
+    if (history === undefined) throw new Error("The leaf did not move");
     expect(JSON.stringify(history.messages)).not.toContain("HIDDEN NATIVE NOTIFICATION");
     expect(history.completedTurns).toBe(1);
   });

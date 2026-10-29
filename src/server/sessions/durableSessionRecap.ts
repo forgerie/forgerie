@@ -14,14 +14,20 @@ export interface RecapBranchEntry { type: string; message?: unknown; customType?
  * `message` entries with user or assistant text count. Custom messages, notifications, shell runs, branch
  * summaries and compactions have their own entry types there, for native and imported history alike.
  * Durable entries decide only freshness: the leaf, the newest entry, and the last saved recap.
+ *
+ * The branch must describe the same history as the leaf that later guards the commit. The leaf is read
+ * before the branch and again after the scan; if a turn landed in between, the result is `undefined`.
  */
-export async function readRecapHistory(handle: DurableSessionHandle, branch: readonly RecapBranchEntry[]) {
+export async function readRecapHistory(handle: DurableSessionHandle, readBranch: () => Promise<readonly RecapBranchEntry[]>) {
+  const leafBefore = (await handle.conversation.entries({ order: "descending" }, 1, undefined, context)).items[0]?.id;
+  const branch = await readBranch();
   const entries: EntryRecord[] = [];
   let cursor: Cursor | undefined;
   do {
     const page = await handle.conversation.entries({ order: "ascending" }, 256, cursor, context);
     entries.push(...page.items); cursor = page.next;
   } while (cursor !== undefined);
+  if (entries.at(-1)?.id !== leafBefore) return undefined;
   const lastRecapEntry = [...entries].reverse().find(entry => entry.kind === RECAP_ENTRY_KIND);
   const parsed = recapDataSchema.safeParse(lastRecapEntry?.data);
   const lastRecap = parsed.success ? parsed.data : undefined;

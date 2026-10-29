@@ -38,7 +38,8 @@ it("appends a data-only recap that reaches browser history without entering cont
     expect(messages.at(-1)).toMatchObject({ role: "custom", customType: RECAP_ENTRY_KIND, details: data });
     expect((await f.reader.statistics(context)).assistantMessages).toBe(1);
     expect((await f.harness.snapshot(UsageDoc, f.conversation.id, context))?.models[data.model]?.totalTokens).toBe(50);
-    const history = await readRecapHistory(f.handle, [message("user", "Please fix it"), message("assistant", "Implemented, not deployed"), recapCard]);
+    const history = await readRecapHistory(f.handle, () => Promise.resolve([message("user", "Please fix it"), message("assistant", "Implemented, not deployed"), recapCard]));
+    if (history === undefined) throw new Error("The leaf did not move");
     expect(history).toMatchObject({ completedTurns: 1, newTurns: 0, lastRecap: data, newestEntryId: String(answer.id) });
     expect(history.messages).toHaveLength(2);
     expect(responseFromBranch([{ type: "custom_message", customType: RECAP_ENTRY_KIND, content: "While you were away", details: data }]).response.kind).toBe("none");
@@ -79,10 +80,23 @@ it("reads only user and assistant messages from the projected branch, and counts
       { type: "custom_message", customType: "notice", message: { role: "user", content: "HIDDEN NATIVE NOTIFICATION" } },
       message("user", "Deploy it"), message("assistant", "Deployed"),
     ];
-    const history = await readRecapHistory(f.handle, branch);
+    const history = await readRecapHistory(f.handle, () => Promise.resolve(branch));
+    if (history === undefined) throw new Error("The leaf did not move");
     const prompt = buildRecapPrompt(history.messages)?.prompt ?? "";
     for (const hidden of ["hidden extension note", "secret.txt", "imported branch summary", "compacted history", "HIDDEN NATIVE NOTIFICATION"]) expect(prompt).not.toContain(hidden);
     expect(prompt).toContain("Imported answer");
     expect(history).toMatchObject({ completedTurns: 3, newTurns: 2, hasExchange: true });
+  } finally { await f.harness.close(context); }
+});
+it("returns nothing when a turn lands while the branch is read, so a stale prompt cannot claim the newer leaf", async () => {
+  const f = await fixture();
+  try {
+    await f.user(); await f.answer();
+    const history = await readRecapHistory(f.handle, async () => {
+      const branch = [message("user", "Please fix it"), message("assistant", "Implemented, not deployed")];
+      await f.user(); await f.answer();
+      return branch;
+    });
+    expect(history).toBeUndefined();
   } finally { await f.harness.close(context); }
 });
