@@ -1,61 +1,150 @@
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import type { Context } from "@earendil-works/chord";
-import { AgentDoc, LiveDoc, GenerationTask, configure, defineDoc, defineExtension, defineTask, type Conversation, type ConversationId, type Harness, type InputSubmissionDraft, type Submission, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import type { Context, JsonRepresentation } from "@earendil-works/chord";
+import { AgentDoc, InboxDoc, LiveDoc, GenerationTask, CompactionTask, hook, configure, defineDoc, defineExtension, defineTask, type Conversation, type ConversationId, type Harness, type InputSubmissionDraft, type Submission, type Session, type TaskId, type Tx } from "@earendil-works/pi-durable";
 import { MODEL_CHAIN_SWITCH_KIND } from "../../shared/apiTypes.js";
-import { CHILD_MODEL_CONTINUE, childModelDiagnostic } from "../../shared/childModelDiagnostic.js";
+import { CHILD_MODEL_CONTINUE, childModelDiagnostic, childModelDiagnosticContext, hasUnsafeChildModelDiagnostic } from "../../shared/childModelDiagnostic.js";
 import { modelKey, parseModelChoice, resolveModelChain } from "../../shared/modelChains.js";
-import { planChildModelFailure, unavailableChildModel, type ChainProgress, type ChildFailureAssessment } from "./childModelFailures.js";
-import { recordModelChainFailure, type ModelChainRuntime } from "./modelChainFailures.js";
+import { CHILD_RETRY_DELAYS, planChildModelFailure, type ChainProgress, type ChildFailureAssessment } from "./childModelFailures.js";
+import { claimModelRecovery, missingModelRun, recordFailedModelRun, type ModelRecoveryLedger } from "./modelChainRecovery.js";
+import { recordModelChainFailure, selectAvailableChainEntry, type ModelChainRuntime } from "./modelChainFailures.js";
 
 /* eslint-disable @typescript-eslint/consistent-type-definitions */
-type ChainState = { tasks: Record<string, TaskId>; wait?: { from: string; error: string; until: number; to?: string } };
+type ChainState = ModelRecoveryLedger & { tasks: Record<string, TaskId>; pending?: Record<string, { task: TaskId; content: JsonRepresentation<InputSubmissionDraft["content"]>; sealed?: true; whenBusy: "reject" | "steer" | "followUp" }>; recovery?: TaskId; wait?: { owner?: TaskId; from: string; error: string; until: number; to?: string } };
 type TurnInput = { reference: string; requestId: string; content: InputSubmissionDraft["content"]; whenBusy: "reject" | "steer" | "followUp" };
-type TurnState = { phase: "deliver"; attempt: number; progress?: ChainProgress }
-  | { phase: "advance"; attempt: number; progress: ChainProgress; from: string; error: string; failure: ChildFailureAssessment; to?: string; until?: number };
+type TurnState = { phase: "start" } | { phase: "observe"; owner: TaskId }
+  | { phase: "deliver"; attempt: number; progress?: ChainProgress; run?: string }
+  | { phase: "advance"; attempt: number; progress: ChainProgress; from: string; error: string; failure?: ChildFailureAssessment; to?: string; until?: number; run?: string };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
 export const SessionModelChain = defineDoc<{ reference?: string }>({ kind: "forgerie.session-model-chain", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({}) });
 export const SessionChainTurns = defineDoc<ChainState>({ kind: "forgerie.session-chain-turns", version: 1, scope: "conversation", history: "latest", fork: "initial", initial: () => ({ tasks: {} }) });
 
 /** A checkpoint owns each admission and switch. A restart reuses its receipt, never the original user message. */
 function chainTurn(resolve: (id: ConversationId) => ModelChainRuntime) {
-  return defineTask<TurnInput, TurnState, null>({ name: "forgerie.session-chain-turn", version: 1, initial: () => ({ phase: "deliver", attempt: 0 }), phases: {
+  return defineTask<TurnInput, TurnState, null>({ name: "forgerie.session-chain-turn", version: 1, initial: () => ({ phase: "start" }), phases: {
+    start: async (task, runtime, ctx) => {
+      const options = resolve(runtime.conversationId);
+      const settings = await runtime.snapshot(AgentDoc, runtime.conversationId, ctx);
+      let models: string[];
+      try { models = resolveModelChain(task.input.reference, options.modelChains?.() ?? {}, settings?.thinkingLevel); }
+      catch (error) {
+        await runtime.commit(async tx => {
+          const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
+          delete doc.pending?.[task.input.requestId]; clearRecovery(doc, task.id);
+          return { status: "terminal", outcome: { status: "failed", error: { message: childModelDiagnostic(String(error)) } } };
+        }, ctx);
+        return;
+      }
+      const cooldowns = await options.modelCooldowns?.snapshot() ?? {};
+      const selected = selectAvailableChainEntry(models, cooldowns, runtime.now(), runtime.models);
+      await runtime.commit(async tx => {
+        const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
+        if (doc.recovery !== undefined && doc.recovery !== task.id) return { status: "waiting", checkpoint: task.state.checkpoint, on: [doc.recovery], policy: "allSettled" };
+        if (models.length > 1 && selected.exhausted) {
+          const error = childModelDiagnostic(cooldowns[modelKey(selected.model)]?.reason ?? "All models are cooling");
+          const until = runtime.now() + CHILD_RETRY_DELAYS[0];
+          doc.recovery = task.id;
+          doc.wait = { owner: task.id, from: modelKey(selected.model), to: modelKey(selected.model), error, until };
+          return { status: "running", checkpoint: { phase: "advance", attempt: 0, progress: { failed: [], waited: [], budget: 1, exhausted: true }, from: modelKey(selected.model), to: selected.model, error, until } };
+        }
+        return { status: "running", checkpoint: { phase: "deliver", attempt: 0 } };
+      }, ctx);
+    },
     deliver: async (task, runtime, ctx) => {
       const state = task.state.checkpoint;
       const conversation = await runtime.conversation(runtime.conversationId, ctx);
       if (conversation === undefined) throw new Error("Missing chain session");
-      const submission = await conversation.submit({ type: "input", content: state.attempt === 0 ? task.input.content : CHILD_MODEL_CONTINUE,
-        whenBusy: state.attempt === 0 ? task.input.whenBusy : "followUp", requestId: state.attempt === 0 ? task.input.requestId : `chain:${String(task.id)}:${String(state.attempt)}` }, ctx);
+      const admission = { held: false, content: task.input.content };
+      await runtime.commit(async tx => {
+        const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
+        const owner = doc.recovery;
+        if (owner === undefined || owner === task.id) {
+          const pending = doc.pending !== undefined && Object.hasOwn(doc.pending, task.input.requestId) ? doc.pending[task.input.requestId] : undefined;
+          if (state.attempt === 0 && pending !== undefined) { admission.content = pending.content; pending.sealed = true; }
+          return undefined;
+        }
+        admission.held = true;
+        return { status: "waiting", checkpoint: state, on: [owner], policy: "allSettled" };
+      }, ctx);
+      if (admission.held) return;
+      const requestId = state.attempt === 0 ? task.input.requestId : `chain:${String(task.id)}:${String(state.attempt)}`;
+      if (state.run !== undefined) {
+        const run = state.run;
+        await runtime.commit(async tx => {
+          const claim = (await tx.doc(SessionChainTurns, runtime.conversationId)).retryOwners?.[run];
+          if (claim?.owner === task.id) claim.requestId = requestId;
+        }, ctx);
+      }
+      let submission: Submission;
+      try { submission = await conversation.submit({ type: "input", content: state.attempt === 0 ? admission.content : CHILD_MODEL_CONTINUE,
+        whenBusy: state.attempt === 0 ? task.input.whenBusy : "followUp", requestId }, ctx); }
+      catch (error) {
+        if (runtime.signal.aborted) throw error;
+        await runtime.commit(async tx => {
+          const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
+          delete doc.pending?.[task.input.requestId]; clearRecovery(doc, task.id);
+          return { status: "terminal", outcome: { status: "failed", error: { message: childModelDiagnostic(String(error)) } } };
+        }, ctx);
+        return;
+      }
+      if (state.attempt === 0) await runtime.commit(async tx => { delete (await tx.doc(SessionChainTurns, runtime.conversationId)).pending?.[task.input.requestId]; }, ctx);
       const settled = await submission.wait(ctx);
       const settings = await runtime.snapshot(AgentDoc, runtime.conversationId, ctx);
-      const current = settings?.model === undefined ? undefined : `${settings.model.provider}/${settings.model.modelId}`;
+      const ledger = await runtime.snapshot(SessionChainTurns, runtime.conversationId, ctx);
+      let current = ledger?.failureModels?.[String(settled.id)] ?? (settings?.model === undefined ? undefined : `${settings.model.provider}/${settings.model.modelId}`);
+      let missingRun: string | undefined;
       let error = settled.status === "unanswered" && settled.detail !== undefined ? typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail) : undefined;
       if (settled.status === "unanswered" && settled.reason === "no_model") {
         await runtime.commit(async tx => {
-          const generation = (await tx.scanTasks({ conversationId: runtime.conversationId, kind: GenerationTask.definition.name, status: "terminal", order: "descending" }, 1)).items[0];
-          if (generation?.state.status === "terminal" && generation.state.outcome.status === "failed" && unavailableChildModel(generation.state.outcome.error.message) === current) error = generation.state.outcome.error.message;
+          const failure = await missingModelRun(tx, runtime.conversationId, settled);
+          if (failure === undefined) return;
+          error = failure.error; current = failure.model; missingRun = `generation:${String(failure.generation)}`;
+          await recordFailedModelRun(tx, await tx.doc(SessionChainTurns, runtime.conversationId), { conversationId: runtime.conversationId, generation: failure.generation, inputs: [settled.id], model: failure.model });
         }, ctx);
       }
       if (settled.status === "unanswered" && (settled.reason === "model_error" || settled.reason === "no_model") && current !== undefined && error !== undefined) {
+        const from = current;
+        const recovery = { delegated: false };
+        let run = state.run ?? ledger?.failureRuns?.[String(settled.id)] ?? missingRun ?? `input:${String(settled.id)}`;
+        await runtime.commit(async tx => {
+          const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
+          run = doc.failureRuns?.[String(settled.id)] ?? run;
+          const claim = claimModelRecovery(doc, run, { owner: task.id, conversationId: runtime.conversationId, requestId });
+          if (claim.owner !== task.id) {
+            recovery.delegated = true;
+            return { status: "running", checkpoint: { phase: "observe", owner: claim.owner } };
+          }
+          doc.recovery = task.id;
+          return undefined;
+        }, ctx);
+        if (recovery.delegated) return;
         const options = resolve(runtime.conversationId);
-        const { assessment, diagnostic, cooldowns } = await recordModelChainFailure(options, current, error, runtime.now(), cause => { runtime.report(cause); });
+        const { assessment, diagnostic, cooldowns } = await recordModelChainFailure(options, from, error, runtime.now(), cause => { runtime.report(cause); });
         let models: string[] = [];
         try { models = resolveModelChain(task.input.reference, options.modelChains?.() ?? {}, settings?.thinkingLevel); }
         catch (cause) { runtime.report(cause); }
-        const plan = models.length === 0 ? { kind: "report" as const } : planChildModelFailure({ models, current, error, now: runtime.now(), cooldowns, assessment, attempt: state.attempt, ...(state.progress === undefined ? {} : { progress: state.progress }) });
+        const plan = models.length === 0 ? { kind: "report" as const } : planChildModelFailure({ models, current: from, error, now: runtime.now(), cooldowns, assessment, attempt: state.attempt, ...(state.progress === undefined ? {} : { progress: state.progress }) });
         if (plan.kind !== "report") {
           await runtime.commit(async tx => {
             // A manual plain-model selection ends the chain, including a pending wait.
             const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
-            if ((await tx.doc(SessionModelChain, runtime.conversationId)).reference !== task.input.reference) return { status: "terminal", outcome: { status: "completed", result: null } };
+            if ((await tx.doc(SessionModelChain, runtime.conversationId)).reference !== task.input.reference) { clearRecovery(doc, task.id); return { status: "terminal", outcome: { status: "completed", result: null } }; }
             const until = plan.delay === undefined ? undefined : runtime.now() + plan.delay;
-            if (until !== undefined) doc.wait = { from: current, error: diagnostic, until, ...(plan.kind === "switch" ? { to: modelKey(plan.to) } : {}) };
-            return { status: "running", checkpoint: { phase: "advance", attempt: state.attempt + 1, progress: plan.progress, from: current, error: diagnostic, failure: assessment,
+            if (until !== undefined) doc.wait = { owner: task.id, from, error: diagnostic, until, ...(plan.kind === "switch" ? { to: modelKey(plan.to) } : {}) };
+            return { status: "running", checkpoint: { phase: "advance", attempt: state.attempt + 1, progress: plan.progress, run, from, error: diagnostic, failure: assessment,
               ...(plan.kind === "switch" ? { to: plan.to } : {}), ...(until === undefined ? {} : { until }) } };
           }, ctx);
           return;
         }
       }
-      await runtime.commit(async tx => { delete (await tx.doc(SessionChainTurns, runtime.conversationId)).wait; return { status: "terminal", outcome: { status: "completed", result: null } }; }, ctx);
+      await runtime.commit(async tx => { clearRecovery(await tx.doc(SessionChainTurns, runtime.conversationId), task.id); return { status: "terminal", outcome: { status: "completed", result: null } }; }, ctx);
+    },
+    observe: async (task, runtime, ctx) => {
+      const owner = await runtime.waitForTask(task.state.checkpoint.owner, ctx);
+      const outcome = owner.state.outcome;
+      await runtime.commit(() => ({ status: "terminal", outcome: outcome.status === "completed" ? { status: "completed", result: null }
+        : outcome.status === "failed" || outcome.status === "faulted" ? { status: outcome.status, error: outcome.error }
+        : outcome.status === "orphaned" ? { status: "orphaned", reason: outcome.reason }
+        : { status: "aborted", ...(outcome.reason === undefined ? {} : { reason: outcome.reason }) } }), ctx);
     },
     advance: async (task, runtime, ctx) => {
       const state = task.state.checkpoint;
@@ -68,8 +157,8 @@ function chainTurn(resolve: (id: ConversationId) => ModelChainRuntime) {
           busy = (await tx.doc(LiveDoc, runtime.conversationId)).run?.taskId;
           if (busy !== undefined) return undefined;
           const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
-          delete doc.wait;
-          if ((await tx.doc(SessionModelChain, runtime.conversationId)).reference !== task.input.reference) return { status: "terminal", outcome: { status: "completed", result: null } };
+          clearWait(doc, task.id);
+          if ((await tx.doc(SessionModelChain, runtime.conversationId)).reference !== task.input.reference) { clearRecovery(doc, task.id); return { status: "terminal", outcome: { status: "completed", result: null } }; }
           let target = state.to;
           let progress = state.progress;
           // Another session can cool a target while this task waits or the daemon restarts.
@@ -78,15 +167,15 @@ function chainTurn(resolve: (id: ConversationId) => ModelChainRuntime) {
             let models: string[] = [];
             try { models = resolveModelChain(task.input.reference, selected.modelChains?.() ?? {}); }
             catch (cause) { runtime.report(cause); }
-            const plan = models.length === 0 ? { kind: "report" as const } : planChildModelFailure({ models, current: state.from, error: state.error, assessment: state.failure,
+            const plan = models.length === 0 ? { kind: "report" as const } : planChildModelFailure({ models, current: state.from, error: state.error, ...(state.failure === undefined ? {} : { assessment: state.failure }),
               now: runtime.now(), cooldowns, progress, attempt: state.attempt - 1 });
-            if (plan.kind === "report") return { status: "terminal", outcome: { status: "completed", result: null } };
+            if (plan.kind === "report") { clearRecovery(doc, task.id); return { status: "terminal", outcome: { status: "completed", result: null } }; }
             progress = plan.progress;
             if (plan.delay !== undefined) {
               const until = runtime.now() + plan.delay;
-              doc.wait = { from: state.from, error: state.error, until, ...(plan.kind === "switch" ? { to: modelKey(plan.to) } : {}) };
-              return { status: "running", checkpoint: { phase: "advance", attempt: state.attempt, from: state.from, error: state.error, failure: state.failure,
-                progress, until, ...(plan.kind === "switch" ? { to: plan.to } : {}) } };
+              doc.wait = { owner: task.id, from: state.from, error: state.error, until, ...(plan.kind === "switch" ? { to: modelKey(plan.to) } : {}) };
+              return { status: "running", checkpoint: { phase: "advance", attempt: state.attempt, from: state.from, error: state.error, ...(state.failure === undefined ? {} : { failure: state.failure }),
+                progress, until, ...(state.run === undefined ? {} : { run: state.run }), ...(plan.kind === "switch" ? { to: plan.to } : {}) } };
             }
             if (plan.kind === "switch") target = plan.to;
           }
@@ -96,22 +185,55 @@ function chainTurn(resolve: (id: ConversationId) => ModelChainRuntime) {
             await configure(tx, runtime.conversationId, { model: choice.model, ...(choice.thinkingLevel === undefined ? {} : { thinkingLevel: choice.thinkingLevel }) });
             if (modelKey(target) !== state.from) await tx.appendEntry(runtime.conversationId, { kind: MODEL_CHAIN_SWITCH_KIND, data: { from: state.from, to: modelKey(target), error: childModelDiagnostic(state.error) } });
           }
-          return { status: "running", checkpoint: { phase: "deliver", attempt: state.attempt, progress } };
+          return { status: "running", checkpoint: { phase: "deliver", attempt: state.attempt, progress, ...(state.run === undefined ? {} : { run: state.run }) } };
         }, ctx);
         if (busy === undefined) return;
         await runtime.waitForTask(busy, ctx);
       }
     },
-  }, abort: async (_task, runtime, ctx) => runtime.commit(async tx => {
-    delete (await tx.doc(SessionChainTurns, runtime.conversationId)).wait;
+  }, abort: async (task, runtime, ctx) => runtime.commit(async tx => {
+    const doc = await tx.doc(SessionChainTurns, runtime.conversationId);
+    await withdrawPending(tx, runtime.conversationId, doc, task.input.requestId);
+    clearRecovery(doc, task.id);
     return { status: "terminal", outcome: { status: "aborted" } };
   }, ctx) });
 }
 
 export const SESSION_MODEL_CHAIN_EXTENSION = "forgerie.session-model-chains";
 
-export function modelChainExtension(resolve: (id: ConversationId) => ModelChainRuntime) {
-  return defineExtension({ name: SESSION_MODEL_CHAIN_EXTENSION, tasks: [chainTurn(resolve)] });
+export function modelChainExtension(resolve: (id: ConversationId) => ModelChainRuntime & Pick<Session, "commit">) {
+  return defineExtension({ name: SESSION_MODEL_CHAIN_EXTENSION, tasks: [chainTurn(resolve)], hooks: [hook(GenerationTask, {
+    beforeRequest: async (request, api, ctx) => (await api.snapshot(SessionModelChain, api.conversationId, ctx))?.reference === undefined ? undefined : { messages: childModelDiagnosticContext(request.messages) },
+    afterResponse: async (message, api, ctx) => {
+      if (message.stopReason !== "error") return;
+      await resolve(api.conversationId).commit(async tx => {
+        if ((await tx.doc(SessionModelChain, api.conversationId)).reference === undefined) return;
+        const live = (await tx.doc(LiveDoc, api.conversationId)).run;
+        if (live?.taskId !== api.taskId) return;
+        await recordFailedModelRun(tx, await tx.doc(SessionChainTurns, api.conversationId), { conversationId: api.conversationId, generation: api.taskId, inputs: live.inputs, model: `${message.provider}/${message.model}` });
+      }, ctx);
+    },
+  }), hook(CompactionTask, { beforeCompact: async (request, api, ctx) => {
+    if ((await api.snapshot(SessionModelChain, api.conversationId, ctx))?.reference === undefined) return undefined;
+    const decision = { decline: false };
+    await resolve(api.conversationId).commit(async tx => {
+      const provider = (await tx.doc(AgentDoc, api.conversationId)).model?.provider;
+      if (provider === undefined) return;
+      const fallbacks: { from: string; to: string }[] = [];
+      let cursor;
+      do {
+        const page = await tx.scanEntries({ conversationId: api.conversationId }, 100, cursor);
+        for (const entry of page.items) {
+          if (entry.kind !== MODEL_CHAIN_SWITCH_KIND) continue;
+          const data = entry.data;
+          if (data !== null && typeof data === "object" && !Array.isArray(data) && typeof data["from"] === "string" && typeof data["to"] === "string") fallbacks.push({ from: data["from"], to: data["to"] });
+        }
+        cursor = page.next;
+      } while (cursor !== undefined);
+      decision.decline = hasUnsafeChildModelDiagnostic({ ...request, provider, fallbacks });
+    }, ctx);
+    return decision.decline ? { decline: true } : undefined;
+  } })] });
 }
 
 const ChainTurn = chainTurn(() => ({}));
@@ -120,13 +242,15 @@ async function prepareTurn(tx: Tx, conversationId: ConversationId, reference: st
   const doc = await tx.doc(SessionChainTurns, conversationId);
   const existing = Object.hasOwn(doc.tasks, input.requestId) ? doc.tasks[input.requestId] : undefined;
   if (existing !== undefined) return { id: existing, ownsInput: true };
-  if (input.whenBusy === "steer") for (const id of Object.values(doc.tasks)) {
+  if (input.whenBusy === "reject" && doc.recovery !== undefined) throw new Error("Stop the pending model-chain recovery before sending another message");
+  if (input.whenBusy === "steer" && doc.recovery === undefined && doc.wait === undefined) for (const id of Object.values(doc.tasks)) {
     const task = await tx.task(id);
     if (task !== undefined && task.state.status !== "terminal") return { id, ownsInput: false };
   }
   // The registry supplies the family-routed implementation; this token owns only the durable task identity.
   const id = await tx.createTask(ChainTurn, { ...input, reference }, { conversationId, ownership: { kind: "conversation" }, background: true });
   doc.tasks = { ...doc.tasks, [input.requestId]: id };
+  doc.pending = { ...doc.pending, [input.requestId]: { task: id, content: input.content, whenBusy: input.whenBusy } };
   return { id, ownsInput: true };
 }
 
@@ -136,16 +260,53 @@ export function prepareChainTurn(conversation: Conversation, reference: string, 
 
 interface ChainAdmission {
   snapshot: Harness["snapshot"];
+  watchDoc: Harness["watchDoc"];
+  waitForTask: Harness["waitForTask"];
   commit(change: (tx: Tx) => Promise<undefined>, context: Context): Promise<unknown>;
 }
-/** Durable outboxes also start main turns. Attach fallback before admitting their stable request ID. */
-export async function prepareModelChainInput(api: ChainAdmission, conversationId: ConversationId, input: Omit<TurnInput, "reference">, ctx: Context): Promise<void> {
-  if ((await api.snapshot(SessionModelChain, conversationId, ctx))?.reference === undefined) return;
+/** Stage the intent without blocking an outbox's serial admission line behind a provider wait. */
+export async function stageModelChainInput(api: ChainAdmission, conversationId: ConversationId, input: Omit<TurnInput, "reference">, ctx: Context): Promise<{ id: TaskId; ownsInput: boolean } | undefined> {
+  if ((await api.snapshot(SessionModelChain, conversationId, ctx))?.reference === undefined) return undefined;
+  const admitted: { turn?: { id: TaskId; ownsInput: boolean } } = {};
   await api.commit(async tx => {
     const reference = (await tx.doc(SessionModelChain, conversationId)).reference;
-    if (reference !== undefined) await prepareTurn(tx, conversationId, reference, input);
+    if (reference !== undefined) admitted.turn = await prepareTurn(tx, conversationId, reference, input);
     return undefined;
   }, ctx);
+  return admitted.turn;
+}
+
+/** Batch only an unsealed last intent, just as the native inbox batches only its last queued input. */
+export async function batchModelChainInput(tx: Tx, id: ConversationId, requestId: string, text: string): Promise<"appended" | "hold" | "native"> {
+  const doc = await tx.doc(SessionChainTurns, id);
+  const last = Object.entries(doc.pending ?? {}).at(-1);
+  if (last?.[0] !== requestId || last[1].sealed === true || last[1].whenBusy !== "followUp" || await tx.submissionByRequest(id, requestId) !== undefined) return doc.recovery === undefined ? "native" : "hold";
+  const pending = last[1];
+  pending.content = typeof pending.content === "string" ? `${pending.content}\n\n${text}` : [...pending.content, { type: "text", text }];
+  return "appended";
+}
+
+/** Durable outboxes also start main turns. Only the task may admit a held input on its stable request ID. */
+export async function prepareModelChainInput(api: ChainAdmission, conversationId: ConversationId, input: Omit<TurnInput, "reference">, ctx: Context): Promise<void> {
+  const turn = await stageModelChainInput(api, conversationId, input, ctx);
+  if (turn?.ownsInput !== true) return;
+  const watch = await api.watchDoc(SessionChainTurns, conversationId, ctx);
+  if (watch === undefined) throw new Error("Missing model-chain admissions");
+  let admitted!: () => void;
+  const ready = new Promise<void>(resolve => { admitted = resolve; });
+  const observe = (value: typeof watch.value) => { if (value?.pending === undefined || !Object.hasOwn(value.pending, input.requestId)) admitted(); };
+  watch.start(value => { observe(value); return Promise.resolve(); }); observe(watch.value);
+  try {
+    await Promise.race([ready, api.waitForTask(turn.id, ctx).then(task => {
+      if (task.state.outcome.status === "failed" || task.state.outcome.status === "faulted") throw new Error(task.state.outcome.error.message);
+    }), watch.closed.then(() => { throw new Error("Model-chain admission watch closed"); })]);
+    const receipt = { exists: false };
+    await api.commit(async tx => { receipt.exists = await tx.submissionByRequest(conversationId, input.requestId) !== undefined; return undefined; }, ctx);
+    if (!receipt.exists) {
+      const task = await api.waitForTask(turn.id, ctx);
+      throw new Error(task.state.outcome.status === "failed" || task.state.outcome.status === "faulted" ? task.state.outcome.error.message : "Model-chain input ended before admission");
+    }
+  } finally { await watch.stop(); }
 }
 
 /** Wait for the task-owned admission, not a second submit that could race a busy rejection. */
@@ -173,8 +334,54 @@ export async function chainTurnSubmission(harness: Harness, conversation: Conver
   } finally { off(); void terminal.catch(() => undefined); }
 }
 
+function clearWait(doc: ChainState, owner: TaskId): void {
+  // Older checkpoints have no owner; their recovery task is the only pending wait.
+  if (doc.wait?.owner === owner || (doc.wait !== undefined && doc.wait.owner === undefined && (doc.recovery === undefined || doc.recovery === owner))) delete doc.wait;
+}
+function clearRecovery(doc: ChainState, owner: TaskId): void {
+  clearWait(doc, owner);
+  if (doc.recovery === owner) delete doc.recovery;
+}
+async function withdrawPending(tx: Tx, conversationId: ConversationId, doc: ChainState, requestId: string): Promise<boolean> {
+  if (doc.pending === undefined || !Object.hasOwn(doc.pending, requestId)) return false;
+  // A held input has not reached the native inbox. Give it Stop's ordinary aborted receipt, without
+  // calling the cooling model. A receipt which crossed into placement already owns a live turn.
+  const receipt = await tx.submissionByRequest(conversationId, requestId);
+  if (receipt === undefined) await tx.createSubmission({ conversationId, requestId, type: "input", status: "unanswered", reason: "aborted" });
+  else if (receipt.status === "queued") {
+    tx.settleSubmission(receipt.id, { status: "unanswered", reason: "aborted" });
+    const inbox = await tx.doc(InboxDoc, conversationId);
+    inbox.items = inbox.items.filter(item => item.id !== receipt.id);
+  }
+  Reflect.deleteProperty(doc.pending, requestId);
+  return receipt === undefined || receipt.status === "queued";
+}
+export async function cancelHeldChainInputs(harness: Harness, id: ConversationId, ctx: Context, selected?: readonly TaskId[]): Promise<void> {
+  const tasks: TaskId[] = [];
+  await harness.commit(async tx => {
+    const doc = await tx.doc(SessionChainTurns, id);
+    for (const [requestId, pending] of Object.entries(doc.pending ?? {})) {
+      if (selected !== undefined && !selected.includes(pending.task)) continue;
+      if (await withdrawPending(tx, id, doc, requestId)) tasks.push(pending.task);
+    }
+  }, ctx);
+  for (const task of tasks) await harness.abortTask(task, ctx);
+}
 export async function cancelChainTurns(harness: Harness, id: ConversationId, ctx: Context): Promise<void> {
   const doc = await harness.snapshot(SessionChainTurns, id, ctx);
-  for (const task of Object.values(doc?.tasks ?? {})) await harness.abortTask(task, ctx);
-  await harness.commit(async tx => { delete (await tx.doc(SessionChainTurns, id)).wait; }, ctx);
+  if (doc === undefined) return;
+  await cancelHeldChainInputs(harness, id, ctx);
+  for (const task of Object.values(doc.tasks)) await harness.abortTask(task, ctx);
+  await harness.commit(async tx => { const state = await tx.doc(SessionChainTurns, id); delete state.wait; delete state.recovery; }, ctx);
+}
+
+/** Pending task intents have no native inbox receipt yet. Do not count an admission twice during its handoff. */
+export async function heldChainInputs(tx: Tx, id: ConversationId): Promise<{ task: TaskId; kind: "steer" | "followUp"; text: string }[]> {
+  const doc = await tx.doc(SessionChainTurns, id);
+  const result: { task: TaskId; kind: "steer" | "followUp"; text: string }[] = [];
+  for (const [requestId, pending] of Object.entries(doc.pending ?? {})) {
+    if (await tx.submissionByRequest(id, requestId) !== undefined) continue;
+    result.push({ task: pending.task, kind: pending.whenBusy === "steer" ? "steer" : "followUp", text: typeof pending.content === "string" ? pending.content : pending.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") });
+  }
+  return result;
 }

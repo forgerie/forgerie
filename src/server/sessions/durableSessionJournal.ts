@@ -1,6 +1,6 @@
-import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
+import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION, SessionChainTurns } from "./durableModelChains.js";
 import { endTurnReplyMessage } from "./endTurnReply.js";
-import { constants } from "node:fs";
+import { constants, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
@@ -302,12 +302,22 @@ export class DurableSessionJournal {
     const header = this.manager.getHeader();
     if (this.projectionFileReady || file === undefined || header === null) return;
     const entries = this.manager.getEntries();
-    if (!entries.some((entry) => entry.type === "message")) return;
-    // SDK persistence normally waits for an assistant. Save the first input now so a crash cannot hide its database from discovery.
-    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-    await writeFile(file, [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n") + "\n", { flag: "wx", mode: 0o600 }).catch((error: unknown) => {
-      if (!isFsError(error, "EEXIST")) throw error;
-    });
+    if (!entries.some(entry => entry.type === "message")) {
+      if (Object.keys((await this.harness.snapshot(SessionChainTurns, this.conversation.id, BACKGROUND_CONTEXT))?.pending ?? {}).length === 0 || !this.manager.isPersisted()) return;
+      // An initial cooldown wait has no native message yet. Persist its discoverable header and tell the SDK
+      // it now owns an existing file. Keep this synchronous like SDK persistence: no append can fall between
+      // the snapshot and reload, and the first assistant must not try to create the same path with `wx`.
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+      try { writeFileSync(file, [header, ...this.manager.getEntries()].map(entry => JSON.stringify(entry)).join("\n") + "\n", { flag: "wx", mode: 0o600 }); }
+      catch (error) { if (!isFsError(error, "EEXIST")) throw error; }
+      this.manager.setSessionFile(file);
+    } else {
+      // Keep ordinary input projection and its completion boundary unchanged.
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+      await writeFile(file, [header, ...entries].map(entry => JSON.stringify(entry)).join("\n") + "\n", { flag: "wx", mode: 0o600 }).catch((error: unknown) => {
+        if (!isFsError(error, "EEXIST")) throw error;
+      });
+    }
     this.projectionFileReady = true;
   }
 

@@ -74,3 +74,42 @@ it("passes chains through new-session, trigger, default and explicit model selec
     expect((await service.status(ref)).chainWait).toBeUndefined();
   } finally { await app.close(); await service.dispose(); await rm(root, { recursive: true, force: true }); vi.unstubAllEnvs(); }
 }, 20_000);
+
+async function missingFirstEntryService() {
+  const root = await mkdtemp(join(tmpdir(), "forgerie-chain-entrypoints-"));
+  const agentDir = join(root, "agent");
+  await mkdir(agentDir);
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "faux", defaultModel: "a", retry: { enabled: false }, compaction: { enabled: false } }));
+  const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json"), allowModelNetwork: false });
+  const provider = fauxProvider({ models: [{ id: "a" }, { id: "b" }], tokensPerSecond: 100000 });
+  models.registerNativeProvider(provider.provider); await models.refresh({ allowNetwork: false });
+  provider.setResponses(Array.from({ length: 20 }, () => fauxAssistantMessage("Done")));
+  const service = new PiSessionService(new CapturingSessionEventHub(), { agentDir, modelRuntime: models, modelChains: () => ({ worker: ["faux/missing", "faux/b"] }),
+    sessionManager: createPiSessionManagerGateway({ agentDir, env: { HOME: root }, sessionDirEnvKeys: [] }), archiveStore: emptyArchiveStore(), heartbeatIntervalMs: 60000,
+    spawnTargets: { resolveSpawnTarget: () => Promise.resolve({ allowed: true, cwd: root }) } });
+  return { root, service, dispose: async () => { await service.dispose(); await rm(root, { recursive: true, force: true }); } };
+}
+
+it("starts a trigger chain when its first entry is missing from the catalog", async () => {
+  vi.stubEnv("PI_OFFLINE", "1");
+  const run = await missingFirstEntryService();
+  try {
+    const ref = { cwd: run.root, id: "trigger-missing-chain-entry" };
+    await run.service.ensureTriggerSession(ref, { model: "worker" });
+    expect(await run.service.status(ref)).toMatchObject({ modelChain: "worker", model: { provider: "faux", id: "b" } });
+    await run.service.prompt(ref, "Trigger task");
+    await vi.waitFor(async () => { expect((await run.service.status(ref)).isStreaming).toBe(false); });
+  } finally { await run.dispose(); vi.unstubAllEnvs(); }
+});
+
+it("spawns a chain with a missing first entry without opening the spawning session", async () => {
+  vi.stubEnv("PI_OFFLINE", "1");
+  const run = await missingFirstEntryService();
+  try {
+    const spawned = await run.service.spawnSession({ spawningSessionId: "not-open", spawningCwd: run.root, cwd: run.root, modelSpec: "worker", prompt: "Spawned task" });
+    const ref = { cwd: spawned.cwd, id: spawned.sessionId };
+    expect(spawned.model).toBe("faux/b");
+    expect(await run.service.status(ref)).toMatchObject({ modelChain: "worker", model: { provider: "faux", id: "b" } });
+    await vi.waitFor(async () => { expect((await run.service.status(ref)).isStreaming).toBe(false); });
+  } finally { await run.dispose(); vi.unstubAllEnvs(); }
+});

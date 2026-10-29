@@ -1,3 +1,4 @@
+import { claimModelRecovery, missingModelRun, recordFailedModelRun, type ModelRecoveryOwner } from "./modelChainRecovery.js";
 import { recordModelChainFailure } from "./modelChainFailures.js";
 import { AUTONOMY_GUIDANCE } from "./autonomyGuidance.js";
 import { readToolRiskIdentity } from "./toolRiskIdentity.js";
@@ -67,12 +68,12 @@ type ReporterPolicy = { firstDelivery?: boolean; progress?: ChainProgress; failu
 type ReporterState = ReporterPolicy & ({ phase: "deliver"; attempt?: number; error?: string } | { phase: "retry"; attempt: number; error: string; until: number; run?: string; retryAttempt?: number }
   | { phase: "switch"; attempt: number; error: string; to: string; run: string; until?: number; retryAttempt?: number }
   | { phase: "observe"; run: string; owner: TaskId } | { phase: "report"; report?: string; diagnosticsSafe?: boolean; suppressed?: "duplicate" | "aborted" });
-type ChildRetryOwner = { owner: TaskId; conversationId: ConversationId; requestId: string };
+
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
 
 export const CHILD_AGENTS_DOC_KIND = "forgerie.durable-children";
 const Children = defineDoc<{ agents: Record<string, ChildRecord>; reporters: Record<string, TaskId>;
-  failureRuns?: Record<string, string>; failureModels?: Record<string, string>; retryOwners?: Record<string, ChildRetryOwner>;
+  failureRuns?: Record<string, string>; failureModels?: Record<string, string>; retryOwners?: Record<string, ModelRecoveryOwner>;
   continuations?: Record<string, { from: number; text: string; conversationId: number }> }>({
   kind: CHILD_AGENTS_DOC_KIND, version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ agents: {}, reporters: {} }),
@@ -165,8 +166,6 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
           await runtime.waitForTask(busy, context);
         }
       }
-      const attempted = await runtime.snapshot(AgentDoc, conversationId, context);
-      const attemptedModel = attempted?.model === undefined ? undefined : `${attempted.model.provider}/${attempted.model.modelId}`;
       const submission = await child.submit({ type: "input", content, whenBusy: attempt > 0 || followUp ? "followUp" : "steer",
         requestId: childRequestId(reporter.id, attempt) }, context);
       const selected = await resolve(runtime.conversationId, context);
@@ -177,10 +176,10 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
       if (settled.status === "unanswered" && settled.reason === "no_model") {
         // Unlike provider errors, Durable puts this diagnostic on the generation receipt, not the submission.
         await runtime.commit(async (tx) => {
-          const task = (await tx.scanTasks({ conversationId, kind: GenerationTask.definition.name, status: "terminal", order: "descending" }, 1)).items[0];
-          if (task?.state.status === "terminal" && task.state.outcome.status === "failed" && attemptedModel !== undefined && unavailableChildModel(task.state.outcome.error.message) === attemptedModel) {
-            detail = task.state.outcome.error.message; missingRun = `generation:${String(task.id)}`;
-          }
+          const failure = await missingModelRun(tx, conversationId, settled);
+          if (failure === undefined) return;
+          detail = failure.error; missingRun = `generation:${String(failure.generation)}`;
+          await recordFailedModelRun(tx, await tx.doc(Children, runtime.conversationId), { conversationId, generation: failure.generation, inputs: [settled.id], model: failure.model });
         }, context);
       }
       const failure = detail === undefined ? undefined : assessChildModelFailure(detail);
@@ -196,12 +195,11 @@ function childReporter(resolve: (conversationId: ConversationId, context: Contex
         await runtime.commit(async (tx) => {
           const doc = await tx.doc(Children, runtime.conversationId);
           const run = doc.failureRuns?.[String(settled.id)] ?? missingRun ?? `input:${String(settled.id)}`;
-          const claim = doc.retryOwners?.[run];
-          if (claim !== undefined && claim.owner !== reporter.id) {
+          const claim = claimModelRecovery(doc, run, { owner: reporter.id, conversationId, requestId: childRequestId(reporter.id, attempt) });
+          if (claim.owner !== reporter.id) {
             progress.delegated = true;
             return { status: "running", checkpoint: { phase: "observe", run, owner: claim.owner } };
           }
-          if (claim === undefined) doc.retryOwners = { ...doc.retryOwners, [run]: { owner: reporter.id, conversationId, requestId: childRequestId(reporter.id, attempt) } };
           const agent = doc.agents[name];
           let models: string[];
           try { models = current === undefined ? [] : chainModels(agent?.modelReference, chains, parseModelChoice(current) ?? settings ?? {}); }
@@ -542,17 +540,10 @@ export function durableChildExtensions(options: DurableChildExtensionOptions = {
             if (live?.taskId !== api.taskId) return;
             const inputs = live.inputs;
             const doc = await tx.doc(Children, parent);
-            let run = `generation:${String(api.taskId)}`;
-            for (const [key, claim] of Object.entries(doc.retryOwners ?? {})) {
-              if (claim.conversationId !== api.conversationId) continue;
-              const retry = await tx.submissionByRequest(api.conversationId, claim.requestId);
-              if (retry !== undefined && inputs.includes(retry.id)) { run = key; break; }
-            }
-            doc.failureRuns = { ...doc.failureRuns, ...Object.fromEntries(inputs.map((id) => [String(id), run])) };
             const settings = await tx.doc(AgentDoc, api.conversationId);
             const model = settings.model ?? { provider: message.provider, modelId: message.model };
             const spec = `${model.provider}/${model.modelId}${settings.thinkingLevel === undefined ? "" : `:${settings.thinkingLevel}`}`;
-            doc.failureModels = { ...doc.failureModels, ...Object.fromEntries(inputs.map((id) => [String(id), spec])) };
+            await recordFailedModelRun(tx, doc, { conversationId: api.conversationId, generation: api.taskId, inputs, model: spec });
           }, ctx);
         },
       }),

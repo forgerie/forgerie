@@ -3,8 +3,8 @@ import { SessionRecapScheduler, canWriteRecap } from "./sessionRecapScheduler.js
 import { buildRecapPrompt, generateSessionRecap } from "./sessionRecapGenerator.js";
 import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
 import { generateChainSessionName } from "./modelChainTitles.js";
-import type { ModelChainRuntime } from "./modelChainFailures.js";
-import { parseModelChoice, resolveModelChain, selectChainModel } from "../../shared/modelChains.js";
+import { selectAvailableChainEntry, type ModelChainRuntime } from "./modelChainFailures.js";
+import { parseModelChoice, resolveModelChain } from "../../shared/modelChains.js";
 import { DurableDecisionWriter, issueDecision } from "./durableDecisionWriter.js";
 import { durableSessionPaths } from "./durableSessionJournal.js";
 import { readDurableSessionLocator } from "./durableSessionLocator.js";
@@ -1981,17 +1981,16 @@ export class PiSessionService implements SessionRouteService {
     const hasModel = branch.some((entry) => isRecord(entry) && entry["type"] === "model_change");
     const hasThinking = branch.some((entry) => isRecord(entry) && entry["type"] === "thinking_level_change");
     if (existing !== undefined && hasModel && hasThinking) return;
-    const initialModel = hasModel || action.model === undefined ? undefined : await this.resolveNewSessionModel(action.model);
+    const selection = hasModel || action.model === undefined ? {} : await this.initialModelOptions(action.model);
     const options = {
-      ...(initialModel === undefined ? {} : { initialModel }),
-      ...(!hasModel && action.model !== undefined && !action.model.includes("/") ? { initialModelChain: action.model } : {}),
+      ...selection,
       ...(hasThinking || action.thinkingLevel === undefined ? {} : { initialThinkingLevel: action.thinkingLevel }),
     };
     if (existing === undefined) { await this.startSession(ref.cwd, { ...options, sessionId: ref.id }); return; }
     const active = this.activeForRef(ref);
     if (active !== undefined) {
       if (options.initialModelChain !== undefined) await active.runtime.session.setModelChain?.(options.initialModelChain);
-      else if (initialModel !== undefined) await active.runtime.session.setModel(initialModel);
+      else if (options.initialModel !== undefined) await active.runtime.session.setModel(options.initialModel);
       if (options.initialThinkingLevel !== undefined) active.runtime.session.setThinkingLevel(options.initialThinkingLevel);
       return;
     }
@@ -2034,12 +2033,11 @@ export class PiSessionService implements SessionRouteService {
     if (!decision.allowed) throw spawnTargetError(decision);
     // A model spec overrides the inherited model. Only a spec resolves
     // against the spawning session; the default path must not depend on it.
-    const model = input.modelSpec === undefined
-      ? input.model
-      : await this.resolveSpawnModel({ id: input.spawningSessionId, cwd: input.spawningCwd }, input.modelSpec);
+    const selection = input.modelSpec === undefined
+      ? input.model === undefined ? {} : { initialModel: input.model }
+      : await this.initialModelOptions(input.modelSpec, { id: input.spawningSessionId, cwd: input.spawningCwd });
     const created = await this.start(decision.cwd, {
-      ...(model === undefined ? {} : { initialModel: model }),
-      ...(input.modelSpec === undefined || input.modelSpec.includes("/") ? {} : { initialModelChain: input.modelSpec }),
+      ...selection,
       ...(input.thinkingLevel === undefined ? {} : { initialThinkingLevel: input.thinkingLevel }),
     });
     const modelUsed = this.active.get(created.id)?.runtime.session.model;
@@ -2085,12 +2083,11 @@ export class PiSessionService implements SessionRouteService {
     try {
       decision = await this.spawnTargets.resolveSpawnTarget(input.spawningCwd, input.cwd);
       if (!decision.allowed) throw spawnTargetError(decision);
-      const model = input.modelSpec === undefined
-        ? input.model
-        : await this.resolveSpawnModel({ id: input.sourceSessionId, cwd: input.spawningCwd }, input.modelSpec);
+      const selection = input.modelSpec === undefined
+        ? input.model === undefined ? {} : { initialModel: input.model }
+        : await this.initialModelOptions(input.modelSpec, { id: input.sourceSessionId, cwd: input.spawningCwd });
       created = await this.startSession(decision.cwd, {
-        ...(model === undefined ? {} : { initialModel: model }),
-        ...(input.modelSpec === undefined || input.modelSpec.includes("/") ? {} : { initialModelChain: input.modelSpec }),
+        ...selection,
         ...(input.thinkingLevel === undefined ? {} : { initialThinkingLevel: input.thinkingLevel }),
         creationProvenance: "detached-handoff",
       });
@@ -2374,17 +2371,19 @@ export class PiSessionService implements SessionRouteService {
     return modelsWithScopeFirst(session.modelRuntime.getAvailableSnapshot(), session.scopedModels);
   }
 
-  /**
-   * Resolve a strict `provider/model-id` spec from a spawn tool against the
-   * *spawning* session's model runtime, using the same candidates
-   * {@link setModel} offers plus a direct runtime lookup as fallback. Unknown
-   * or malformed specs throw; the agent loop turns that into an error tool
-   * result the spawning agent can retry from.
-   */
-  /** Resolve `provider/model-id` against the shared runtime, with no session. */
+  /** Named chains remain deferred. Resolve only concrete overrides before creating their target. */
+  private async initialModelOptions(reference: string, spawningRef?: PiSessionRef): Promise<Pick<InternalStartSessionOptions, "initialModel" | "initialModelChain">> {
+    if (!reference.includes("/")) {
+      resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {});
+      return { initialModelChain: reference };
+    }
+    return { initialModel: spawningRef === undefined ? await this.resolveNewSessionModel(reference) : await this.resolveSpawnModel(spawningRef, reference) };
+  }
+
+  /** Project a chain choice for the catalog without starting a session. */
   private async concreteModelSpec(reference: string): Promise<string> {
     if (reference.includes("/")) return reference;
-    const selected = selectChainModel(resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {}), await this.chainRuntime.modelCooldowns?.snapshot() ?? {}, Date.now()).model;
+    const selected = selectAvailableChainEntry(resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {}), await this.chainRuntime.modelCooldowns?.snapshot() ?? {}, Date.now(), this.modelRuntime).model;
     const parsed = parseModelChoice(selected);
     if (parsed === null) throw new Error("Invalid model-chain entry");
     return `${parsed.model.provider}/${parsed.model.modelId}`;
@@ -2402,6 +2401,13 @@ export class PiSessionService implements SessionRouteService {
     return model;
   }
 
+  /**
+   * Resolve a strict `provider/model-id` spec from a spawn tool against the
+   * *spawning* session's model runtime, using the same candidates
+   * {@link setModel} offers plus a direct runtime lookup as fallback. Unknown
+   * or malformed specs throw; the agent loop turns that into an error tool
+   * result the spawning agent can retry from.
+   */
   private async resolveSpawnModel(spawningRef: PiSessionRef, modelSpec: string): Promise<AgentModel> {
     const session = await this.getOrOpen(spawningRef);
     const concrete = await this.concreteModelSpec(modelSpec);
@@ -3299,7 +3305,7 @@ export class PiSessionService implements SessionRouteService {
       settings.getDefaultModel(),
     ) : { model: this.modelRuntime.getModel(chainModel.provider, chainModel.modelId) };
     const chainEntries = reference === undefined ? undefined : resolveModelChain(reference, this.chainRuntime.modelChains?.() ?? {});
-    const chainChoice = chainEntries === undefined ? null : parseModelChoice(selectChainModel(chainEntries, await this.chainRuntime.modelCooldowns?.snapshot() ?? {}, Date.now()).model);
+    const chainChoice = chainEntries === undefined ? null : parseModelChoice(selectAvailableChainEntry(chainEntries, await this.chainRuntime.modelCooldowns?.snapshot() ?? {}, Date.now(), this.modelRuntime).model);
     const requestedThinkingLevel = chainChoice?.thinkingLevel ?? selected?.thinkingLevel ?? settings.getDefaultThinkingLevel() ?? "medium";
     const model = selected?.model;
     const thinkingLevel = model === undefined ? "off" : clampThinkingLevel(model, requestedThinkingLevel);

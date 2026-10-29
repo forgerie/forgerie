@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { SessionChainTurns, SessionModelChain, modelChainExtension, prepareChainTurn, chainTurnSubmission, cancelChainTurns } from "./durableModelChains.js";
-import type { ModelChainRuntime } from "./modelChainFailures.js";
-import { parseModelChoice, resolveModelChain, selectChainModel } from "../../shared/modelChains.js";
+import { SessionChainTurns, SessionModelChain, modelChainExtension, prepareChainTurn, chainTurnSubmission, cancelChainTurns, cancelHeldChainInputs, heldChainInputs } from "./durableModelChains.js";
+import { selectAvailableChainEntry, type ModelChainRuntime } from "./modelChainFailures.js";
+import { parseModelChoice, resolveModelChain } from "../../shared/modelChains.js";
 import type { ModelChainWait } from "../../shared/apiTypes.js";
 import { remoteDefaultBranchReader, REMOTE_HEAD_TIMEOUT_MS } from "./gatedGitRemote.js";
 import type { WorkflowGlance } from "../../shared/workflowGlance.js";
@@ -146,6 +146,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   model: PiAgentSession["model"];
   modelChain: string | undefined;
   chainWait: ModelChainWait | undefined;
+  private recoveringChain = false;
   thinkingLevel: PiAgentSession["thinkingLevel"];
   private registry = createRegistry();
   private tools: DurableSdkTools;
@@ -166,6 +167,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   private compactionTask: TaskId<CompactionResult> | undefined;
   private branchSummaryController: AbortController | undefined;
   private branchTargetId: string | undefined;
+  private heldChainMessages: Awaited<ReturnType<typeof heldChainInputs>> = [];
   private queued: readonly InboxItem[] = [];
   private mutation: Promise<void> = Promise.resolve();
   private selectionReads: Promise<void> = Promise.resolve();
@@ -307,11 +309,11 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   get promptTemplates() { return this.resourceLoader.getPrompts().prompts; }
   get state(): { streamingMessage?: AssistantMessage } { return this.partial === undefined ? {} : { streamingMessage: this.partial }; }
-  get isStreaming(): boolean { return this.streaming || this.chainWait !== undefined; }
+  get isStreaming(): boolean { return this.streaming || this.chainWait !== undefined || this.recoveringChain; }
   getActiveRunStartedAt(): string | undefined { return this.runStartedAt; }
   get isCompacting(): boolean { return this.compacting; }
   get isBashRunning(): boolean { return this.bashController !== undefined; }
-  get pendingMessageCount(): number { return this.queued.filter((item) => item.mode !== "write").length; }
+  get pendingMessageCount(): number { return this.queued.filter((item) => item.mode !== "write").length + this.heldChainMessages.length; }
 
   private installSdkTools(): void {
     const name = `forgerie.sdk-tools:${this.sessionId}`;
@@ -335,7 +337,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     this.systemPrompt = await buildSdkSystemPrompt(this.basePrompt);
     this.installSdkTools();
     // Register delivery before a family can schedule a persisted accepted answer.
-    this.registry.install(modelChainExtension(id => this.dispatch(id).options));
+    this.registry.install(modelChainExtension(id => ({ ...this.dispatch(id).options, commit: (change, ctx) => this.dispatch(id).journal.harness.commit(change, ctx) })));
     this.registry.install(askDeliveryExtension());
     this.registry.install(processEventsExtension());
     this.registry.install(defineExtension({ name: "forgerie.sdk-context", sections: [section("forgerie", (input) => this.dispatch(input.conversationId).systemPrompt, { tag: false })],
@@ -919,6 +921,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const task = await this.journal.harness.waitForTask(this.compactionTask, context);
     this.compactionTask = undefined;
     if (task.state.outcome.status !== "completed") throw new Error("Compaction cancelled or failed");
+    if (task.state.outcome.result.entryId === undefined && task.state.outcome.result.submissionId === undefined) throw new Error("Compaction declined or no summary was needed");
     const id = task.state.outcome.result.submissionId;
     if (id !== undefined) await (await this.journal.harness.submission(id, context))?.wait(context);
     const view = await this.journal.conversation.context(context);
@@ -930,19 +933,21 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   abortCompaction(): void { if (this.compactionTask !== undefined) void this.journal.harness.abortTask(this.compactionTask, context).catch((error: unknown) => { this.report(error); }); }
   abortBranchSummary(): void { this.branchSummaryController?.abort(); }
-  async abort(): Promise<void> { this.bashController?.abort(); await this.mutation; await cancelChainTurns(this.journal.harness, this.journal.conversation.id, context); this.chainWait = undefined; await this.journal.conversation.abort(context); }
+  async abort(): Promise<void> { this.bashController?.abort(); await this.mutation; await cancelChainTurns(this.journal.harness, this.journal.conversation.id, context); this.chainWait = undefined; this.recoveringChain = false; await this.journal.conversation.abort(context); }
 
   clearQueue(): { steering: string[]; followUp: string[] } {
     const result = { steering: [...this.getSteeringMessages()], followUp: [...this.getFollowUpMessages()] };
     const queued = this.queued;
+    const held = this.heldChainMessages.map(item => item.task);
     this.queued = [];
-    this.mutation = this.mutation.then(async () => { for (const item of queued) if (item.mode !== "write") await this.journal.harness.abortSubmission(item.id, context, this.journal.conversation.id); });
+    this.heldChainMessages = [];
+    this.mutation = this.mutation.then(async () => { if (held.length > 0) await cancelHeldChainInputs(this.journal.harness, this.journal.conversation.id, context, held); for (const item of queued) if (item.mode !== "write") await this.journal.harness.abortSubmission(item.id, context, this.journal.conversation.id); });
     return result;
   }
   getSteeringMessages(): readonly string[] { return this.queueText("steer"); }
   getFollowUpMessages(): readonly string[] { return this.queueText("followUp"); }
   private queueText(mode: "steer" | "followUp"): string[] {
-    return this.queued.flatMap((item) => item.mode !== mode || !("content" in item) ? [] : typeof item.content === "string" ? [item.content] : [item.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")]);
+    return [...this.queued.flatMap((item) => item.mode !== mode || !("content" in item) ? [] : typeof item.content === "string" ? [item.content] : [item.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n")]), ...this.heldChainMessages.filter(item => item.kind === mode).map(item => item.text)];
   }
 
   async setModel(model: NonNullable<PiAgentSession["model"]>): Promise<void> {
@@ -954,6 +959,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     }, context);
     this.modelChain = undefined;
     this.chainWait = undefined;
+    this.recoveringChain = false;
     this.model = model;
     this.sessionManager.appendModelChange(model.provider, model.id);
     this.setThinkingLevel(clampThinkingLevel(model, this.thinkingLevel));
@@ -962,7 +968,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
   }
   async setModelChain(reference: string): Promise<void> {
     const entries = resolveModelChain(reference, this.options.modelChains?.() ?? {}, this.thinkingLevel);
-    const selected = selectChainModel(entries, await this.options.modelCooldowns?.snapshot() ?? {}, this.options.now?.() ?? Date.now());
+    const selected = selectAvailableChainEntry(entries, await this.options.modelCooldowns?.snapshot() ?? {}, this.options.now?.() ?? Date.now(), this.modelRuntime);
     const choice = parseModelChoice(selected.model);
     if (choice === null) throw new Error("Invalid chain model");
     const model = this.modelRuntime.getModel(choice.model.provider, choice.model.modelId);
@@ -974,6 +980,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     }, context);
     this.modelChain = reference;
     this.chainWait = undefined;
+    this.recoveringChain = false;
     this.model = model;
     this.sessionManager.appendModelChange(choice.model.provider, choice.model.modelId);
     await this.restoreAgentSelection();
@@ -1268,7 +1275,12 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     const agent = await this.journal.conversation.agent(context);
     const chain = await this.journal.harness.snapshot(SessionModelChain, this.journal.conversation.id, context);
     this.modelChain = chain?.reference;
-    this.chainWait = (await this.journal.harness.snapshot(SessionChainTurns, this.journal.conversation.id, context))?.wait;
+    const turns = await this.journal.harness.snapshot(SessionChainTurns, this.journal.conversation.id, context);
+    const wait = turns?.wait;
+    if (wait !== undefined) await this.journal.project();
+    this.recoveringChain = turns?.recovery !== undefined;
+    this.chainWait = wait === undefined ? undefined : { from: wait.from, error: wait.error, until: wait.until, ...(wait.to === undefined ? {} : { to: wait.to }) };
+    this.heldChainMessages = Object.keys(turns?.pending ?? {}).length === 0 ? [] : await this.journal.conversation.commit(tx => heldChainInputs(tx, this.journal.conversation.id), context);
     this.model = agent.model === undefined ? undefined : this.modelRuntime.getModel(agent.model.provider, agent.model.modelId);
     this.thinkingLevel = agent.thinkingLevel;
     const saved = this.sessionManager.buildSessionContext();

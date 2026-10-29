@@ -1,4 +1,4 @@
-import { SessionChainTurns, SessionModelChain } from "./durableModelChains.js";
+import { SessionChainTurns, SessionModelChain, heldChainInputs } from "./durableModelChains.js";
 import { decisionAnnotations, withRiskAnnotations, withToolInvocationIds } from "../decisions/optionalDecisionAnnotations.js";
 import { z } from "zod";
 import type { StackLatencyContext } from "../../shared/stackLatency.js";
@@ -190,12 +190,14 @@ export class DurableParentReadModel {
           const partial = live.generation?.message === undefined ? undefined : copyJson(live.generation.message);
           const tools = (live.tools ?? []).filter(slot => projectBrowserSessionEvent({ type: "tool.start", toolName: slot.name, toolCallId: slot.callId, summary: "" }).type === "tool.start")
             .map(slot => ({ toolCallId: slot.callId, toolName: slot.name, status: slot.status, output: slot.output ?? "" }));
+          const held = turns === undefined ? [] : (await heldChainInputs(tx, id)).map(({ kind, text }) => ({ kind, text }));
+          // Capture host state after the last native read; an await here would pair a new host cut with stale dialogs.
           const host = hostStatus();
           const queuedMessages = [...inbox.items.flatMap(item => item.mode === "write" ? [] : [{ kind: item.mode,
-            text: typeof item.content === "string" ? item.content : item.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") }]), ...(host.compaction?.queuedMessages ?? [])];
+            text: typeof item.content === "string" ? item.content : item.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") }]), ...held, ...(host.compaction?.queuedMessages ?? [])];
           hub.savedHostOutput(handle.address.sessionId, messages);
           const status: SessionStatus = { ...host.status, sessionId: handle.address.sessionId, persisted: true,
-            isStreaming: live.run !== undefined || turns?.wait !== undefined,
+            isStreaming: live.run !== undefined || turns?.wait !== undefined || turns?.recovery !== undefined,
             ...(chain?.reference === undefined ? {} : { modelChain: chain.reference }),
             ...(turns?.wait === undefined ? {} : { chainWait: { from: turns.wait.from, error: turns.wait.error, until: turns.wait.until, ...(turns.wait.to === undefined ? {} : { to: turns.wait.to }) } }), isCompacting: host.compaction?.isRunning === true || (live.compactions?.length ?? 0) > 0,
             isBashRunning: hub.transientEvents(handle.address.sessionId).reverse().find(event => event.type === "shell.start" || event.type === "shell.end")?.type === "shell.start",

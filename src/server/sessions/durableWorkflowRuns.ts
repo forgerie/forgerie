@@ -53,7 +53,7 @@ const Proposals = defineDoc<{ records: Record<string, WorkflowProposal> }>({
 
 // A launch record and its delivery task commit together. Delivery retries use one Durable submission receipt.
 // A stop decision reuses it with its own request ID, so each decision reaches the agent once.
-const Launch = defineTask<{ runId: string; prompt: string; requestId?: string }, { phase: "deliver" }, null>({
+export const WorkflowLaunch = defineTask<{ runId: string; prompt: string; requestId?: string }, { phase: "deliver" }, null>({
   name: "forgerie.workflow-launch", version: 1, initial: () => ({ phase: "deliver" }),
   phases: { deliver: async (task, runtime, context) => {
     const parent = await runtime.conversation(runtime.conversationId, context);
@@ -148,7 +148,7 @@ const StallWatch = defineTask<StallInput, StallState, null>({
           return end();
         }
         run.stall = { state: "woken", child, error, at: Date.now() };
-        await tx.createTask(Launch, { runId: run.id, prompt: stallPrompt(run.definition.name, child, error), requestId: `workflow-stall:${run.id}:${String(task.id)}` },
+        await tx.createTask(WorkflowLaunch, { runId: run.id, prompt: stallPrompt(run.definition.name, child, error), requestId: `workflow-stall:${run.id}:${String(task.id)}` },
           { ownership: { kind: "conversation" }, background: true });
         return { ...later, checkpoint: { ...later.checkpoint, woken: true } };
       }, context);
@@ -261,7 +261,7 @@ export interface WorkflowStopAutonomy {
 export function workflowExtension(options: { library?: WorkflowLibrary; cwd?: string; autonomy?: WorkflowStopAutonomy } = {}) {
   const inventory = async (): Promise<WorkflowInventory> => options.library === undefined || options.cwd === undefined
     ? { workflows: [], diagnostics: [] } : options.library.list(options.cwd);
-  return defineExtension({ name: "forgerie.workflows", tasks: [Launch, Cancel, StallWatch], tools: [defineTool({
+  return defineExtension({ name: "forgerie.workflows", tasks: [WorkflowLaunch, Cancel, StallWatch], tools: [defineTool({
     name: "saved_workflows",
     description: "List the user's saved workflows with their descriptions and routes, or read one in full by name. Call it before propose_workflow.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "A saved workflow to read in full." })) }, { additionalProperties: false }),
@@ -466,7 +466,7 @@ export async function decideWorkflowStop(harness: Harness, parent: Conversation,
       await logDecision(tx, parent.id, { id: `stop:${runId}:${stageId}:${String(round)}`, kind: "auto-stop", by: "forgerie", question: `${stage.name} (${record.definition.name})`,
         choice: decision === "land" ? `landed ${landed.length === 0 ? "nothing" : landed.join(", ")}` : "approved", reason: "Settings > Plugins > Workflow autonomy passes this kind of stop", flagged: false });
     }
-    await tx.createTask(Launch, { runId, prompt, requestId: `workflow-stop:${runId}:${stageId}:${String(round)}` }, { ownership: { kind: "conversation" }, background: true });
+    await tx.createTask(WorkflowLaunch, { runId, prompt, requestId: `workflow-stop:${runId}:${stageId}:${String(round)}` }, { ownership: { kind: "conversation" }, background: true });
     // Doc drafts are transaction overlays; materialize the record before the commit settles.
     return { record: publicRun(record) };
   }, context);
@@ -486,7 +486,7 @@ export async function notifyAutoStopFailed(tx: Tx, parent: ConversationId, runId
   record.stops = { ...record.stops, [stageId]: { ...current, autoFailures: failures } };
   const prompt = `[workflow ${record.definition.name}] Forgerie could not pass "${stage.name}" itself: ${reason}\n${autoStopFailureAdvice(stage, failures)}`;
   // The first failure keeps its original receipt, so a notice saved before repairs existed replays once.
-  await tx.createTask(Launch, { runId, prompt, requestId: `workflow-stop-auto:${runId}:${stageId}:${String(round)}${failures === 1 ? "" : `:${String(failures)}`}` }, { ownership: { kind: "conversation" }, background: true });
+  await tx.createTask(WorkflowLaunch, { runId, prompt, requestId: `workflow-stop-auto:${runId}:${stageId}:${String(round)}${failures === 1 ? "" : `:${String(failures)}`}` }, { ownership: { kind: "conversation" }, background: true });
 }
 
 /**
@@ -542,7 +542,7 @@ export async function decideWorkflowProposal(harness: Harness, parent: Conversat
     record.state = decision === "changes" ? { kind: "changes", note: trimmed, decidedAt } : { kind: "dismissed", decidedAt };
     if (decision === "changes") {
       const prompt = `[workflow ${record.name}] The user asked for changes to the proposal: ${trimmed}\nRevise it, then call propose_workflow again.`;
-      await tx.createTask(Launch, { runId: id, prompt, requestId: `workflow-proposal:${id}:changes` }, { ownership: { kind: "conversation" }, background: true });
+      await tx.createTask(WorkflowLaunch, { runId: id, prompt, requestId: `workflow-proposal:${id}:changes` }, { ownership: { kind: "conversation" }, background: true });
     }
     return publicProposal(record);
   }, context);
@@ -575,7 +575,7 @@ export async function doWorkflowProposalHere(harness: Harness, parent: Conversat
     const workflow = parseWorkflow(record.name, `proposal:${id}`, record.text);
     const inputs = workflowInputs(workflow.definition, supplied);
     record.state = { kind: "here", decidedAt: Date.now() };
-    await tx.createTask(Launch, { runId: id, prompt: hereWorkflowPrompt(record, workflow, inputs), requestId: `workflow-proposal:${id}:here` },
+    await tx.createTask(WorkflowLaunch, { runId: id, prompt: hereWorkflowPrompt(record, workflow, inputs), requestId: `workflow-proposal:${id}:here` },
       { ownership: { kind: "conversation" }, background: true });
     return publicProposal(record);
   }, context);
@@ -662,7 +662,7 @@ async function launchResolvedWorkflow(harness: Harness, parent: Conversation, de
     doc.active = id;
     if (proposal !== undefined) proposal.state = { kind: "started", runId: id, decidedAt: run.startedAt };
     const prompt = workflowPrompt(id, { ...definition, definition: { ...definition.definition, ...(stages === undefined ? {} : { stages }) } }, inputs);
-    await tx.createTask(Launch, { runId: id, prompt: reviewRounds === undefined ? prompt : `${prompt}\n\n${reviewRoundRule(reviewRounds)}` }, { ownership: { kind: "conversation" }, background: true });
+    await tx.createTask(WorkflowLaunch, { runId: id, prompt: reviewRounds === undefined ? prompt : `${prompt}\n\n${reviewRoundRule(reviewRounds)}` }, { ownership: { kind: "conversation" }, background: true });
     return run;
   }, context);
   harness.resume();
