@@ -1139,10 +1139,10 @@ it("writes a recap on the title chain's first available entry instead of the ses
 
 it("writes a recap through the real HTTP service, charges usage, and never inserts it into the model conversation", async () => {
   const { session, provider, manager, services, directory } = await fixture();
-  let autoRecap = false;
+  let autoRecap = false, clock = Date.parse("2026-01-01T00:00:00.000Z");
   const hub = new SessionEventHub();
   const service = new PiSessionService(hub, { agentDir: join(directory, "agent"), modelRuntime: services.modelRuntime,
-    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(), autoRecap: () => autoRecap,
+    sessionManager: { ...sessionGateway([]), create: () => manager }, archiveStore: emptyArchiveStore(), autoRecap: () => autoRecap, now: () => new Date(clock),
     createAgentRuntime: () => Promise.resolve({ session, cwd: directory, setRebindSession: () => { /* This fixture keeps its facade. */ }, fork: () => Promise.reject(new Error("Not exercised")), dispose: () => Promise.resolve() }), heartbeatIntervalMs: 60_000 });
   const app = Fastify(); await app.register(websocket); registerSessionRoutes(app, service, hub);
   try {
@@ -1167,15 +1167,31 @@ it("writes a recap through the real HTTP service, charges usage, and never inser
     expect(history.messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { ...recap, trigger: "manual", model: "faux/faux-1", messageCount: 2 } });
     expect(session.journal.usage.models["faux/faux-1"]?.totalTokens).toBeGreaterThan(tokensBefore);
     autoRecap = true;
+    // An open request without an arrival token never writes.
     expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
+    // The reader watches two turns live. Their browser has no history ids for live replies.
     for (const text of ["Validate it", "Check deployment"]) {
       provider.setResponses([fauxAssistantMessage("Tested, not deployed")]);
       await session.prompt(text); await session.journal.conversation.waitForIdle(context);
+      await service.seen(ref, { cwd: directory });
     }
-    await vi.waitFor(async () => { expect((await service.unreadCatalog()).sessions).toHaveLength(1); });
-    provider.setResponses([fauxAssistantMessage(JSON.stringify({ summary: "Fixing the browser path. Implemented and tested, not deployed." }))]);
-    expect(await service.recap(ref, "open")).toEqual({ kind: "written" });
-    expect((await service.messages(ref)).messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { trigger: "open", summary: "Fixing the browser path. Implemented and tested, not deployed." } });
-    expect(await service.recap(ref, "open")).toEqual({ kind: "skipped" });
+    await vi.waitFor(async () => { expect((await service.status(ref)).isStreaming).toBe(false); });
+    clock += 31 * 60_000;
+    const watched = await service.seen(ref, { cwd: directory, arrival: true, active: false });
+    expect(await service.recap(ref, "open", watched.arrivalId)).toEqual({ kind: "skipped" });
+    // Two turns land while the reader is away.
+    for (const text of ["Deploy it", "Verify the deploy"]) {
+      provider.setResponses([fauxAssistantMessage("Deployed and verified")]);
+      await session.prompt(text); await session.journal.conversation.waitForIdle(context);
+    }
+    await vi.waitFor(async () => { expect((await service.status(ref)).isStreaming).toBe(false); });
+    clock += 31 * 60_000;
+    provider.setResponses([fauxAssistantMessage(JSON.stringify({ summary: "Fixing the browser path. Deployed and verified." }))]);
+    const away = await service.seen(ref, { cwd: directory, arrival: true, active: true });
+    expect(await service.recap(ref, "open", away.arrivalId)).toEqual({ kind: "written" });
+    expect((await service.messages(ref)).messages.at(-1)).toMatchObject({ role: "custom", customType: "forgerie.recap", details: { trigger: "open", summary: "Fixing the browser path. Deployed and verified." } });
+    // The arrival heartbeat marked the reader present: an immediate return is not an absence.
+    const back = await service.seen(ref, { cwd: directory, arrival: true, active: true });
+    expect(await service.recap(ref, "open", back.arrivalId)).toEqual({ kind: "skipped" });
   } finally { await app.close(); await service.dispose(); }
 });

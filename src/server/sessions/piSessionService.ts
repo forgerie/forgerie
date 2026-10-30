@@ -1452,7 +1452,11 @@ export class PiSessionService implements SessionRouteService {
       async () => { await session.journal.project(); return session.sessionManager.getBranch(); }, undefined,
       (entry, index) => session.journal.sdkEntryId(entry, index));
     if (this.activeForRef(identity)?.runtime.session !== session) return result;
-    this.unreadStore.observeSeen(identity.id, identity.cwd, request.seenThrough, history?.branchIds ?? [], observedAt);
+    // A present reader sees the live transcript, and live browser messages carry no history ids. The newest branch
+    // entry is the seen marker; the client's marker only helps when the daemon cannot read the branch.
+    const branchIds = history?.branchIds ?? [];
+    const newest = [...branchIds].reverse().find(entryId => entryId !== undefined);
+    this.unreadStore.observeSeen(identity.id, identity.cwd, newest ?? request.seenThrough, branchIds, observedAt);
     await this.unreadStore.flush();
     return result;
   }

@@ -106,8 +106,8 @@ There is no background recap timer. Unread badges do not control recaps.
 A visible, selected session counts as seen only while you have used a pointer,
 key, scroll, touch or wheel in the last two minutes. The browser reports this
 at once, every 30 seconds, and when you leave. Any device counts, including
-while a run is active. The daemon saves the time and the latest visible history
-marker. Sessions never seen since this feature was added count as away. An
+while a run is active. The daemon saves the time and marks everything in the
+session up to that moment as seen, including replies that streamed in live. Sessions never seen since this feature was added count as away. An
 unknown history marker falls back to the exchanges after the last recap.
 No arrival recap starts while the composer has focus with text.
 

@@ -120,8 +120,10 @@ Unread badges are separate. Manual `/recap` ignores absence and turn counts.
 
 A selected, visible session is seen while input was used in the last two
 minutes, even during a run. Browsers send a heartbeat at once, every 30 seconds,
-and on departure. Any device counts. The daemon keeps `lastSeenAt` and the
-latest stable browser history ID in version 2 of `session-unread.json`.
+and on departure. Any device counts. The daemon keeps `lastSeenAt` and `seenThrough` in version 2 of
+`session-unread.json`. `seenThrough` is the newest branch entry when the
+heartbeat lands, because live replies have no history ID in the browser. The
+browser marker is used only when the daemon cannot read the branch.
 This reuses the unread file's atomic writer, without changing badge state.
 Version 1 loads without seen state. Unknown IDs use history after the last recap.
 The store prevents older device markers or backward clocks from moving seen
