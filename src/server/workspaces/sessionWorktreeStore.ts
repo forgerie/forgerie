@@ -153,7 +153,11 @@ export class SessionWorktreeStore {
       const removed = record.transcripts.filter((item) => ids.has(item.id));
       if (removed.length === 0) continue;
       await this.update(record.id, { transcripts: record.transcripts.filter((item) => !ids.has(item.id)) });
-      for (const transcript of removed) await unlink(transcript.transcriptPath).catch((error: unknown) => { if (!isMissing(error)) throw error; });
+      for (const transcript of removed) {
+        // Ephemeral snapshots reference originals. Only session close may delete those files and journals.
+        if (resolve(transcript.transcriptPath) === resolve(transcript.session.path) || isEphemeralSessionPath(transcript.transcriptPath, this.ephemeralSessionsRoot)) continue;
+        await unlink(transcript.transcriptPath).catch((error: unknown) => { if (!isMissing(error)) throw error; });
+      }
     }
   }
 

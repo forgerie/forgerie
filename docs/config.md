@@ -333,7 +333,7 @@ tools, and child agents as other sessions. They survive browser disconnects and
 Forgerie restarts.
 
 **Delete permanently** replaces Archive for an ephemeral session. Confirm it a
-second time to close the chat. Closing, including through bulk archive, deletes
+second time to close the chat. Closing, including bulk archive and cleanup, deletes
 its transcript, durable journal, unread state, notifications, and worktree
 session associations. It creates no archive and has no Undo. Managed processes
 end. Git worktrees, branches, and workspace files stay in place.

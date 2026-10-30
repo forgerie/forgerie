@@ -34,7 +34,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
-async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: string) => string; beforeDelete?: () => Promise<void> } = {}) {
+async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: string) => string; beforeDelete?: () => Promise<void>; now?: () => Date } = {}) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-ephemeral-")); roots.push(root);
   const agentDir = join(root, "agent"), cwd = join(root, "project"), dataDir = join(root, "data");
   await Promise.all([agentDir, cwd, dataDir].map(path => mkdir(path, { recursive: true })));
@@ -55,7 +55,7 @@ async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: s
   const reload = () => {
     const events = new CapturingSessionEventHub();
     const gateway = createPiSessionManagerGateway({ agentDir, env: { PI_WEB_DATA_DIR: dataDir, ...(options.ordinarySessionDir === undefined ? {} : { PI_WEB_AGENT_SESSION_DIR: options.ordinarySessionDir(root, dataDir) }) }, sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"] });
-    const service = new PiSessionService(events, { agentDir, modelRuntime, sessionManager: gateway, archiveStore, beforeEphemeralDelete: async sessionId => { await options.beforeDelete?.(); await claims.releaseSessions([sessionId]); }, sessionWorktrees: worktrees, logger: { info: details => { logs.push(details); } },
+    const service = new PiSessionService(events, { agentDir, modelRuntime, ...(options.now === undefined ? {} : { now: options.now }), sessionManager: gateway, archiveStore, beforeEphemeralDelete: async sessionId => { await options.beforeDelete?.(); await claims.releaseSessions([sessionId]); }, sessionWorktrees: worktrees, logger: { info: details => { logs.push(details); } },
       managedProcesses: { stateDirectory: dataDir, prepareLauncher: () => Promise.resolve(processControl.launcher) }, heartbeatIntervalMs: 60_000 });
     services.push(service); hubs.set(service, events);
     return { service, events, gateway };
@@ -394,4 +394,196 @@ it("uses one alias inventory for a bulk permanent deletion", async () => {
   expect(result.archivedSessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
   expect(result.failures).toEqual([]);
   expect(inventory).toHaveBeenCalledTimes(1);
+});
+
+
+it("cleanup blocks snapshot and input admission through permanent storage removal", async () => {
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const f = await fixture({ now: () => new Date(Date.now() + 86_400_000), beforeDelete: async () => { entered(); await gate; } });
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session);
+  const closing = f.service.cleanup({ thresholds: { archiveIdleDays: 0 } });
+  void closing.catch(() => undefined);
+  try {
+    await paused;
+    expect(await readFile(session.path, "utf8")).toContain("private needle");
+    await expect(f.service.streamSnapshot(session)).rejects.toThrow(/closing|not found/iu);
+    await expect(f.service.prompt(session, "during cleanup")).rejects.toThrow(/closing|not found/iu);
+  } finally { release(); await closing; }
+  expect((await closing).archivedSessionIds).toEqual([session.id]);
+  expect(f.service.activeCount()).toBe(0);
+  await expect(f.service.streamSnapshot(session)).rejects.toThrow(/closing|not found/iu);
+  await expect(f.service.prompt(session, "after cleanup")).rejects.toThrow(/closing|not found/iu);
+  await expect(readFile(session.path)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(readdir(durableSessionPaths(session.path).directory)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("releases cleanup admission after a delete-hook failure and permits a retry", async () => {
+  let fail = true;
+  const f = await fixture({ now: () => new Date(Date.now() + 86_400_000), beforeDelete: () => {
+    if (fail) return Promise.reject(new Error("controlled cleanup failure"));
+    return Promise.resolve();
+  } });
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session);
+  await expect(f.service.cleanup({ thresholds: { archiveIdleDays: 0 } })).rejects.toThrow("controlled cleanup failure");
+  await f.service.streamSnapshot(session);
+  await f.prompt(f.service, session, "after failed cleanup");
+  expect(await readFile(session.path, "utf8")).toContain("after failed cleanup");
+  fail = false;
+  expect((await f.service.cleanup({ thresholds: { archiveIdleDays: 0 } })).archivedSessionIds).toEqual([session.id]);
+  expect(f.service.activeCount()).toBe(0);
+  await expect(readFile(session.path)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("cleanup keeps pinned sessions writable while it deletes only its selected sessions", async () => {
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const f = await fixture({ now: () => new Date(Date.now() + 86_400_000), beforeDelete: async () => { entered(); await gate; } });
+  const selected = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  const pinned = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.service.pin(pinned);
+  const closing = f.service.cleanup({ thresholds: { archiveIdleDays: 0 } });
+  void closing.catch(() => undefined);
+  try {
+    await paused;
+    await f.service.streamSnapshot(pinned);
+    await f.prompt(f.service, pinned, "pinned session remains writable");
+  } finally { release(); await closing; }
+  expect((await closing).archivedSessionIds).toEqual([selected.id]);
+  expect(await readFile(pinned.path, "utf8")).toContain("pinned session remains writable");
+  await expect(readFile(selected.path)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("a saved-transcript close acquires deletion admission without an outer archive scope", async () => {
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const f = await fixture({ beforeDelete: async () => { entered(); await gate; } });
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session); await f.service.dispose();
+  await f.worktreeStore.add({ id: "saved", repo: f.cwd, path: f.cwd, branch: "saved", defaultBranch: "main", renamed: true,
+    setup: { phase: "done", log: "" }, state: { kind: "discarded", at: session.created }, cleanup: { kind: "pending" },
+    transcripts: [{ id: session.id, cwd: session.cwd, transcriptPath: session.path, session }], createdAt: session.created, updatedAt: session.modified });
+  const next = f.reload();
+  // Discovery can miss a retained file; the worktree's saved reference remains authoritative for reading it.
+  vi.spyOn(next.gateway, "resolveSessionFile").mockResolvedValueOnce(undefined);
+  const closing = next.service.archive(session);
+  void closing.catch(() => undefined);
+  try {
+    await paused;
+    await expect(next.service.streamSnapshot(session)).rejects.toThrow(/closing|not found/iu);
+    await expect(next.service.prompt(session, "during saved close")).rejects.toThrow(/closing|not found/iu);
+  } finally { release(); await closing; }
+  expect(next.service.activeCount()).toBe(0);
+  await expect(next.service.streamSnapshot(session)).rejects.toThrow(/closing|not found/iu);
+  await expect(readFile(session.path)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("cleanup drains a new-session runtime still being constructed before deleting its storage", async () => {
+  const f = await fixture({ now: () => new Date(Date.now() + 86_400_000) });
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let admitted: DurableSessionRuntime | undefined;
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  vi.spyOn(DurableSessionRuntime, "open").mockImplementationOnce(async (...args) => {
+    admitted = await openRuntime(...args); entered(); await gate; return admitted;
+  });
+  const starting = f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  void starting.catch(() => undefined);
+  await paused;
+  if (admitted === undefined) throw new Error("Missing admitted runtime");
+  const ref = { id: admitted.session.sessionId, cwd: f.cwd };
+  const file = admitted.session.sessionFile;
+  if (file === undefined) throw new Error("Missing new-session transcript");
+  let finished = false, closingObserved = false;
+  const closing = f.service.cleanup({ thresholds: { archiveIdleDays: 0 } }).then(result => { finished = true; return result; });
+  void closing.catch(() => undefined);
+  const probes: Promise<unknown>[] = [];
+  try {
+    await vi.waitFor(() => {
+      probes.push(f.service.streamSnapshot(ref).catch((error: unknown) => {
+        closingObserved ||= error instanceof Error && /closing|not found/iu.test(error.message);
+      }));
+      expect(closingObserved).toBe(true);
+    });
+    expect(finished).toBe(false);
+    expect(await readFile(file, "utf8")).toContain(ref.id);
+  } finally { release(); await Promise.allSettled([starting, closing, ...probes]); }
+  await expect(starting).rejects.toThrow(/closing|not found/iu);
+  expect((await closing).archivedSessionIds).toEqual([ref.id]);
+  expect(admitted.session.isClosed).toBe(true);
+  expect(f.service.activeCount()).toBe(0);
+  await expect(readFile(file)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("cleanup cannot delete a fork source while its retired runtime is still closing", async () => {
+  const f = await fixture({ now: () => new Date(Date.now() + 86_400_000) });
+  let initial: DurableSessionRuntime | undefined;
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  vi.spyOn(DurableSessionRuntime, "open").mockImplementationOnce(async (...args) => {
+    initial = await openRuntime(...args); return initial;
+  });
+  const source = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, source);
+  if (initial === undefined) throw new Error("Missing source runtime");
+  const retired = initial.session;
+  const close = retired.close.bind(retired);
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(retired, "close").mockImplementationOnce(async () => { entered(); await gate; await close(); });
+  const forking = f.service.runCommand(source, "/clone");
+  void forking.catch(() => undefined);
+  await paused;
+  try {
+    await expect(f.service.cleanup({ thresholds: { archiveIdleDays: 0 } })).rejects.toThrow(/activity|busy/iu);
+    expect(await readFile(source.path, "utf8")).toContain("private needle");
+  } finally { release(); await Promise.allSettled([forking]); }
+  expect((await forking).type).toBe("done");
+}, 20_000);
+
+it("snapshots join a new-session constructor instead of admitting a second runtime", async () => {
+  const f = await fixture();
+  let entered!: () => void, release!: () => void, lookupAdmitted!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const lookup = new Promise<void>(resolve => { lookupAdmitted = resolve; });
+  const opened: DurableSessionRuntime[] = [];
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  const factory = vi.spyOn(DurableSessionRuntime, "open").mockImplementation(async (...args) => {
+    const runtime = await openRuntime(...args); opened.push(runtime);
+    if (opened.length === 1) { entered(); await gate; }
+    return runtime;
+  });
+  const starting = f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  void starting.catch(() => undefined);
+  await paused;
+  const runtime = opened[0];
+  if (runtime === undefined) throw new Error("Missing starting runtime");
+  const ref = { id: runtime.session.sessionId, cwd: f.cwd };
+  const resolveFile = f.gateway.resolveSessionFile.bind(f.gateway);
+  vi.spyOn(f.gateway, "resolveSessionFile").mockImplementationOnce((...args) => {
+    const result = resolveFile(...args);
+    // Observe after the awaiting admission continuation has run, not before its lookup returns.
+    void result.then(() => { queueMicrotask(lookupAdmitted); });
+    return result;
+  });
+  const reopenManager = vi.spyOn(f.gateway, "open");
+  const snapshot = f.service.streamSnapshot(ref);
+  void snapshot.catch(() => undefined);
+  try {
+    await lookup;
+    expect(reopenManager).not.toHaveBeenCalled();
+  } finally {
+    release(); await Promise.allSettled([starting, snapshot]);
+    await f.service.dispose();
+    await Promise.all(opened.map(item => item.dispose()));
+  }
+  await starting; await snapshot;
+  expect(factory).toHaveBeenCalledTimes(1);
 });

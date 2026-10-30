@@ -83,3 +83,23 @@ describe("worktree ownership after restart", () => {
     expect((await (await f.reload()).require(f.record.id)).setup.phase).toBe("failed");
   });
 });
+
+
+it("forgets a reference to an original transcript without deleting the session's file", async () => {
+  const f = await fixture();
+  await f.store.update(f.record.id, { transcripts: [{ id: f.session.id, cwd: f.session.cwd, transcriptPath: f.session.path, session: { ...f.session, ephemeral: true } }] });
+  await f.store.forgetTranscripts([f.session.id]);
+  expect((await f.store.require(f.record.id)).transcripts).toEqual([]);
+  expect(await readFile(f.session.path, "utf8")).toContain("Fix the bug");
+});
+
+it("still removes an owned snapshot copy without deleting the original transcript", async () => {
+  const f = await fixture();
+  await f.store.saveTranscripts(f.record.id, [f.session]);
+  const saved = (await f.store.require(f.record.id)).transcripts[0];
+  if (saved === undefined) throw new Error("Missing saved snapshot");
+  expect(saved.transcriptPath).not.toBe(f.session.path);
+  await f.store.forgetTranscripts([f.session.id]);
+  await expect(readFile(saved.transcriptPath)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(f.session.path, "utf8")).toContain("Fix the bug");
+});

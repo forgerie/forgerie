@@ -408,6 +408,34 @@ describe("PiSessionService lifecycle, listing, and reload", () => {
     expect(fake.calls.dispose).toBe(1);
   });
 
+  it("finishes an admitted open during disposal without parking a late startup dialog", async () => {
+    const sessionId = "dispose-late-startup-dialog";
+    const createStarted = deferred();
+    const runtimeResult = deferred<PiSessionRuntime>();
+    const fake = fakeRuntime(sessionId);
+    let confirmed: boolean | undefined;
+    const bind = fake.session.bindExtensions.bind(fake.session);
+    fake.session.bindExtensions = async bindings => {
+      await bind(bindings);
+      confirmed = await bindings.uiContext?.confirm("Late startup", "Must cancel during disposal");
+    };
+    const service = new PiSessionService(new CapturingSessionEventHub(), {
+      agentDir: TEST_AGENT_DIR, modelRuntime: testModelRuntime, archiveStore: emptyArchiveStore(),
+      createAgentRuntime: () => { createStarted.resolve(); return runtimeResult.promise; },
+      sessionManager: sessionGateway([sessionRecord(sessionId)]), heartbeatIntervalMs: 60_000,
+    });
+    const opening = service.status(sessionRef(sessionId));
+    await createStarted.promise;
+    const disposing = service.dispose();
+    runtimeResult.resolve(fake.runtime);
+    await expect(opening).resolves.toMatchObject({ sessionId });
+    await disposing;
+    expect(confirmed).toBe(false);
+    expect(service.activeCount()).toBe(0);
+    expect(fake.calls.abort).toBe(0);
+    expect(fake.calls.dispose).toBe(1);
+  });
+
   it("rebinds extensions and title coordination when the SDK runtime replaces the active session", async () => {
     const hub = new CapturingSessionEventHub();
     const model = testModel();
