@@ -113,7 +113,8 @@ import { writeClipboardText } from "./clipboard";
 import { heldProposals, proposalNoun, type HeldProposal } from "./session/proposalLedge";
 import { ProposalLedge } from "./session/ProposalLedge";
 import { MarkdownFragment } from "./ui/MarkdownFragment";
-import { launchModel, modelWords } from "./backlog/suggestions/suggestionsModel";
+import { hereMessage, launchModel, modelWords } from "./backlog/suggestions/suggestionsModel";
+import type { Suggestion } from "./backlog/suggestions/suggestionsApi";
 
 /** How this chat's backlog suggestions reach the rest of the app. Only an explicit Open or Show moves the reader. */
 export interface SuggestionLinks {
@@ -618,6 +619,21 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
     const composer = runtimeRef.current?.thread.composer;
     if (composer) composer.setText([composer.getState().text, text].filter(Boolean).join("\n\n"));
   };
+  /**
+   * File and act here, once the items are filed: asks this chat's agent to work on them, as a follow-up while it runs.
+   * A message Pi refused waits in the message box instead, so one press sends it.
+   */
+  const deliverHere = async (records: readonly Suggestion[]) => {
+    const text = hereMessage(records);
+    if (text === undefined) return;
+    setSendError(undefined);
+    try { await send(text); }
+    catch (error) {
+      if (!(error instanceof NotSentError)) return;
+      appendToDraft(text);
+      setSendError(`Filed, but the message to work on ${records.length === 1 ? "it" : "them"} did not send: ${error.message} It is in the message box.`);
+    }
+  };
   const ask: AskBinding | undefined = state.ask.type === "open" ? {
     ask: state.ask.ask, phase: state.ask.phase, offline: state.connection.type !== "ready",
     onSubmit: (answers) => void store.submitAsk(answers), onDismiss: () => void store.dismissAsk(),
@@ -667,13 +683,15 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
             onDismiss: (suggestionId) => { void suggestions.dismiss(suggestionId); }, onShow: showProposal,
             onReview: (proposalEntry) => setWorkflowSheet({ type: "proposal", entry: proposalEntry }),
             onDismissProposal: (proposalId) => { void workflows.dismissProposal(proposalId); },
-          }} otherModel={connected ? { listModels: store.listModels,
+            onFileAll: (ids) => { void suggestions.fileAll(ids); }, onFileAndActAll: (ids) => { void suggestions.fileAndActAll(ids); },
+            onFileAndActHere: connected ? (ids) => { void suggestions.fileHere(ids, deliverHere); } : undefined,
+          }} here={state.transcript.isRunning ? "after-run" : "now"} otherModel={connected ? { listModels: store.listModels,
             launch: (suggestionId) => {
               const record = suggestionList?.find((candidate) => candidate.id === suggestionId);
               const launch = record ? launchModel(record, suggestionsView.models[suggestionId], { model: chatModel, thinkingLevel: chatThinking }, suggestionModels) : undefined;
               return { model: launch?.model, thinkingLevel: launch?.thinkingLevel, words: modelWords(launch?.model) ?? "this chat's model" };
             },
-            onPick: (suggestionId, model) => { suggestions.setModel(suggestionId, model); void suggestions.fileAndAct(suggestionId); },
+            onPick: (ids, model) => { void suggestions.fileAndActAll(ids, model); },
           } : undefined} /> }}
         beforeComposer={<>
           {found && matchBar && <MatchBar view={matchBar} onClose={found.onClose} onRetry={retryFound ?? (() => undefined)}

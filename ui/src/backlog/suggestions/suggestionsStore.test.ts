@@ -156,6 +156,53 @@ describe("the store", () => {
     expect(store.getSnapshot().suggestions?.[0]?.state.kind).toBe("filed");
   });
 
+  it("files several one at a time, in the order given, holding every one's buttons from the start", async () => {
+    const second = { ...OPEN, id: "sg-second" };
+    const server = memoryServer([OPEN, second, DUPLICATE]);
+    const store = createSuggestionsStore(server.api, () => ({ sessionId: "s-chat" }));
+    await store.refresh();
+    const pending: string[][] = [];
+    store.subscribe(() => pending.push(Object.keys(store.getSnapshot().pending)));
+    server.refuse(OPEN.id, { status: 502, message: "GitHub did not answer." });
+    const filed = await store.fileAll([second.id, OPEN.id, DUPLICATE.id]);
+    expect(server.presses.map((press) => press.id)).toEqual([second.id, OPEN.id, DUPLICATE.id]);
+    expect(pending[2]).toEqual([second.id, OPEN.id, DUPLICATE.id]);
+    // A refusal stops only its own record.
+    expect(filed.map((record) => record.id)).toEqual([second.id, DUPLICATE.id]);
+    expect(store.getSnapshot().problems).toEqual({ [OPEN.id]: "GitHub did not answer." });
+    expect(store.getSnapshot().pending).toEqual({});
+  });
+
+  it("files and acts on several with one model for all, and skips one already in flight", async () => {
+    const second = { ...OPEN, id: "sg-second" };
+    const server = memoryServer([OPEN, second]);
+    const store = createSuggestionsStore(server.api, () => ({ sessionId: "s-chat" }));
+    await store.refresh();
+    const busy = store.file(OPEN.id);
+    await store.fileAndActAll([OPEN.id, second.id], { modelSpec: "google/gemini-3-8-flash" });
+    await busy;
+    expect(server.presses).toEqual([
+      { id: OPEN.id, kind: "file", request: {} },
+      { id: second.id, kind: "file-and-act", request: { modelSpec: "google/gemini-3-8-flash" } },
+    ]);
+  });
+
+  it("files for this chat, then hands over only what it filed, in order", async () => {
+    const second = { ...OPEN, id: "sg-second", title: "Second" };
+    const server = memoryServer([OPEN, second]);
+    const store = createSuggestionsStore(server.api, () => ({ sessionId: "s-chat" }));
+    await store.refresh();
+    const deliver = vi.fn(async () => undefined);
+    server.refuse(OPEN.id, { status: 502, message: "Offline." });
+    await store.fileHere([second.id, OPEN.id], deliver);
+    expect(server.presses.map((press) => press.kind)).toEqual(["file", "file"]);
+    expect(deliver).toHaveBeenCalledWith([expect.objectContaining({ id: second.id, state: expect.objectContaining({ kind: "filed" }) })]);
+    // Nothing filed: nothing to hand over.
+    server.refuse(OPEN.id, { status: 502, message: "Offline." });
+    await store.fileHere([OPEN.id], deliver);
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
   it("asks once for a record a card names that the last read lacked", async () => {
     const server = memoryServer([OPEN]);
     const list = vi.fn(server.api.list);

@@ -38,6 +38,24 @@ export function filedWords(state: Extract<SuggestionState, { kind: "filed" | "st
 }
 
 /**
+ * The message File and act here sends this chat's agent: the items it just filed, in the order given, each by its
+ * issue number and link or its file. Undefined when none of them is filed.
+ */
+export function hereMessage(records: readonly Suggestion[]): string | undefined {
+  const lines = records.flatMap((record) => {
+    const state = record.state;
+    if (!isFiled(state)) return [];
+    const ref = state.number !== undefined ? `#${String(state.number)}${state.url !== undefined ? ` (${state.url})` : ""}`
+      : `\`${state.path ?? (record.destination.provider === "markdown" ? record.destination.path : record.destination.repo)}\``;
+    return [`${ref}: ${record.title.trim()}`];
+  });
+  if (lines.length === 0) return undefined;
+  if (lines.length === 1) return `Work on the backlog item I just filed: ${lines[0]!}`;
+  return [`Work on the ${String(lines.length)} backlog items I just filed, one at a time, in this order:`,
+    ...lines.map((line, index) => `${String(index + 1)}. ${line}`)].join("\n");
+}
+
+/**
  * The repo-relative file a filed Markdown item lives in: the path the server reports, else the one it was going to.
  * Undefined for an item with a web page or an issue number, which opens there instead.
  */

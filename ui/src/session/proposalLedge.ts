@@ -36,6 +36,36 @@ export type HeldSuggestion = Held & {
 export type HeldWorkflow = Held & { type: "workflow"; entry: ProposalEntry };
 export type HeldProposal = HeldSuggestion | HeldWorkflow;
 
+/**
+ * What the ledge's All menu acts on: the suggestions File and act would take now, newest first, and how many it leaves
+ * out and why. A close match waits for its card, a failure for its Retry, and work in flight for itself. Workflows are
+ * not suggestions, so they are neither in it nor left out of it.
+ */
+export interface ProposalBatch {
+  ids: string[];
+  leftOut: { review: number; failed: number; filing: number };
+}
+export function batchOf(proposals: readonly HeldProposal[]): ProposalBatch {
+  const suggestions = proposals.filter((proposal): proposal is HeldSuggestion => proposal.type === "suggestion");
+  const inFlight = (proposal: HeldSuggestion) => proposal.busy || proposal.status !== undefined;
+  return {
+    ids: suggestions.filter((proposal) => proposal.offer && proposal.retry === undefined && !proposal.duplicate && !inFlight(proposal)).map((proposal) => proposal.id),
+    leftOut: {
+      review: suggestions.filter((proposal) => proposal.duplicate && !inFlight(proposal)).length,
+      failed: suggestions.filter((proposal) => !proposal.duplicate && (proposal.retry !== undefined || !proposal.offer) && !inFlight(proposal)).length,
+      filing: suggestions.filter(inFlight).length,
+    },
+  };
+}
+/** What the All menu's heading says it leaves out, such as "Leaves out 3: 1 to review, 1 failed, 1 filing". Undefined: nothing. */
+export function leftOutWords({ leftOut }: ProposalBatch): string | undefined {
+  const parts = [[leftOut.review, "to review"], [leftOut.failed, "failed"], [leftOut.filing, "filing"]] as const;
+  const named = parts.filter(([count]) => count > 0);
+  if (named.length === 0) return undefined;
+  const total = named.reduce((sum, [count]) => sum + count, 0);
+  return `Leaves out ${String(total)}: ${named.map(([count, words]) => `${String(count)} ${words}`).join(", ")}`;
+}
+
 /** What the ledge's handle and stack call a count of proposals. */
 export const proposalNoun = (count: number) => count === 1 ? "proposal" : "proposals";
 

@@ -11,6 +11,7 @@ import { browserTransport } from "./sessionStore";
 import type { PiMessage, SessionStatus } from "./contracts";
 import type { Suggestion } from "./backlog/suggestions/suggestionsApi";
 import { answer } from "./backlog/suggestions/fixtures/serverLike";
+import { hereMessage } from "./backlog/suggestions/suggestionsModel";
 import { FAILED_ACT, FILING, OPEN, look } from "./backlog/suggestions/fixtures/suggestions";
 
 let root: Root;
@@ -63,6 +64,7 @@ async function chat({ cwd = "/work", projects = { "p-forgerie": "/work" }, recor
       return Response.json(next);
     }
     if (path.startsWith("/api/backlog/suggestions?")) return Response.json({ suggestions: state.records });
+    if (path.endsWith("/prompt")) return Response.json({ accepted: true });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.includes("/decisions?") || path.includes("/children?") || path.includes("/workflow-proposals?") || path.includes("/workflow-runs?")) return Response.json([]);
     if (path.includes("/messages?")) return Response.json({ messages, start: 0, total: messages.length });
@@ -110,7 +112,8 @@ describe("a backlog suggestion in the ledge at the input", () => {
     const scrolled = vi.fn();
     card.scrollIntoView = scrolled;
     await act(async () => button(`More for ${record.title}`)!.click());
-    expect([...document.querySelectorAll("[role='menuitem']")].map((item) => item.textContent)).toEqual(["File and act on another model…", "Show in chat", "Dismiss"]);
+    expect([...document.querySelectorAll("[role='menuitem']")].map((item) => item.getAttribute("aria-label") ?? item.textContent))
+      .toEqual(["File and act here, This chat works on it next", "File and act on another model…", "Show in chat", "Dismiss"]);
     await act(async () => menuItem("Show in chat")!.click());
     await until(() => scrolled.mock.calls.length === 1);
     // The title is the same press.
@@ -119,6 +122,34 @@ describe("a backlog suggestion in the ledge at the input", () => {
     await act(async () => button(`More for ${record.title}`)!.click());
     await act(async () => menuItem("Dismiss")!.click());
     expect(posts.map((post) => post.path)).toEqual([`/api/backlog/suggestions/${record.id}/dismiss`]);
+    await until(() => ledgeRow() === null);
+  });
+
+  it("File and act here files it, then asks this chat's agent to work on it", async () => {
+    const { posts, state } = await chat();
+    await act(async () => button(`More for ${record.title}`)!.click());
+    await act(async () => menuItem("File and act here")!.click());
+    await until(() => posts.length === 2);
+    expect(posts[0]).toEqual({ path: `/api/backlog/suggestions/${record.id}/file`, body: { requestId: expect.any(String) } });
+    expect(posts[1]?.path).toMatch(/\/prompt$/u);
+    expect(posts[1]?.body).toMatchObject({ text: hereMessage(state.records) });
+    await until(() => ledgeRow() === null);
+  });
+
+  it("the open list's All menu files and acts on every ready suggestion, newest first, one at a time", async () => {
+    const newer: Suggestion = { ...record, id: "sg-newer", title: "Show the thinking level in the session picker", createdAt: "2026-10-21T16:50:00Z" };
+    const { posts } = await chat({ records: [record, newer] });
+    await act(async () => button("Show all 2 proposals")!.click());
+    const all = button("Act on all 2 suggestions")!;
+    expect(all.querySelector(".menu-button-text-long")?.textContent).toBe("All 2 suggestions");
+    await act(async () => all.click());
+    expect([...document.querySelectorAll("[role='menuitem']")].map((item) => item.getAttribute("aria-label"))).toEqual([
+      "File all 2, Keep them in the backlog for later", "File and act on all 2, Starts 2 sessions on claude-haiku-4-5",
+      "File and act on all 2 here, This chat works through them, one at a time", "File and act on all 2 on another model…, One model for all 2 sessions"]);
+    // The first item that starts with these words, before the one that ends in "here".
+    await act(async () => menuItem("File and act on all 2")!.click());
+    await until(() => posts.length === 2);
+    expect(posts.map((post) => post.path)).toEqual([`/api/backlog/suggestions/${newer.id}/file-and-act`, `/api/backlog/suggestions/${record.id}/file-and-act`]);
     await until(() => ledgeRow() === null);
   });
 

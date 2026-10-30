@@ -21,3 +21,17 @@
 @media (prefers-reduced-motion: reduce) { .menu-button-menu { animation: none; } .menu-button-trigger { transition: none; } }
 /* At window level the menu is fixed in place; its host sets where, against the button. */
 .menu-button-menu[data-layer="window"] { position: fixed; z-index: 100; inset-block-start: auto; inset-inline-end: auto; }
+/* A trigger with words: a quiet outlined control, such as a list head's batch menu. */
+.menu-button-trigger[data-text] { display: inline-flex; gap: var(--space-1); inline-size: auto; block-size: 2rem; padding-inline: var(--space-3) var(--space-2);
+  border: var(--hairline) solid var(--line); border-radius: var(--radius-control); color: var(--foreground); font-size: var(--small-text); font-weight: 500; white-space: nowrap; }
+.menu-button-trigger[data-text]:hover, .menu-button-trigger[data-text][aria-expanded="true"] { border-color: var(--line-focus); }
+.menu-button-trigger[data-text] svg { color: var(--muted-foreground); }
+.menu-button-text-short { display: none; }
+@container (width < 24rem) { .menu-button-text-long { display: none; } .menu-button-text-short { display: inline; } }
+/* What the commands act on, above them. */
+.menu-button-heading { padding: var(--space-2) var(--space-2) var(--space-1); color: var(--muted-foreground); font-size: var(--label-text); }
+/* A command with a second line: the icon sits on the label's line. */
+.menu-button-item[data-detail] { align-items: start; padding-block: var(--space-2); }
+.menu-button-item[data-detail] svg { margin-block-start: 0.1875rem; }
+.menu-button-words { display: grid; gap: 0.125rem; min-inline-size: 0; }
+.menu-button-detail { color: var(--muted-foreground); font-size: var(--label-text); }

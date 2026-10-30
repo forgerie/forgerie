@@ -15,9 +15,19 @@ It stays after archive. It never expires.
 | --- | --- |
 | File | Files the item. The current chat continues. |
 | File and act | Files the item, then starts a new session in a fresh worktree. The server sends its initial prompt. The browser stays in the current chat. |
+| File and act here | In the ledge above the input, from a row's More. Files the item, then sends this chat's agent a message that names it by issue number and link, or by file. While the agent runs, the message waits as a follow-up. If the message cannot send, it goes into the message box. No background session starts, and no claim binds the item to this chat. |
 | Dismiss | Hides an unfiled suggestion without deleting it. Restore keeps its prior state, including unsafe failures. |
 | File anyway | Acknowledges displayed matches: `notDuplicateOf` issue numbers for GitHub, or `acknowledgedPaths` for Markdown. Any new unacknowledged match stops filing. It never overwrites or comments on a match. |
 | Start session after a launch error | Starts work from the existing filed receipt. It never files again. |
+
+When the ledge's list is open and two or more suggestions are ready, its head has
+an All menu: File all, File and act on all, File and act on all here, and File
+and act on all on another model. Ready means File and act would take it now:
+the menu leaves out close matches, failures, and work in flight, and its first
+line says how many it leaves out. The browser sends the requests one at a time,
+newest first, so filings and launches do not race in the repository. A refused
+request stops only its own item. File and act on all here sends one message that
+lists the filed items in that order.
 
 Title and body can be overridden when filing, not after filing. Each item includes
 `## Context` with Why, Files, and Decisions, then

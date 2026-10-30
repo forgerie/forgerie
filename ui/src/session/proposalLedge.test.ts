@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DUPLICATE, FAILED, FAILED_ACT, FAILED_FINAL, FILED, FILING, OPEN, OPEN_GITHUB, DISMISSED, suggestion } from "../backlog/suggestions/fixtures/suggestions";
 import { PROPOSAL, PROPOSAL_ENTRY, STARTED_PROPOSAL } from "../workflows/fixtures/proposals";
-import { gistOf, heldProposals, heldSuggestion, proposalNoun } from "./proposalLedge";
+import { batchOf, gistOf, heldProposals, heldSuggestion, leftOutWords, proposalNoun } from "./proposalLedge";
 
 const quiet = { pending: {}, problems: {}, last: {}, drafts: {} };
 
@@ -46,6 +46,23 @@ describe("what waits in the ledge", () => {
 
   it("uses the reader's draft for the title", () => {
     expect(heldSuggestion(OPEN, { ...quiet, drafts: { [OPEN.id]: { title: "Retry once", body: "" } } }).title).toBe("Retry once");
+  });
+});
+
+describe("what the All menu acts on", () => {
+  it("takes the ready suggestions, newest first, and counts what it leaves out and why", () => {
+    const newer = suggestion("sg-newer", { createdAt: "2026-10-28T10:00:00Z" });
+    const held = [...heldProposals({ suggestions: [OPEN, newer, DUPLICATE, FAILED, FAILED_FINAL], view: quiet,
+      messages: [{ workflowEntry: PROPOSAL_ENTRY }], proposals: [PROPOSAL] }), heldSuggestion(OPEN_GITHUB, { ...quiet, pending: { [OPEN_GITHUB.id]: "file" } }), heldSuggestion(FILING, quiet)];
+    const batch = batchOf(held);
+    expect(batch).toEqual({ ids: ["sg-newer", OPEN.id], leftOut: { review: 1, failed: 2, filing: 2 } });
+    expect(leftOutWords(batch)).toBe("Leaves out 5: 1 to review, 2 failed, 2 filing");
+  });
+
+  it("says nothing about a workflow, and nothing when it leaves nothing out", () => {
+    const batch = batchOf(heldProposals({ suggestions: [OPEN], view: quiet, messages: [{ workflowEntry: PROPOSAL_ENTRY }], proposals: [PROPOSAL] }));
+    expect(batch).toEqual({ ids: [OPEN.id], leftOut: { review: 0, failed: 0, filing: 0 } });
+    expect(leftOutWords(batch)).toBeUndefined();
   });
 });
 

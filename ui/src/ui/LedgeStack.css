@@ -19,6 +19,12 @@
 .ledge-stack-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-block-size: 2.25rem;
   padding-inline: var(--space-3) var(--space-1); border-block-end: var(--hairline) solid var(--line); color: var(--muted-foreground); font-size: var(--label-text); }
 .ledge-stack-head strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ledge-stack-head-count { white-space: nowrap; }
+/* The head's own control, such as a menu for every row, sits before Fold. */
+.ledge-stack-head-actions { display: flex; align-items: center; gap: var(--space-1); }
+.ledge-stack-head-actions > span { display: flex; }
+/* A narrow head spends Fold's padding before any words. */
+@container (width < 24rem) { .ledge-stack-head .ledge-stack-fold { padding-inline: var(--space-2); } }
 .ledge-stack-fold { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); block-size: 2rem; padding-inline: var(--space-3);
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--small-text); font-weight: 500; }
 .ledge-stack-fold:hover { background: var(--hover-surface); color: var(--foreground); }

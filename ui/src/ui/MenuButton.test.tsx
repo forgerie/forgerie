@@ -84,3 +84,19 @@ it("leaves focus where a press outside put it", async () => {
   expect(document.activeElement).toBe(outside);
   outside.remove();
 });
+
+it("shows words on the button, a heading over the commands, and a detail line read with its command", async () => {
+  const ran = vi.fn();
+  await act(async () => root.render(<MenuButton label="Act on all 3 suggestions" text="All 3 suggestions" shortText="All 3" heading="Leaves out 1: 1 failed"
+    commands={[{ label: "File all 3", detail: "Keep them in the backlog for later", onSelect: ran }, { label: "Show in chat", onSelect: () => undefined }]} />));
+  const trigger = host.querySelector<HTMLButtonElement>("button")!;
+  expect([trigger.querySelector(".menu-button-text-long")?.textContent, trigger.querySelector(".menu-button-text-short")?.textContent]).toEqual(["All 3 suggestions", "All 3"]);
+  expect(trigger.getAttribute("aria-label")).toBe("Act on all 3 suggestions");
+  await act(async () => trigger.click());
+  expect(host.querySelector(".menu-button-heading")?.textContent).toBe("Leaves out 1: 1 failed");
+  const items = [...host.querySelectorAll<HTMLButtonElement>("[role=\"menuitem\"]")];
+  expect(items.map((item) => item.getAttribute("aria-label") ?? item.textContent)).toEqual(["File all 3, Keep them in the backlog for later", "Show in chat"]);
+  expect(items[0]?.querySelector(".menu-button-detail")?.textContent).toBe("Keep them in the backlog for later");
+  await act(async () => items[0]!.click());
+  expect(ran).toHaveBeenCalledOnce();
+});

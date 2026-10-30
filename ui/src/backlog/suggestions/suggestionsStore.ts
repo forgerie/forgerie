@@ -2,7 +2,7 @@
 // truth: a card draws its state from here, never from the transcript, so a reload shows the last outcome. The
 // binding calls refresh() on `backlog.suggestions.changed`, on reconnect, and when a card names a record it lacks.
 import { SuggestionRefusal, type ActRequest, type Suggestion, type SuggestionModel, type SuggestionsApi } from "./suggestionsApi";
-import { canFile, edited, matchNumbers, matchPaths, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
+import { canFile, edited, isFiled, matchNumbers, matchPaths, type SuggestionAction, type SuggestionDraft } from "./suggestionsModel";
 
 export type SuggestionPress = SuggestionAction | "dismiss" | "restore";
 export interface SuggestionsView {
@@ -80,21 +80,43 @@ export function createSuggestionsStore(api: SuggestionsApi, query: () => { sessi
       return { ...current, suggestions: has ? list.map((suggestion) => suggestion.id === record.id && suggestion.revision <= record.revision ? record : suggestion) : [record, ...list] };
     });
   }
-  async function press(id: string, kind: SuggestionPress, send: () => Promise<Suggestion>, after?: (record: Suggestion) => void) {
-    if (view.pending[id] !== undefined) return;
+  /** Holds a record's buttons for a press. False when a press on it is already in flight. */
+  function mark(id: string, kind: SuggestionPress): boolean {
+    if (view.pending[id] !== undefined) return false;
     update((current) => ({ ...current, pending: { ...current.pending, [id]: kind }, problems: without(current.problems, id),
       ...(kind === "file" || kind === "file-and-act" ? { last: { ...current.last, [id]: kind } } : {}) }));
+    return true;
+  }
+  /** Sends a marked press. The record the server returned, or undefined when it refused. */
+  async function run(id: string, send: () => Promise<Suggestion>, after?: (record: Suggestion) => void): Promise<Suggestion | undefined> {
     try {
       const record = await send();
       accept(record);
       after?.(record);
+      return record;
     } catch (error) {
       update((current) => ({ ...current, problems: { ...current.problems, [id]: message(error) } }));
       // The record moved on elsewhere, such as in another window: read where it is now.
       if (error instanceof SuggestionRefusal && error.status === 409) void refresh();
+      return undefined;
     } finally {
       update((current) => ({ ...current, pending: without(current.pending, id) }));
     }
+  }
+  const press = (id: string, kind: SuggestionPress, send: () => Promise<Suggestion>, after?: (record: Suggestion) => void) =>
+    mark(id, kind) ? run(id, send, after) : Promise.resolve(undefined);
+  /**
+   * One press for several records. Every record's buttons wait at once; the requests go one at a time, in the order
+   * given, so filings and launches never race each other in the repository. A refusal stops only its own record.
+   */
+  async function pressAll(ids: readonly string[], kind: SuggestionPress, send: (id: string) => Promise<Suggestion>, after?: (record: Suggestion) => void) {
+    const marked = ids.filter((id) => mark(id, kind));
+    const records: Suggestion[] = [];
+    for (const id of marked) {
+      const record = await run(id, () => send(id), after);
+      if (record !== undefined) records.push(record);
+    }
+    return records;
   }
   const find = (id: string) => view.suggestions?.find((suggestion) => suggestion.id === id);
   /** The words and match numbers a file request carries for this record. */
@@ -111,6 +133,11 @@ export function createSuggestionsStore(api: SuggestionsApi, query: () => { sessi
    * A filed record no longer has words to edit or a model to pick. One whose launch failed keeps its model: the server
    * retries the launch with the choice it recorded, and a server older than that record takes this one again.
    */
+  const fileOne = (id: string) => api.file(id, request(id));
+  const actOne = (id: string) => {
+    const model = view.models[id];
+    return api.fileAndAct(id, { ...request(id), ...(model?.modelSpec ? { modelSpec: model.modelSpec } : {}), ...(model?.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}) });
+  };
   const settle = (record: Suggestion) => {
     if (canFile(record.state)) return;
     const launchFailed = record.state.kind === "filed" && record.state.launchError !== undefined;
@@ -127,12 +154,28 @@ export function createSuggestionsStore(api: SuggestionsApi, query: () => { sessi
       asked.add(id);
       void refresh();
     },
-    file: (id: string) => press(id, "file", () => api.file(id, request(id)), settle),
+    file: (id: string) => press(id, "file", () => fileOne(id), settle),
     /** Files and starts a background session; from a filed record, only starts it. Never moves the reader. */
-    fileAndAct: (id: string) => press(id, "file-and-act", () => {
-      const model = view.models[id];
-      return api.fileAndAct(id, { ...request(id), ...(model?.modelSpec ? { modelSpec: model.modelSpec } : {}), ...(model?.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}) });
-    }, settle),
+    fileAndAct: (id: string) => press(id, "file-and-act", () => actOne(id), settle),
+    /** Files each record, one at a time. Resolves with the records the server filed. */
+    fileAll: (ids: readonly string[]) => pressAll(ids, "file", fileOne, settle),
+    /**
+     * Files each record and starts a background session for it, one at a time. With `model`, every launch uses it,
+     * as a pick from the model panel would for one record.
+     */
+    fileAndActAll: (ids: readonly string[], model?: SuggestionModel) => {
+      if (model !== undefined) update((current) => ({ ...current, models: { ...current.models, ...Object.fromEntries(ids.map((id) => [id, model])) } }));
+      return pressAll(ids, "file-and-act", actOne, settle);
+    },
+    /**
+     * File and act here: files each record, then hands the filed ones, in the order given, to `deliver`, which asks this
+     * chat's agent to work on them. Nothing is delivered when none was filed.
+     */
+    fileHere: async (ids: readonly string[], deliver: (records: readonly Suggestion[]) => Promise<void>) => {
+      const filed = (await pressAll(ids, "file", fileOne, settle)).filter((record) => isFiled(record.state));
+      if (filed.length > 0) await deliver(filed);
+      return filed;
+    },
     dismiss: (id: string) => press(id, "dismiss", () => api.dismiss(id)),
     restore: (id: string) => press(id, "restore", () => api.restore(id)),
     setDraft: (id: string, draft: SuggestionDraft | undefined) => update((current) => ({ ...current,

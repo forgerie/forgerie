@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { LedgeRow } from "./LedgeRow";
 import "./LedgeStack.css";
@@ -11,10 +11,13 @@ export type LedgeStackRow = Omit<ComponentProps<typeof LedgeRow>, "lead" | "even
  * stack: the newest in front with its own actions, and the edges of the others behind it, never more than two (one in a
  * container under 30rem tall), so a stack of 3 and one of 30 have the same height. A count at the front row's start
  * opens the list: a head that counts, then every row, newest first, each with its own action and none louder than
- * another. The list scrolls inside a share of the container's height, with a fade at its cut edge.
+ * another. The list scrolls inside a share of the container's height, with a fade at its cut edge. The head may hold one
+ * control of its own before Fold, such as a menu that acts on every row at once.
  */
-export function LedgeStack({ rows, open, onToggle, labels }: {
+export function LedgeStack({ rows, open, onToggle, labels, headAction }: {
   rows: readonly LedgeStackRow[];
+  /** A control in the open list's head, before Fold, such as a menu that acts on every row at once. */
+  headAction?: ReactNode;
   /** The list is open. Only a stack of two or more opens. */
   open: boolean;
   onToggle: () => void;
@@ -76,10 +79,13 @@ export function LedgeStack({ rows, open, onToggle, labels }: {
   }
   return <div className="ledge-stack" data-ledge-band data-open>
     <div className="ledge-stack-head">
-      <span><strong>{rows.length}</strong> {labels.noun(rows.length)}</span>
-      <button ref={toggle} type="button" className="ledge-stack-fold" aria-expanded={true} onClick={press}>
-        {labels.fold}<ChevronDownIcon aria-hidden size={14} />
-      </button>
+      <span className="ledge-stack-head-count"><strong>{rows.length}</strong> {labels.noun(rows.length)}</span>
+      <span className="ledge-stack-head-actions">
+        {headAction}
+        <button ref={toggle} type="button" className="ledge-stack-fold" aria-expanded={true} onClick={press}>
+          {labels.fold}<ChevronDownIcon aria-hidden size={14} />
+        </button>
+      </span>
     </div>
     <ul ref={list} className="ledge-stack-rows" aria-label={named(rows.length)} data-cut={cut || undefined}>
       {rows.map(({ key, ...row }) => <LedgeRow key={key} {...row} gist={undefined} even />)}

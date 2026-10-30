@@ -819,7 +819,7 @@ function Preview() {
       <Thread ledge={proposalPreview ? (() => {
         const held = heldProposals({ suggestions: [], view: { pending: {}, problems: {}, last: {}, drafts: {} }, messages, proposals: flowProposals });
         return { count: held.length, noun: proposalNoun(held.length), keys: held.map((proposal) => proposal.key),
-          content: held.length === 0 ? null : <ProposalLedge proposals={held} actions={{ onFile: () => {}, onFileAndAct: () => {}, onDismiss: () => {}, onShow: () => {},
+          content: held.length === 0 ? null : <ProposalLedge proposals={held} actions={{ onFile: () => {}, onFileAndAct: () => {}, onDismiss: () => {}, onShow: () => {}, onFileAll: () => {}, onFileAndActAll: () => {},
             onReview: (entry) => setFlowSheet(entry.proposalId),
             onDismissProposal: (id) => decideProposal(id, { kind: "dismissed", decidedAt: PROPOSAL.createdAt }) }} /> };
       })() : undefined} beforeComposer={proposalPreview ? (flowRun && <WorkflowRunStrip run={flowRun} onOpen={() => {}} />) : pinnedPreview ? (() => {
