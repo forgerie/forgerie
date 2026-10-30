@@ -2706,7 +2706,7 @@ export class PiSessionService implements SessionRouteService {
     request: { kind: ExtensionDialogKind; title: string; message?: string | undefined; options?: string[] | undefined; placeholder?: string | undefined },
     opts: ExtensionUIDialogOptions | undefined,
   ): Promise<boolean | string | undefined> {
-    if (this.stopping || this.detachedHandoffStartupSessions.has(session)) return extensionDialogCancelValue(request.kind);
+    if (this.stopping || this.sessionCloseStates.get(session.sessionId)?.kind === "closing" || this.detachedHandoffStartupSessions.has(session)) return extensionDialogCancelValue(request.kind);
     this.assertHandoffDestinationAcceptsInput(session);
     const signal = opts?.signal;
     // A pre-aborted signal dismisses the dialog before it ever opens.
@@ -4564,6 +4564,7 @@ export class PiSessionService implements SessionRouteService {
         await this.sessionManager.forgetSessionFile?.(input.path);
         await this.beforeEphemeralDelete?.(input.sessionId);
         await deleteEphemeralSessionFiles(root, input.path, input.sessionId);
+        // Deleted IDs also block explicit reuse at another path until this service restarts.
         this.sessionCloseStates.set(input.sessionId, { kind: "deleted" });
       } catch (error) {
         this.logger.info({ err: error, sessionId: input.sessionId, path: input.path }, "ephemeral session deletion refused or failed");

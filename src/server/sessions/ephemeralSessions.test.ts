@@ -34,7 +34,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
-async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: string) => string; beforeDelete?: () => Promise<void>; now?: () => Date } = {}) {
+async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: string) => string; beforeDelete?: () => Promise<void>; now?: () => Date; extensionDialogsTimeoutMs?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-ephemeral-")); roots.push(root);
   const agentDir = join(root, "agent"), cwd = join(root, "project"), dataDir = join(root, "data");
   await Promise.all([agentDir, cwd, dataDir].map(path => mkdir(path, { recursive: true })));
@@ -55,7 +55,7 @@ async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: s
   const reload = () => {
     const events = new CapturingSessionEventHub();
     const gateway = createPiSessionManagerGateway({ agentDir, env: { PI_WEB_DATA_DIR: dataDir, ...(options.ordinarySessionDir === undefined ? {} : { PI_WEB_AGENT_SESSION_DIR: options.ordinarySessionDir(root, dataDir) }) }, sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"] });
-    const service = new PiSessionService(events, { agentDir, modelRuntime, ...(options.now === undefined ? {} : { now: options.now }), sessionManager: gateway, archiveStore, beforeEphemeralDelete: async sessionId => { await options.beforeDelete?.(); await claims.releaseSessions([sessionId]); }, sessionWorktrees: worktrees, logger: { info: details => { logs.push(details); } },
+    const service = new PiSessionService(events, { agentDir, modelRuntime, ...(options.extensionDialogsTimeoutMs === undefined ? {} : { extensionDialogsTimeoutMs: options.extensionDialogsTimeoutMs }), ...(options.now === undefined ? {} : { now: options.now }), sessionManager: gateway, archiveStore, beforeEphemeralDelete: async sessionId => { await options.beforeDelete?.(); await claims.releaseSessions([sessionId]); }, sessionWorktrees: worktrees, logger: { info: details => { logs.push(details); } },
       managedProcesses: { stateDirectory: dataDir, prepareLauncher: () => Promise.resolve(processControl.launcher) }, heartbeatIntervalMs: 60_000 });
     services.push(service); hubs.set(service, events);
     return { service, events, gateway };
@@ -587,3 +587,113 @@ it("snapshots join a new-session constructor instead of admitting a second runti
   await starting; await snapshot;
   expect(factory).toHaveBeenCalledTimes(1);
 });
+
+it.each(["confirm", "select", "input"] as const)("cleanup cancels successive startup dialogs with the %s cancel value", async kind => {
+  const f = await fixture({ extensionDialogsTimeoutMs: 0 });
+  let firstOpened!: () => void, lateRequested!: () => void;
+  const first = new Promise<void>(resolve => { firstOpened = resolve; });
+  const late = new Promise<void>(resolve => { lateRequested = resolve; });
+  const results: (boolean | string | undefined)[] = [];
+  let runtime: DurableSessionRuntime | undefined;
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  vi.spyOn(DurableSessionRuntime, "open").mockImplementationOnce(async (...args) => {
+    runtime = await openRuntime(...args);
+    const bind = runtime.session.bindExtensions.bind(runtime.session);
+    runtime.session.bindExtensions = async bindings => {
+      await bind(bindings);
+      const ui = bindings.uiContext;
+      if (ui === undefined) throw new Error("Missing startup UI context");
+      const pending = ui.confirm("First startup", "Cancel during cleanup");
+      firstOpened(); results.push(await pending);
+      const next = kind === "confirm" ? ui.confirm("Late startup", "Must cancel")
+        : kind === "select" ? ui.select("Late startup", ["one", "two"]) : ui.input("Late startup");
+      lateRequested(); results.push(await next);
+    };
+    return runtime;
+  });
+  const starting = f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  void starting.catch(() => undefined);
+  await first;
+  if (runtime === undefined) throw new Error("Missing constructing runtime");
+  const file = runtime.session.sessionFile;
+  const closing = f.service.cleanup({ thresholds: { archiveIdleDays: 0 } });
+  void closing.catch(() => undefined);
+  try {
+    await late;
+    expect(f.events.sessionEvents.some(({ event }) => event.type === "dialog.opened" && event.dialog.title === "Late startup")).toBe(false);
+    await closing;
+    await expect(starting).rejects.toThrow(/closing/iu);
+    expect(results).toEqual([false, kind === "confirm" ? false : undefined]);
+    expect(f.service.activeCount()).toBe(0);
+    if (file === undefined) throw new Error("Missing ephemeral transcript");
+    await expect(readFile(file)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally { await f.service.dispose(); await Promise.allSettled([starting, closing]); }
+}, 20_000);
+
+it("cleanup cancels a dialog opened after an asynchronous startup step", async () => {
+  const f = await fixture({ extensionDialogsTimeoutMs: 0 });
+  let entered!: () => void, release!: () => void, lateRequested!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const step = new Promise<void>(resolve => { release = resolve; });
+  const late = new Promise<void>(resolve => { lateRequested = resolve; });
+  let runtime: DurableSessionRuntime | undefined;
+  let result: string | undefined = "not cancelled";
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  vi.spyOn(DurableSessionRuntime, "open").mockImplementationOnce(async (...args) => {
+    runtime = await openRuntime(...args);
+    const bind = runtime.session.bindExtensions.bind(runtime.session);
+    runtime.session.bindExtensions = async bindings => {
+      await bind(bindings);
+      if (bindings.uiContext === undefined) throw new Error("Missing startup UI context");
+      entered(); await step;
+      const pending = bindings.uiContext.input("After async startup");
+      lateRequested(); result = await pending;
+    };
+    return runtime;
+  });
+  const starting = f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  void starting.catch(() => undefined);
+  await ready;
+  if (runtime === undefined) throw new Error("Missing constructing runtime");
+  const ref = { id: runtime.session.sessionId, cwd: f.cwd };
+  const file = runtime.session.sessionFile;
+  const closing = f.service.cleanup({ thresholds: { archiveIdleDays: 0 } });
+  void closing.catch(() => undefined);
+  try {
+    // A stale answer is non-mutating before closing; admission rejects it once cleanup owns the ID.
+    await vi.waitFor(async () => { await expect(f.service.answerDialog(ref, "absent-dialog", true)).rejects.toThrow(/closing/iu); });
+    release(); await late;
+    expect(f.events.sessionEvents.some(({ event }) => event.type === "dialog.opened" && event.dialog.title === "After async startup")).toBe(false);
+    await closing;
+    await expect(starting).rejects.toThrow(/closing/iu);
+    expect(result).toBeUndefined();
+    if (file === undefined) throw new Error("Missing ephemeral transcript");
+    await expect(readFile(file)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally { release(); await f.service.dispose(); await Promise.allSettled([starting, closing]); }
+}, 20_000);
+
+it("cleanup closing admission does not cancel another session's dialog", async () => {
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const f = await fixture({ extensionDialogsTimeoutMs: 0, beforeDelete: async () => { entered(); await gate; } });
+  let runtime: DurableSessionRuntime | undefined;
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  vi.spyOn(DurableSessionRuntime, "open").mockImplementationOnce(async (...args) => { runtime = await openRuntime(...args); return runtime; });
+  const other = await f.service.start(f.cwd, { initialModelSpec: "faux/faux-1" });
+  await f.service.pin(other);
+  const selected = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  const closing = f.service.cleanup({ thresholds: { archiveIdleDays: 0 } });
+  void closing.catch(() => undefined);
+  try {
+    await paused;
+    if (runtime === undefined) throw new Error("Missing other runtime");
+    const answer = runtime.session.extensionRunner.getUIContext().confirm("Other session", "Still answerable");
+    const opened = f.events.sessionEvents.find(({ sessionId, event }) => sessionId === other.id && event.type === "dialog.opened" && event.dialog.title === "Other session");
+    if (opened?.event.type !== "dialog.opened") throw new Error("Other session dialog was cancelled");
+    expect((await f.service.answerDialog(other, opened.event.dialog.dialogId, true)).result).toBe("closed");
+    await expect(answer).resolves.toBe(true);
+  } finally { release(); await closing; }
+  expect((await closing).archivedSessionIds).toEqual([selected.id]);
+  await expect(f.service.streamSnapshot(other)).resolves.toBeDefined();
+}, 20_000);
