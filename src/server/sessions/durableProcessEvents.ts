@@ -1,3 +1,5 @@
+import { automatedInputSubmission, isSharedAutomatedInput } from "./durableAutomatedInputState.js";
+import { mergeAutomatedContent } from "./durableInputContent.js";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc, defineExtension, defineTask, InboxDoc, type Conversation, type ConversationId, type Tx } from "@earendil-works/pi-durable";
 import { processSummarySchema, type ProcessEventSummary, type ProcessOverflow } from "../processes/processWatchState.js";
@@ -23,7 +25,9 @@ const Delivery = defineTask<{ id: string; text: string }, InputPlacementState, n
       requestId: deliveryRequestId(task.input.id), content: text, previousRecipient: runtime.conversationId,
       selectRecipient: () => Promise.resolve(runtime.conversationId),
       onPlaced: async (tx, entry) => {
-        (await tx.doc(Presentation, runtime.conversationId, String(entry), null)).envelope = { type: "custom", display: false };
+        if (!await isSharedAutomatedInput(tx, runtime.conversationId, placementRequestId(deliveryRequestId(task.input.id), task.state.checkpoint.attempt))) {
+          (await tx.doc(Presentation, runtime.conversationId, String(entry), null)).envelope = { type: "custom", display: false };
+        }
         await forgetText(tx, runtime.conversationId, task.input.id);
       },
     }, context);
@@ -40,7 +44,7 @@ async function forgetText(tx: Tx, conversationId: ConversationId, id: string): P
   receipts.texts = Object.fromEntries(Object.entries(receipts.texts).filter(([key]) => key !== id));
 }
 
-const liveDelivery = z.object({ input: z.object({ id: z.string() }), state: z.object({ checkpoint: z.object({ attempt: z.number().optional() }) }) });
+const liveDelivery = z.object({ input: z.object({ id: z.string(), text: z.string() }), state: z.object({ checkpoint: z.object({ attempt: z.number().optional() }) }) });
 
 /**
  * Find a process-event wake that still waits in the inbox. Each queued follow-up costs a model turn, so new events join
@@ -52,8 +56,8 @@ async function queuedDelivery(tx: Tx, conversationId: ConversationId) {
       const parsed = liveDelivery.safeParse(task);
       if (!parsed.success) continue;
       const { input, state } = parsed.data;
-      const submission = await tx.submissionByRequest(conversationId, placementRequestId(deliveryRequestId(input.id), state.checkpoint.attempt));
-      if (submission?.status === "queued") return { id: input.id, submission: submission.id };
+      const submission = await automatedInputSubmission(tx, conversationId, placementRequestId(deliveryRequestId(input.id), state.checkpoint.attempt));
+      if (submission?.status === "queued") return { id: input.id, text: input.text, submission: submission.id };
     }
   }
   return undefined;
@@ -122,14 +126,18 @@ export async function acceptProcessEvents(conversation: Conversation, summary: P
     if (!turn) return;
     const inbox = await tx.doc(InboxDoc, conversation.id);
     const item = queued === undefined ? undefined : inbox.items.find(candidate => candidate.id === queued.submission);
-    if (queued !== undefined && item?.mode === "followUp" && typeof item.content === "string") {
+    if (queued !== undefined && item?.mode === "followUp") {
       // The boundary reads this inbox in its own commit, so the merge lands whole before placement or not at all.
-      const merged = mergeProcessEventText(item.content, text);
-      item.content = merged;
-      (receipts.texts ??= {})[queued.id] = merged;
+      const previous = receipts.texts?.[queued.id] ?? queued.text;
+      // Other automated sources can share this native item. Their text must not become this source's retry payload.
+      const merged = mergeProcessEventText(previous, text);
+      item.content = item.content === previous ? merged : mergeAutomatedContent(item.content, text);
+      receipts.texts ??= {};
+      receipts.texts[queued.id] = merged;
       return;
     }
-    (receipts.texts ??= {})[summary.id] = text;
+    receipts.texts ??= {};
+    receipts.texts[summary.id] = text;
     await tx.createTask(Delivery, { id: summary.id, text }, { ownership: { kind: "conversation" }, conversationId: conversation.id, background: true });
   }, context);
 }

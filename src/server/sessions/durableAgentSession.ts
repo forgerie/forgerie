@@ -1,3 +1,5 @@
+import { submitAutomatedInput } from "./durableChildParentInput.js";
+import { automatedInputSubmission } from "./durableAutomatedInputState.js";
 import { randomUUID } from "node:crypto";
 import { SessionChainTurns, SessionModelChain, modelChainExtension, prepareChainTurn, chainTurnSubmission, cancelChainTurns, cancelHeldChainInputs, heldChainInputs } from "./durableModelChains.js";
 import { selectAvailableChainEntry, type ModelChainRuntime } from "./modelChainFailures.js";
@@ -811,7 +813,7 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
     if (this.closed) throw new Error("Session is closed");
     if (options?.requestId !== undefined) {
       const requestId = options.requestId;
-      const existing = await this.journal.conversation.commit((tx) => tx.submissionByRequest(this.journal.conversation.id, requestId), context);
+      const existing = await this.journal.conversation.commit((tx) => options.source === "extension" ? automatedInputSubmission(tx, this.journal.conversation.id, requestId) : tx.submissionByRequest(this.journal.conversation.id, requestId), context);
       if (existing !== undefined) {
         const submission = await this.journal.harness.submission(existing.id, context);
         if (submission === undefined) throw new Error("Durable prompt submission disappeared");
@@ -847,8 +849,13 @@ export class DurableAgentSession implements PiAgentSession, DurableParentReader,
       // An extension's sendUserMessage is not the user answering a card.
       if (options?.source !== "extension") await closeProposalsOnReply(tx, this.journal.conversation.id);
     }, context);
-    if (this.chainWait !== undefined) throw new Error("Stop the pending model-chain wait before sending another message");
+    if (this.chainWait !== undefined && options?.source !== "extension") throw new Error("Stop the pending model-chain wait before sending another message");
     const requestId = options?.requestId ?? randomUUID();
+    if (options?.source === "extension") {
+      const submission = await submitAutomatedInput(this.journal.harness, this.journal.conversation.id, requestId, content, context, options.streamingBehavior === "steer" ? "steer" : "followUp");
+      await this.receivePromptSubmission(submission, options.preflightResult);
+      return;
+    }
     const turn = this.modelChain === undefined ? undefined : await prepareChainTurn(this.journal.conversation, this.modelChain,
       { requestId, content, whenBusy: options?.streamingBehavior ?? "reject" });
     const submission = turn?.ownsInput === true

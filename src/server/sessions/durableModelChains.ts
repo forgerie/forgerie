@@ -1,3 +1,5 @@
+import { automatedInputRequestId, automatedInputSubmission } from "./durableAutomatedInputState.js";
+import { mergeAutomatedContent } from "./durableInputContent.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Context, JsonRepresentation } from "@earendil-works/chord";
 import { AgentDoc, InboxDoc, LiveDoc, GenerationTask, CompactionTask, hook, configure, defineDoc, defineExtension, defineTask, type Conversation, type ConversationId, type Harness, type InputSubmissionDraft, type Submission, type Session, type TaskId, type Tx } from "@earendil-works/pi-durable";
@@ -239,6 +241,7 @@ export function modelChainExtension(resolve: (id: ConversationId) => ModelChainR
 const ChainTurn = chainTurn(() => ({}));
 
 async function prepareTurn(tx: Tx, conversationId: ConversationId, reference: string, input: Omit<TurnInput, "reference">): Promise<{ id: TaskId; ownsInput: boolean }> {
+  input = { ...input, requestId: await automatedInputRequestId(tx, conversationId, input.requestId) };
   const doc = await tx.doc(SessionChainTurns, conversationId);
   const existing = Object.hasOwn(doc.tasks, input.requestId) ? doc.tasks[input.requestId] : undefined;
   if (existing !== undefined) return { id: existing, ownsInput: true };
@@ -276,18 +279,20 @@ export async function stageModelChainInput(api: ChainAdmission, conversationId: 
   return admitted.turn;
 }
 
-/** Batch only an unsealed last intent, just as the native inbox batches only its last queued input. */
-export async function batchModelChainInput(tx: Tx, id: ConversationId, requestId: string, text: string): Promise<"appended" | "hold" | "native"> {
+/** Human chain intents stay separate; automated inputs join their representative intent across them. */
+export async function batchModelChainInput(tx: Tx, id: ConversationId, requestId: string, content: InputSubmissionDraft["content"], whenBusy: "steer" | "followUp" = "followUp"): Promise<"appended" | "hold" | "native" | "sealed"> {
   const doc = await tx.doc(SessionChainTurns, id);
-  const last = Object.entries(doc.pending ?? {}).at(-1);
-  if (last?.[0] !== requestId || last[1].sealed === true || last[1].whenBusy !== "followUp" || await tx.submissionByRequest(id, requestId) !== undefined) return doc.recovery === undefined ? "native" : "hold";
-  const pending = last[1];
-  pending.content = typeof pending.content === "string" ? `${pending.content}\n\n${text}` : [...pending.content, { type: "text", text }];
+  if (await tx.submissionByRequest(id, requestId) !== undefined) return "native";
+  const pending = doc.pending?.[requestId];
+  if (pending?.sealed === true) return "sealed";
+  if (pending?.whenBusy !== whenBusy) return doc.recovery === undefined ? "native" : "hold";
+  pending.content = mergeAutomatedContent(pending.content, content);
   return "appended";
 }
 
 /** Durable outboxes also start main turns. Only the task may admit a held input on its stable request ID. */
 export async function prepareModelChainInput(api: ChainAdmission, conversationId: ConversationId, input: Omit<TurnInput, "reference">, ctx: Context): Promise<void> {
+  await api.commit(async tx => { input = { ...input, requestId: await automatedInputRequestId(tx, conversationId, input.requestId) }; return undefined; }, ctx);
   const turn = await stageModelChainInput(api, conversationId, input, ctx);
   if (turn?.ownsInput !== true) return;
   const watch = await api.watchDoc(SessionChainTurns, conversationId, ctx);
@@ -317,7 +322,7 @@ export async function chainTurnSubmission(harness: Harness, conversation: Conver
   try {
     for (;;) {
       const changed = new Promise<void>(resolve => { wake = resolve; });
-      const record = await conversation.commit(tx => tx.submissionByRequest(conversation.id, requestId), context);
+      const record = await conversation.commit(tx => automatedInputSubmission(tx, conversation.id, requestId), context);
       if (record !== undefined) {
         const submission = await harness.submission(record.id, context);
         if (submission === undefined) throw new Error("Missing model-chain submission");
@@ -326,7 +331,7 @@ export async function chainTurnSubmission(harness: Harness, conversation: Conver
       const progress = await Promise.race([changed.then(() => undefined), terminal]);
       if (progress !== undefined) {
         // Check the receipt once more: admission and terminal completion can share an observer turn.
-        const receipt = await conversation.commit(tx => tx.submissionByRequest(conversation.id, requestId), context);
+        const receipt = await conversation.commit(tx => automatedInputSubmission(tx, conversation.id, requestId), context);
         if (receipt !== undefined) continue;
         throw new Error(progress.state.outcome.status === "failed" ? progress.state.outcome.error.message : "Model-chain input was cancelled before admission");
       }

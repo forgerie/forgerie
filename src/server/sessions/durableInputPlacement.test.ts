@@ -1,3 +1,4 @@
+import { AutomatedInputs, automatedInputSubmission } from "./durableAutomatedInputState.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ async function fixture(answerQuestions = true) {
       fauxToolCall("child_agent", {action: "spawn", name: "helper", message: "Ask", isolation: "shared"}), fauxToolCall("hold", {}),
     ], {stopReason: "toolUse"});
     if (text === "Ask") return fauxAssistantMessage([fauxToolCall("ask_human", {question: "Which token?"})], {stopReason: "toolUse"});
-    const qid = /^\[child helper asks ([^\]]+)\]/.exec(text)?.[1];
+    const qid = /^\[child helper asks ([^\]]+)\]/m.exec(text)?.[1];
     if (qid !== undefined && !answerQuestions) return fauxAssistantMessage("Ignoring this delivered question");
     if (qid !== undefined) return fauxAssistantMessage([fauxToolCall("child_agent", {action: "answer", name: "helper", questionId: qid, answer: "TOKEN", reason: "Task says TOKEN"})], {stopReason: "toolUse"});
     return fauxAssistantMessage(text.includes("The parent answered: TOKEN") ? "CHILD-FINISHED" : "Done");
@@ -36,24 +37,30 @@ async function fixture(answerQuestions = true) {
   const registry = createRegistry(); const children = durableChildExtensions(); const decision = decisionExtension();
   for (const extension of [...children.parent, ...children.childOnly, decision, hold]) registry.install(extension);
   let now = Date.now();
-  const submissions = new Map<string, SubmissionRecord>();
   const open = async () => {
     const journal = await DurableSessionJournal.open({manager, models, registry,
       agent: {cwd: root, model: {provider: "faux", modelId: "faux-1"}, extensions: [...children.parent, decision, hold]}, familyOptions: {models, registry, now: () => now}});
-    journal.harness.subscribeCommits((publication) => {
-      for (const change of publication.changes) if (change.type === "submission" && change.value.requestId !== undefined) submissions.set(change.value.requestId, change.value);
-    });
     journal.harness.resume(); return journal;
   };
   let journal = await open();
   await journal.conversation.submit({type: "input", content: "Start"}, context);
-  const deliveries = () => [...submissions.values()].filter((submission) => submission.requestId?.startsWith("child-question:") === true || submission.requestId?.startsWith("decision-overturn:") === true);
-  await vi.waitFor(() => { expect(deliveries().filter((submission) => submission.status === "queued")).toHaveLength(1); });
+  const deliveries = () => journal.conversation.commit(async tx => {
+    const receipts: SubmissionRecord[] = [];
+    for (const conversation of (await tx.scanConversations({}, 100)).items) {
+      for (const requestId of Object.keys((await tx.doc(AutomatedInputs, conversation.id)).receipts)) {
+        if (!requestId.startsWith("child-question:") && !requestId.startsWith("decision-overturn:")) continue;
+        const receipt = await automatedInputSubmission(tx, conversation.id, requestId);
+        if (receipt !== undefined) receipts.push({ ...receipt, requestId });
+      }
+    }
+    return receipts;
+  }, context);
+  await vi.waitFor(async () => { expect((await deliveries()).filter((submission) => submission.status === "queued")).toHaveLength(1); });
   const child = (await durableChildRunMetadata(journal.harness, journal.conversation.id, context))['helper'];
   if (child === undefined) throw new Error("Missing child");
   return {
     journal: () => journal, child: child.conversationId, deliveries,
-    queued: () => deliveries().filter((submission) => submission.status === "queued"),
+    queued: async () => (await deliveries()).filter((submission) => submission.status === "queued"),
     advance: () => { now += 1000; },
     restart: async () => { await journal.close(); now += 1000; journal = await open(); },
     close: async () => { await journal.close(); await rm(root, {recursive: true, force: true}); },
@@ -69,34 +76,34 @@ it("keeps queued questions and corrections pending across restart, then redelive
   const run = await fixture();
   try {
     await run.overturn();
-    await vi.waitFor(() => { expect(run.queued()).toHaveLength(2); });
-    const original = run.queued();
+    await vi.waitFor(async () => { expect(await run.queued()).toHaveLength(2); });
+    const original = await run.queued();
     await run.restart();
-    expect((await run.journal().harness.snapshot(InboxDoc, run.journal().conversation.id, context))?.items).toHaveLength(2);
+    expect((await run.journal().harness.snapshot(InboxDoc, run.journal().conversation.id, context))?.items).toHaveLength(1);
     const tasks = await run.journal().harness.commit(async (tx) => (await tx.scanTasks({}, 100)).items, context);
     expect(tasks.filter((task) => ["forgerie.child-question-delivery", "forgerie.decision-correction"].includes(task.kind) && task.state.status !== "terminal")).toHaveLength(2);
     // Withdrawal of a single queued receipt is not necessarily a conversation abort.
-    for (const queued of original) {
-      const submission = await run.journal().harness.submission(queued.id, context);
+    for (const id of new Set(original.map(queued => queued.id))) {
+      const submission = await run.journal().harness.submission(id, context);
       if (submission === undefined) throw new Error("Missing queued submission");
       expect(await submission.abort(context)).toBe("aborted");
     }
     run.advance();
-    await vi.waitFor(() => { expect(run.queued()).toHaveLength(2); });
-    expect(run.queued().every((receipt) => !original.some((old) => old.id === receipt.id))).toBe(true);
+    await vi.waitFor(async () => { expect(await run.queued()).toHaveLength(2); });
+    expect((await run.queued()).every((receipt) => !original.some((old) => old.id === receipt.id))).toBe(true);
     await run.restart();
     await run.journal().conversation.abort(context);
     await run.restart();
     await vi.waitFor(async () => {
       expect(JSON.stringify(await childMessages(run.journal().harness, run.journal().conversation.id, Number(run.child), context))).toContain("CHILD-FINISHED");
-      expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.startsWith("[decision d:correction overturned"))).toHaveLength(1);
+      expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.includes("[decision d:correction overturned"))).toHaveLength(1);
     });
-    expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.startsWith("[child helper asks"))).toHaveLength(1);
-    expect(run.deliveries().filter((receipt) => receipt.entry !== undefined)).toHaveLength(2);
+    expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.includes("[child helper asks"))).toHaveLength(1);
+    expect((await run.deliveries()).filter((receipt) => receipt.entry !== undefined)).toHaveLength(2);
     expect((await decisions(run.journal().harness, run.journal().conversation.id, context)).find((decision) => decision.id === "d:correction")?.state.kind).toBe("overturned");
     await run.restart();
-    expect(run.deliveries().filter((receipt) => receipt.entry !== undefined)).toHaveLength(2);
-    expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.startsWith("[decision d:correction overturned"))).toHaveLength(1);
+    expect((await run.deliveries()).filter((receipt) => receipt.entry !== undefined)).toHaveLength(2);
+    expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.includes("[decision d:correction overturned"))).toHaveLength(1);
   } finally { await run.close(); }
 });
 
@@ -104,8 +111,8 @@ it.each(["live", "gone"])("rechecks a withdrawn correction target after restart 
   const run = await fixture();
   try {
     await run.overturn(true);
-    await vi.waitFor(() => { expect(run.queued()).toHaveLength(2); });
-    const correction = run.queued().find((submission) => submission.requestId?.startsWith("decision-overturn:") === true);
+    await vi.waitFor(async () => { expect(await run.queued()).toHaveLength(2); });
+    const correction = (await run.queued()).find((submission) => submission.requestId?.startsWith("decision-overturn:") === true);
     if (correction === undefined) throw new Error("Missing correction");
     expect(correction.conversationId).toBe(run.child);
     await run.restart();
@@ -115,16 +122,16 @@ it.each(["live", "gone"])("rechecks a withdrawn correction target after restart 
       if (submission === undefined) throw new Error("Missing correction receipt");
       expect(await submission.abort(context)).toBe("aborted");
       run.advance();
-      await vi.waitFor(() => {
-        expect(run.queued().find((submission) => submission.requestId?.startsWith("decision-overturn:") === true)?.conversationId).toBe(run.child);
+      await vi.waitFor(async () => {
+        expect((await run.queued()).find((submission) => submission.requestId?.startsWith("decision-overturn:") === true)?.conversationId).toBe(run.child);
       });
     }
     await run.journal().conversation.abort(context);
     await run.restart();
     const targetMessages = async () => state === "gone" ? run.parentMessages() : (await childMessages(run.journal().harness, run.journal().conversation.id, Number(run.child), context)).messages.filter((message) => message.role === "user").map((message) => message.content);
-    const corrections = async () => (await targetMessages()).filter((text) => typeof text === "string" && text.startsWith("[decision d:correction overturned"));
+    const corrections = async () => (await targetMessages()).filter((text) => typeof text === "string" && text.includes("[decision d:correction overturned"));
     await vi.waitFor(async () => { expect(await corrections()).toHaveLength(1); });
-    const placed = run.deliveries().filter((submission) => submission.requestId?.startsWith("decision-overturn:") === true && submission.entry !== undefined);
+    const placed = (await run.deliveries()).filter((submission) => submission.requestId?.startsWith("decision-overturn:") === true && submission.entry !== undefined);
     expect(placed).toHaveLength(1);
     expect(placed[0]?.conversationId).toBe(state === "gone" ? run.journal().conversation.id : run.child);
     await run.restart(); expect(await corrections()).toHaveLength(1);
@@ -151,8 +158,8 @@ it("does not resend a question already placed before parent abort, even when its
       const task = await run.journal().harness.commit(async (tx) => (await tx.scanTasks({kind: "forgerie.child-question-delivery"}, 10)).items[0], context);
       expect(task?.state.status).toBe("terminal");
     });
-    expect(run.deliveries().filter((receipt) => receipt.entry !== undefined)).toHaveLength(1);
-    expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.startsWith("[child helper asks"))).toHaveLength(1);
+    expect((await run.deliveries()).filter((receipt) => receipt.entry !== undefined)).toHaveLength(1);
+    expect((await run.parentMessages()).filter((text) => typeof text === "string" && text.includes("[child helper asks"))).toHaveLength(1);
     expect(await decisions(run.journal().harness, run.journal().conversation.id, context)).toEqual([]);
     expect(JSON.stringify(await childMessages(run.journal().harness, run.journal().conversation.id, Number(run.child), context))).not.toContain("The parent answered:");
   } finally { await run.close(); }

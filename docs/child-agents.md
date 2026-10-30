@@ -28,6 +28,18 @@ The parent model sees each steer and stop as a note, so it does not undo what yo
 
 Esc in the parent does not stop its children.
 
+Automated follow-ups share one pending batch. Child reports, questions and reminders join
+workflow updates, process events, ask_user answer delivery, and extension or watch
+notifications. The parent receives the batch at its first pending automated boundary,
+even with `followUpMode: "one-at-a-time"`. Model-chain waits hold the same batch.
+Each source keeps its logical delivery receipt across restart and retry.
+
+Your typed messages remain separate and keep their order. Later automated updates can
+join an earlier batch ahead of a typed message. Automated steers share their own
+steering batch; they do not turn into follow-ups. A combined batch uses a normal
+transcript entry rather than one source's hidden notification or custom answer card.
+
+
 ## When agents need you
 
 Agents ask for permission only for loss that Git, a backup or a rebuild cannot
@@ -72,7 +84,7 @@ the parent can call `child_agent({action: "escalate", questionId, kind, guess, w
 
 The parent may drop the `q:` prefix: `answer` with `313` resolves `q:313` when that question exists, with the same ownership and state checks. An unknown handle fails with the open handles for that child. A `send` to a child that waits on a question does not answer it; its result names the open handle and says to use `answer` or `escalate`. `/children` shows the oldest such question as `waitingForParent: {questionId, askedAt}`, and the Agents panel says the child waits for the parent instead of "It may be stuck".
 
-When a question still waits for the parent 10 minutes after it was asked, Forgerie sends the parent one reminder: `[child <name> still waits on <questionId>, asked over 10 min ago] <question>`. The reminder uses the Durable clock, survives restart, and is skipped when the question was answered, closed or escalated to you. A reminder costs one parent turn and can interrupt a hold that is correct.
+When a question still waits for the parent 10 minutes after it was asked, Forgerie sends the parent one reminder: `[child <name> still waits on <questionId>, asked over 10 min ago] <question>`. The reminder uses the Durable clock, survives restart, and is skipped when the question was answered, closed or escalated to you. A reminder can share a parent turn with other queued automated updates, and can interrupt a hold that is correct.
 
 Taste and scope choices are not escalations unless they leave product intent undecided and a wrong guess is expensive to undo. There is no timeout that forwards a slow parent's question to you. Open question counts and `/children` question lists include only escalations waiting for you, not questions waiting for the parent. Questions already open before this change remain user-facing.
 

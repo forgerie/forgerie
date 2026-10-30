@@ -1,3 +1,4 @@
+import { childParentInputExtension } from "./durableChildParentInput.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -54,7 +55,7 @@ it("delivers an accepted decision after SIGKILL between close and answer admissi
     const models = createModels();
     const provider = fauxProvider();
     models.setProvider(provider.provider);
-    const registry = createRegistry();
+    const registry = createRegistry(); registry.install(childParentInputExtension);
     registry.install(askDeliveryExtension());
     harness = await Harness.open(await openNodeSqliteStorage(databasePath), { models, registry, conversationCreated: initializeParentDocuments }, context);
     const conversation = await harness.root(context);

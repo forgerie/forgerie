@@ -6,13 +6,13 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime, SessionManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it, vi } from "vitest";
-import { SessionChainTurns } from "./durableModelChains.js";
+import { SessionChainTurns, chainTurnSubmission, prepareChainTurn, prepareModelChainInput } from "./durableModelChains.js";
 import { InboxDoc } from "@earendil-works/pi-durable";
 import { CHILD_MODEL_CONTINUE } from "../../shared/childModelDiagnostic.js";
 import { MODEL_CHAIN_SWITCH_KIND } from "../../shared/apiTypes.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { WorkflowLaunch } from "./durableWorkflowRuns.js";
-import { ChildParentDelivery } from "./durableChildParentInput.js";
+import { ChildParentDelivery, submitAutomatedInput } from "./durableChildParentInput.js";
 import { createDurableChildHost } from "./durableChildHost.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { DurableAgentSession } from "./durableAgentSession.js";
@@ -41,7 +41,7 @@ async function fixture(errors: (string | undefined)[], beforeResponse?: () => Pr
   }
   const services = await createAgentSessionServices({ cwd: directory, agentDir: join(directory, "agent"), modelRuntime: runtime,
     resourceLoaderOptions: { noExtensions: true, noSkills: true, noContextFiles: true, noPromptTemplates: true } });
-  services.settingsManager.applyOverrides({ defaultProvider: "faux", defaultModel: "a", retry: { enabled: false }, compaction: { enabled: false, ...(options.keepRecentTokens === undefined ? {} : { keepRecentTokens: options.keepRecentTokens }) }, followUpMode: "all" });
+  services.settingsManager.applyOverrides({ defaultProvider: "faux", defaultModel: "a", retry: { enabled: false }, compaction: { enabled: false, ...(options.keepRecentTokens === undefined ? {} : { keepRecentTokens: options.keepRecentTokens }) }, followUpMode: "one-at-a-time" });
   let manager = SessionManager.create(directory, join(directory, "sessions"));
   const cooldowns = new ModelCooldownRegistry(join(directory, "cooldowns.json"), error => { throw error; });
   const open = (handle?: DurableSessionHandle) => DurableAgentSession.open({ ...(handle === undefined ? {} : { handle }), services, sessionManager: manager, now: () => now, modelChains: () => ({ worker: entries }), modelCooldowns: cooldowns, ...(options.children === true ? { childAgents: createDurableChildHost({ homeAgentsDir: join(directory, "home-agents"), builtinAgentsDirs: [] }) } : {}) });
@@ -185,7 +185,7 @@ it("continues a turn started by an extension message, not only a composer prompt
 });
 
 
-it.each(["quota", "no_model"])("recovers coalesced workflow launches and child reports once with followUpMode all, failure=%s", async failure => {
+it.each(["quota", "no_model"])("recovers coalesced workflow launches and child reports once with one-at-a-time human follow-ups, failure=%s", async failure => {
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   let entered!: () => void;
@@ -200,9 +200,9 @@ it.each(["quota", "no_model"])("recovers coalesced workflow launches and child r
     const harness = session.journal.harness;
     const options = { conversationId: session.journal.conversation.id, ownership: { kind: "conversation" as const }, background: true };
     const workflow = await harness.commit(tx => tx.createTask(WorkflowLaunch, { runId: "coalesced", prompt: "Workflow launch" }, options), context);
-    const child = await harness.commit(tx => tx.createTask(ChildParentDelivery, { requestId: "child-report:coalesced", text: "Child report" }, options), context);
-    await Promise.all([harness.waitForTask(workflow, context), harness.waitForTask(child, context)]);
-    await vi.waitFor(async () => { expect((await harness.snapshot(InboxDoc, session.journal.conversation.id, context))?.items.filter(item => item.mode !== "write")).toHaveLength(2); });
+    const child = submitAutomatedInput(harness, session.journal.conversation.id, "child-report:coalesced", "Child report", context);
+    await Promise.all([harness.waitForTask(workflow, context), child]);
+    await vi.waitFor(async () => { expect((await harness.snapshot(InboxDoc, session.journal.conversation.id, context))?.items.filter(item => item.mode !== "write")).toHaveLength(1); });
   } finally { waiting = false; release(); }
   await warmup;
   if (failure === "no_model") {
@@ -375,7 +375,7 @@ it("keeps ordinary extension steers attached to the active recovery owner", asyn
   expect(notices(run.session())).toHaveLength(1);
 });
 
-it("does not append a report arriving during recovery to a pre-wait native batch, and restores FIFO on Stop", async () => {
+it("joins a report arriving during recovery to the pending native batch, and withdraws it once on Stop", async () => {
   let release!: () => void;
   let entered!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -398,9 +398,9 @@ it("does not append a report arriving during recovery to a pre-wait native batch
   await vi.waitFor(() => { expect(session.chainWait?.until).toBe(1_060_000); });
   const second = await harness.commit(tx => tx.createTask(ChildParentDelivery, { requestId: "child-report:during", text: "During wait", previous: { task: first, requestId: "child-report:before" } }, options), context);
   await harness.waitForTask(second, context);
-  await vi.waitFor(() => { expect(session.getFollowUpMessages()).toEqual(["Before wait", "During wait"]); });
-  expect((await harness.snapshot(InboxDoc, parent, context))?.items[0]).toMatchObject({ content: "Before wait" });
-  expect(session.clearQueue().followUp).toEqual(["Before wait", "During wait"]);
+  await vi.waitFor(() => { expect(session.getFollowUpMessages()).toEqual(["Before wait\n\nDuring wait"]); });
+  expect((await harness.snapshot(InboxDoc, parent, context))?.items[0]).toMatchObject({ content: "Before wait\n\nDuring wait" });
+  expect(session.clearQueue().followUp).toEqual(["Before wait\n\nDuring wait"]);
   await session.abort(); await original;
   await run.restart(1_060_000);
   expect(run.calls.map(call => call.model)).toEqual(["a"]);
@@ -426,4 +426,45 @@ it("stays streaming while its recovery owner plans a switch before a native run 
   } finally { release(); off(); spy.mockRestore(); }
   await prompt;
   expect(run.calls.map(call => call.model)).toEqual(["a", "b"]);
+});
+
+it("restores a held mixed automated batch across human chain intents and resolves every logical chain receipt", async () => {
+  const run = await fixture(["rate limit"], undefined, undefined, { children: true });
+  const session = run.session();
+  await session.setModelChain("worker");
+  const original = session.prompt("Original task").catch(() => undefined);
+  await vi.waitFor(() => { expect(session.chainWait?.until).toBe(1_060_000); });
+  const harness = session.journal.harness;
+  const parent = session.journal.conversation;
+  const child = submitAutomatedInput(harness, parent.id, "child-report:held-mixed", "HELD-CHILD", context).catch(() => undefined);
+  await vi.waitFor(() => { expect(session.getFollowUpMessages()).toEqual(["HELD-CHILD"]); });
+  await prepareChainTurn(parent, "worker", { requestId: "human:first", content: "Human first", whenBusy: "followUp" });
+  const workflow = await parent.commit(tx => tx.createTask(WorkflowLaunch, { runId: "held-mixed", prompt: "HELD-WORKFLOW" }, { conversationId: parent.id, ownership: { kind: "conversation" }, background: true }), context);
+  const extension = session.prompt("HELD-EXTENSION", { source: "extension", requestId: "extension:held-mixed", streamingBehavior: "followUp" }).catch(() => undefined);
+  const custom = session.sendCustomMessage({ customType: "test.watch", content: "HELD-WATCH", display: true }, { triggerTurn: true, deliverAs: "followUp" }).catch(() => undefined);
+  await prepareChainTurn(parent, "worker", { requestId: "human:second", content: "Human second", whenBusy: "followUp" });
+  await vi.waitFor(() => {
+    const queued = session.getFollowUpMessages();
+    expect(queued).toHaveLength(3);
+    for (const text of ["HELD-CHILD", "HELD-WORKFLOW", "HELD-EXTENSION", "HELD-WATCH"]) expect(queued[0]).toContain(text);
+    expect(queued.slice(1)).toEqual(["Human first", "Human second"]);
+  });
+  await run.restart(1_060_000);
+  await Promise.all([original, child, extension, custom]);
+  const reopened = run.session();
+  await reopened.journal.harness.waitForTask(workflow, context);
+  await vi.waitFor(() => { expect(reopened.isStreaming).toBe(false); });
+  const chain = await reopened.journal.harness.snapshot(SessionChainTurns, reopened.journal.conversation.id, context);
+  const task = chain?.tasks["child-report:held-mixed"];
+  if (task === undefined) throw new Error("Missing representative chain task");
+  const ids = ["child-report:held-mixed", "workflow:held-mixed", "extension:held-mixed"];
+  const receipts = await Promise.all(ids.map(id => chainTurnSubmission(reopened.journal.harness, reopened.journal.conversation, id, task)));
+  expect(new Set(receipts.map(receipt => receipt.id)).size).toBe(1);
+  await prepareModelChainInput(reopened.journal.harness, reopened.journal.conversation.id, { requestId: "workflow:held-mixed", content: "HELD-WORKFLOW", whenBusy: "followUp" }, context);
+  const users = reopened.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : JSON.stringify(message.content));
+  const combined = users.filter(text => text.includes("HELD-CHILD"));
+  expect(combined).toHaveLength(1);
+  for (const text of ["HELD-WORKFLOW", "HELD-EXTENSION", "HELD-WATCH"]) expect(combined[0]).toContain(text);
+  expect(users.slice(-2)).toEqual(["Human first", "Human second"]);
+  expect(Object.keys((await reopened.journal.harness.snapshot(SessionChainTurns, reopened.journal.conversation.id, context))?.tasks ?? {})).not.toContain("workflow:held-mixed");
 });

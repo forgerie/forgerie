@@ -382,8 +382,7 @@ const QuestionDelivery = defineTask<{ questionId: string; text: string; requestI
       return;
     }
     await deliverInputUntilPlaced(runtime, task.state.checkpoint, { requestId: task.input.requestId ?? `child-question:${task.input.questionId}`, content: task.input.text,
-      previousRecipient: runtime.conversationId, selectRecipient: () => Promise.resolve(runtime.conversationId),
-      submit: (requestId) => submitChildParentInput(runtime, requestId, task.input.text, context) }, context);
+      previousRecipient: runtime.conversationId, selectRecipient: () => Promise.resolve(runtime.conversationId) }, context);
   } },
   abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
 });

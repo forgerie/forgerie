@@ -1,4 +1,6 @@
-import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION, SessionChainTurns } from "./durableModelChains.js";
+import { childParentInputExtension, submitAutomatedInput } from "./durableChildParentInput.js";
+import { isSharedAutomatedInput } from "./durableAutomatedInputState.js";
+import { SessionChainTurns } from "./durableModelChains.js";
 import { endTurnReplyMessage } from "./endTurnReply.js";
 import { constants, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -78,7 +80,8 @@ export class DurableSessionJournal {
   private projectionFileReady = false;
   private readonly ownerSessionId: string;
   private scanned: EntryRecord["id"] | undefined;
-  private readonly customInputEntries = new Set<EntryRecord["id"]>();
+  private readonly sharedCustomInputs = new Set<string>();
+  private readonly customInputEntries = new Map<EntryRecord["id"], string>();
   private readonly unsubscribe: () => void;
   private usageValue: UsageState = { models: {}, tools: {} };
 
@@ -126,6 +129,7 @@ export class DurableSessionJournal {
   }
 
   static async open(options: DurableJournalOptions): Promise<DurableSessionJournal> {
+    options.registry.install(childParentInputExtension);
     const sessionFile = options.manager.getSessionFile();
     const pool = options.pool ?? DurableSessionJournal.pool;
     const harnessOptions: HarnessOptions = options.familyOptions ?? {
@@ -205,7 +209,7 @@ export class DurableSessionJournal {
   private noteCustomInput(submission: SubmissionRecord): void {
     if (submission.conversationId === this.conversation.id && submission.type === "input"
       && submission.requestId?.startsWith(CUSTOM_INPUT_REQUEST_PREFIX) === true && submission.entry !== undefined) {
-      this.customInputEntries.add(submission.entry);
+      if (!this.sharedCustomInputs.has(submission.requestId)) this.customInputEntries.set(submission.entry, submission.requestId);
     }
   }
 
@@ -218,8 +222,7 @@ export class DurableSessionJournal {
   async submitCustomMessage(content: UserInput, whenBusy: "steer" | "followUp") {
     this.assertOwned();
     const requestId = `${CUSTOM_INPUT_REQUEST_PREFIX}${randomUUID()}`;
-    if (this.harnessOptions.registry.snapshot().extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(this.harness, this.conversation.id, { content, whenBusy, requestId }, BACKGROUND_CONTEXT);
-    return this.conversation.submit({ type: "input", content, whenBusy, requestId }, BACKGROUND_CONTEXT);
+    return submitAutomatedInput(this.harness, this.conversation.id, requestId, content, BACKGROUND_CONTEXT, whenBusy);
   }
 
   /** Called before tools and after committed events, so extension hooks see committed assistant calls. */
@@ -235,6 +238,11 @@ export class DurableSessionJournal {
         const page = await this.conversation.entries(query, 256, cursor, BACKGROUND_CONTEXT);
         const aliases: { id: string; entry: EntryRecord; index: number }[] = [];
         for (const entry of page.items) {
+          const customRequest = this.customInputEntries.get(entry.id);
+          if (customRequest !== undefined && await this.conversation.commit(tx => isSharedAutomatedInput(tx, this.conversation.id, customRequest), BACKGROUND_CONTEXT)) {
+            this.sharedCustomInputs.add(customRequest);
+            this.customInputEntries.delete(entry.id);
+          }
           aliases.push(...this.projectEntry(entry));
           this.scanned = entry.id;
         }
@@ -385,6 +393,7 @@ export class DurableSessionJournal {
     this.handleValue = handle;
     this.scanned = undefined;
     this.customInputEntries.clear();
+    this.sharedCustomInputs.clear();
     for (const submission of await this.pool.submissions(handle.address, BACKGROUND_CONTEXT)) this.noteCustomInput(submission);
     this.adoptUsage(await this.harness.snapshot(UsageDoc, this.conversation.id, BACKGROUND_CONTEXT) ?? { models: {}, tools: {} });
     const file = this.manager.getSessionFile();

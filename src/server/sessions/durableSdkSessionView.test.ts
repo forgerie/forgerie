@@ -1,3 +1,4 @@
+import { childParentInputExtension } from "./durableChildParentInput.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +31,7 @@ async function imported() {
   manager.appendMessage(fauxAssistantMessage("an imported answer"));
   const provider = fauxProvider();
   const models = createModels(); models.setProvider(provider.provider);
-  const registry = createRegistry(); registry.install(askDeliveryExtension());
+  const registry = createRegistry(); registry.install(childParentInputExtension); registry.install(askDeliveryExtension());
   const journal = await DurableSessionJournal.open({ manager, models, registry, agent: { model: { provider: "faux", modelId: "faux-1" } },
     initializeParentDocuments: createDurableParentInitializer(manager) });
   cleanups.push(() => journal.close());

@@ -1,6 +1,7 @@
-import { prepareModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
+import { submitAutomatedInput } from "./durableChildParentInput.js";
+import { hasAutomatedInput } from "./durableAutomatedInputState.js";
 import type { Context } from "@earendil-works/chord";
-import type { ConversationId, EntryId, Submission, TaskRuntime, Tx } from "@earendil-works/pi-durable";
+import type { ConversationId, EntryId, TaskRuntime, Tx } from "@earendil-works/pi-durable";
 
 // Optional fields keep version-1 outboxes replayable with their original receipt. Checkpoints need a JSON-compatible alias.
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
@@ -11,7 +12,6 @@ interface InputPlacementOptions {
   previousRecipient: ConversationId;
   selectRecipient(tx: Tx): Promise<ConversationId>;
   onPlaced?(tx: Tx, entry: EntryId): Promise<void>;
-  submit?(requestId: string): Promise<Submission>;
 }
 
 /** Each withdrawn attempt reserves a fresh request ID, so a retry never reuses the withdrawn receipt. */
@@ -28,15 +28,15 @@ export async function deliverInputUntilPlaced<I>(runtime: TaskRuntime<I, InputPl
   if (recipient === undefined) {
     await runtime.commit(async (tx) => {
       // A crash can happen after submit but before the old outbox's terminal commit. Preserve that receipt's target.
-      const previous = attempt === 0 ? await tx.submissionByRequest(options.previousRecipient, requestId) : undefined;
-      const selected = previous === undefined ? await options.selectRecipient(tx) : options.previousRecipient;
+      const previous = attempt === 0 && await hasAutomatedInput(tx, options.previousRecipient, requestId);
+      const selected = !previous ? await options.selectRecipient(tx) : options.previousRecipient;
       return { status: "running", checkpoint: { phase: "deliver", attempt, recipient: selected } };
     }, context);
     return;
   }
   const progress = { rerouted: false };
   await runtime.commit(async (tx) => {
-    if (await tx.submissionByRequest(recipient, requestId) !== undefined) return undefined;
+    if (await hasAutomatedInput(tx, recipient, requestId)) return undefined;
     const selected = await options.selectRecipient(tx);
     if (selected === recipient) return undefined;
     // Selection can precede a crash. Until admission, a correction must still follow the current live target.
@@ -44,10 +44,7 @@ export async function deliverInputUntilPlaced<I>(runtime: TaskRuntime<I, InputPl
     return { status: "running", checkpoint: { phase: "deliver", attempt, recipient: selected } };
   }, context);
   if (progress.rerouted) return;
-  const conversation = await runtime.conversation(recipient, context);
-  if (conversation === undefined) throw new Error("Input delivery target is missing");
-  if (runtime.registry.extension(SESSION_MODEL_CHAIN_EXTENSION) !== undefined) await prepareModelChainInput(runtime, recipient, { content: options.content, whenBusy: "followUp", requestId }, context);
-  const submission = await (options.submit?.(requestId) ?? conversation.submit({ type: "input", content: options.content, whenBusy: "followUp", requestId }, context));
+  const submission = await submitAutomatedInput(runtime, recipient, requestId, options.content, context);
   for (;;) {
     const receipt = await submission.status(context);
     // Even unanswered inputs were delivered if they have an entry (for example, a run aborted after placement).

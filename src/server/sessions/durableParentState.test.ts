@@ -1,3 +1,4 @@
+import { childParentInputExtension } from "./durableChildParentInput.js";
 import { DatabaseSync } from "node:sqlite";
 import type { JsonValue } from "@earendil-works/chord";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -32,7 +33,7 @@ async function fixture(deliver = false) {
   const provider = fauxProvider();
   models.setProvider(provider.provider);
   const open = async () => {
-    const registry = createRegistry();
+    const registry = createRegistry(); registry.install(childParentInputExtension);
     if (deliver) registry.install(askDeliveryExtension());
     const harness = await Harness.open(await openNodeSqliteStorage(databasePath), { models, registry, conversationCreated: initializeParentDocuments }, context);
     cleanup.push(() => harness.close(context));
