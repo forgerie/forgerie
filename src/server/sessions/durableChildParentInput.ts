@@ -1,6 +1,6 @@
 import { AutomatedInputs as Batches, automatedInputSubmission } from "./durableAutomatedInputState.js";
 import { mergeAutomatedContent } from "./durableInputContent.js";
-import { prepareModelChainInput, stageModelChainInput, batchModelChainInput, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
+import { prepareModelChainInput, stageModelChainInput, batchModelChainInput, SessionChainTurns, SESSION_MODEL_CHAIN_EXTENSION } from "./durableModelChains.js";
 import type { Context } from "@earendil-works/chord";
 import {
   defineExtension, defineTask, InboxDoc,
@@ -14,6 +14,22 @@ type Delivery = { task: TaskId; requestId: string };
 type DeliveryInput = { requestId: string; text: UserInput; whenBusy?: "steer" | "followUp"; previous?: Delivery };
 type DeliveryState = { phase: "join" } | { phase: "submit" };
 /* eslint-enable @typescript-eslint/consistent-type-definitions */
+/** A staged intent outlives its admission task. Reuse that intent, never append its payload a second time. */
+async function reconcileStagedAdmission(tx: Tx, recipient: ConversationId, requestId: string, mode: "steer" | "followUp"): Promise<boolean> {
+  const chain = await tx.doc(SessionChainTurns, recipient);
+  const pending = chain.pending?.[requestId];
+  if (pending === undefined) return false;
+  const batches = await tx.doc(Batches, recipient);
+  batches.receipts[requestId] = { task: pending.task, requestId };
+  const admitted = mode === "steer" ? batches.steering : batches.admitted;
+  // Preserve a newer live representative when repairing an older aborted checkpoint.
+  if (admitted === undefined || (chain.pending?.[admitted] === undefined && (await tx.submissionByRequest(recipient, admitted))?.status !== "queued")) {
+    if (mode === "steer") batches.steering = requestId;
+    else batches.admitted = requestId;
+  }
+  return true;
+}
+
 export const ChildParentDelivery = defineTask<DeliveryInput, DeliveryState, null>({
   name: "forgerie.child-parent-input-delivery", version: 1, initial: () => ({ phase: "join" }),
   phases: {
@@ -23,6 +39,7 @@ export const ChildParentDelivery = defineTask<DeliveryInput, DeliveryState, null
       // Serialize only admissions, never parent turns or the children's work. A restart resumes this same chain.
       if (previous !== undefined) await runtime.waitForTask(previous.task, context);
       await runtime.commit(async (tx) => {
+        if (await reconcileStagedAdmission(tx, runtime.conversationId, requestId, mode)) return { status: "terminal", outcome: { status: "completed", result: null } };
         const batches = await tx.doc(Batches, runtime.conversationId);
         // A cancelled predecessor can have no receipt. Keep admitted batches independent of the task chain.
         const admitted = mode === "steer" ? batches.steering : batches.admitted;
@@ -63,8 +80,9 @@ export const ChildParentDelivery = defineTask<DeliveryInput, DeliveryState, null
     },
   },
   abort: (task, runtime, context) => runtime.commit(async (tx) => {
-    // Admission can commit just before cancellation, before the submit phase saves its pointer.
-    if (await tx.submissionByRequest(runtime.conversationId, task.input.requestId) !== undefined) {
+    // Both native admission and staging can commit before cancellation, before submit saves its pointer.
+    if (!await reconcileStagedAdmission(tx, runtime.conversationId, task.input.requestId, task.input.whenBusy ?? "followUp")
+      && await tx.submissionByRequest(runtime.conversationId, task.input.requestId) !== undefined) {
       const batches = await tx.doc(Batches, runtime.conversationId);
       if (task.input.whenBusy === "steer") batches.steering = task.input.requestId;
       else batches.admitted = task.input.requestId;
@@ -89,10 +107,11 @@ interface AutomatedAdmission extends Pick<Harness, "snapshot" | "watchDoc" | "wa
 export async function submitAutomatedInput(api: AutomatedAdmission, recipient: ConversationId, requestId: string, content: UserInput, context: Context, whenBusy: "steer" | "followUp" = "followUp"): Promise<Submission> {
   let delivery: TaskId | undefined;
   await api.commit(async (tx) => {
+    if (await reconcileStagedAdmission(tx, recipient, requestId, whenBusy)) return;
     if (await automatedInputSubmission(tx, recipient, requestId) !== undefined) return;
     const batches = await tx.doc(Batches, recipient);
     const existing = batches.receipts[requestId];
-    // An aborted admission has no receipt. Recreate it on replay rather than waiting forever on its terminal task.
+    // Only an aborted admission without a surviving chain intent needs a new delivery task.
     if (existing !== undefined) {
       const previous = await tx.task(existing.task);
       if (previous !== undefined && (previous.state.status !== "terminal" || previous.state.outcome.status === "completed")) { delivery = existing.task; return; }

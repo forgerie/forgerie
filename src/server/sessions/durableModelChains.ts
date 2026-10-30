@@ -61,7 +61,11 @@ function chainTurn(resolve: (id: ConversationId) => ModelChainRuntime) {
         const owner = doc.recovery;
         if (owner === undefined || owner === task.id) {
           const pending = doc.pending !== undefined && Object.hasOwn(doc.pending, task.input.requestId) ? doc.pending[task.input.requestId] : undefined;
-          if (state.attempt === 0 && pending !== undefined) { admission.content = pending.content; pending.sealed = true; }
+          if (state.attempt === 0 && pending !== undefined) {
+            // Text/image parts have scalar fields. Detach their overlays before submitting outside this commit.
+            admission.content = typeof pending.content === "string" ? pending.content : pending.content.map(part => ({ ...part }));
+            pending.sealed = true;
+          }
           return undefined;
         }
         admission.held = true;

@@ -1,3 +1,6 @@
+import { ParentAsks } from "./durableParentDocuments.js";
+import { AutomatedInputs, automatedInputSubmission, hasAutomatedInput } from "./durableAutomatedInputState.js";
+import { acceptProcessEvents } from "./durableProcessEvents.js";
 import { readRecapHistory } from "./durableSessionRecap.js";
 import { buildRecapPrompt } from "./sessionRecapGenerator.js";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -7,7 +10,7 @@ import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory } from "@e
 import { ModelRuntime, SessionManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it, vi } from "vitest";
 import { SessionChainTurns, chainTurnSubmission, prepareChainTurn, prepareModelChainInput } from "./durableModelChains.js";
-import { InboxDoc } from "@earendil-works/pi-durable";
+import { InboxDoc, type TaskId } from "@earendil-works/pi-durable";
 import { CHILD_MODEL_CONTINUE } from "../../shared/childModelDiagnostic.js";
 import { MODEL_CHAIN_SWITCH_KIND } from "../../shared/apiTypes.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -467,4 +470,117 @@ it("restores a held mixed automated batch across human chain intents and resolve
   for (const text of ["HELD-WORKFLOW", "HELD-EXTENSION", "HELD-WATCH"]) expect(combined[0]).toContain(text);
   expect(users.slice(-2)).toEqual(["Human first", "Human second"]);
   expect(Object.keys((await reopened.journal.harness.snapshot(SessionChainTurns, reopened.journal.conversation.id, context))?.tasks ?? {})).not.toContain("workflow:held-mixed");
+});
+
+it.each(["child", "child-after-placed", "restored-child", "ask", "workflow", "process", "journal-followUp", "journal-steer"])("does not redeliver a staged %s input after crossed cancellation and replay", async source => {
+  const run = await fixture(source === "child-after-placed" ? [undefined, "rate limit"] : ["rate limit"], undefined, undefined, { children: true });
+  const session = run.session();
+  if (source === "child-after-placed") {
+    const placed = await submitAutomatedInput(session.journal.harness, session.journal.conversation.id, "crossed:older", "Older batch", context);
+    await placed.wait(context);
+  }
+  await session.setModelChain("worker");
+  const original = session.prompt("Original task").catch(() => undefined);
+  await vi.waitFor(() => { expect(session.chainWait?.until).toBe(1_060_000); });
+  const harness = session.journal.harness;
+  const parent = session.journal.conversation;
+  const mode = source === "journal-steer" ? "steer" : "followUp";
+  let delivery: TaskId | undefined;
+  let requestId: string | undefined;
+  let aborting: Promise<"marked" | "terminal"> | undefined;
+  const off = harness.subscribeCommits(publication => {
+    for (const change of publication.changes) {
+      if (change.type !== "task") continue;
+      const input = change.value.input;
+      if (typeof input !== "object" || input === null || Array.isArray(input) || typeof input["requestId"] !== "string") continue;
+      if (delivery === undefined && change.value.kind === "forgerie.child-parent-input-delivery") {
+        delivery = change.value.id;
+        requestId = input["requestId"];
+      }
+      // Abort on the commit that creates the chain intent, before its delivery saves the batch pointer.
+      if (delivery !== undefined && change.value.kind === "forgerie.session-chain-turn" && input["requestId"] === requestId && aborting === undefined) aborting = harness.abortTask(delivery, context);
+    }
+  });
+  let first: Promise<unknown>;
+  if (source === "ask") {
+    first = (async () => {
+      const { ask } = await session.parentState.openAsk([{ id: "q", question: "Continue?", options: [] }], context);
+      await session.parentState.submitAsk(ask.askId, { answers: [{ id: "q", values: [], otherText: "MESSAGE-A" }] }, context);
+    })();
+  } else if (source === "workflow") {
+    first = parent.commit(tx => tx.createTask(WorkflowLaunch, { runId: "crossed", prompt: "MESSAGE-A" }, { conversationId: parent.id, ownership: { kind: "conversation" }, background: true }), context);
+  } else if (source === "process") {
+    first = acceptProcessEvents(parent, { id: "crossed", missed: false, events: [{ processId: "crossed-process", name: "MESSAGE-A", watchId: "exit", attention: "turn", kind: "exit", line: 0, count: 1, samples: [], reason: "exited 0" }] }, context);
+  } else if (source.startsWith("journal-")) {
+    first = session.journal.submitCustomMessage("MESSAGE-A", mode).catch(() => undefined);
+  } else {
+    first = submitAutomatedInput(harness, parent.id, "child-report:crossed", "MESSAGE-A", context).catch(() => undefined);
+  }
+  try {
+    await vi.waitFor(() => { expect(aborting).toBeDefined(); });
+    await aborting;
+    off();
+    if (delivery === undefined || requestId === undefined) throw new Error("Missing staged admission");
+    expect((await harness.waitForTask(delivery, context)).state.outcome.status).toBe("aborted");
+    const staged = (await harness.snapshot(SessionChainTurns, parent.id, context))?.pending?.[requestId];
+    if (staged === undefined) throw new Error("The original staged intent must survive cancellation");
+    const content = structuredClone(staged.content);
+    const abortedRequestId = requestId;
+    const acceptedAfterAbort = await parent.commit(tx => hasAutomatedInput(tx, parent.id, abortedRequestId), context);
+    if (source === "restored-child") {
+      const abortedDelivery = delivery;
+      // Reopen can find checkpoints written by the old abort handler: the intent survived but its pointer did not.
+      await parent.commit(async tx => {
+        const batches = await tx.doc(AutomatedInputs, parent.id);
+        delete batches.admitted;
+        batches.receipts[abortedRequestId] = { task: abortedDelivery, requestId: abortedRequestId };
+      }, context);
+    }
+    const second = submitAutomatedInput(harness, parent.id, "crossed:second", "MESSAGE-B", context, mode).catch(() => undefined);
+    await vi.waitFor(() => { expect((mode === "steer" ? session.getSteeringMessages() : session.getFollowUpMessages()).join("\n")).toContain("MESSAGE-B"); });
+    const replay = submitAutomatedInput(harness, parent.id, requestId, content, context, mode).catch(() => undefined);
+    // Join any admission created by replay before advancing the real chain recovery clock.
+    const attempts = await parent.commit(tx => tx.scanTasks({ kind: "forgerie.child-parent-input-delivery" }, 100), context);
+    for (const attempt of attempts.items) await harness.waitForTask(attempt.id, context);
+    const repaired = await harness.snapshot(AutomatedInputs, parent.id, context);
+    const representativeAfterReplay = repaired?.receipts[requestId]?.requestId;
+    if (source === "restored-child") expect(repaired?.admitted).toBe("crossed:second");
+    await run.restart(1_060_000);
+    await Promise.all([original, first, second, replay]);
+    const replayedRequestId = requestId;
+    await vi.waitFor(async () => {
+      const target = run.session().journal.conversation;
+      const receipts = await target.commit(async tx => Promise.all([replayedRequestId, "crossed:second"].map(id => automatedInputSubmission(tx, target.id, id))), context);
+      expect(receipts.every(receipt => receipt?.entry !== undefined)).toBe(true);
+      expect(run.session().isStreaming).toBe(false);
+    });
+    const messages = (await run.session().journal.conversation.context(context)).messages.filter(message => message.role === "user")
+      .map(message => typeof message.content === "string" ? message.content : message.content.flatMap(part => part.type === "text" ? [part.text] : []).join(""));
+    const delivered = messages.filter(text => text.includes("MESSAGE-A") || text.includes("MESSAGE-B"));
+    expect(delivered.join("\n").split("MESSAGE-A")).toHaveLength(2);
+    expect(delivered.join("\n").split("MESSAGE-B")).toHaveLength(2);
+    expect(delivered).toHaveLength(source === "restored-child" ? 2 : 1);
+    expect(acceptedAfterAbort).toBe(true);
+    expect(representativeAfterReplay).toBe(requestId);
+  } finally { off(); }
+});
+
+
+it("places structured ask answers after a model-chain wait without retaining a transaction overlay", async () => {
+  const run = await fixture(["rate limit"]);
+  const session = run.session();
+  await session.setModelChain("worker");
+  const original = session.prompt("Original task").catch(() => undefined);
+  await vi.waitFor(() => { expect(session.chainWait?.until).toBe(1_060_000); });
+  const { ask } = await session.parentState.openAsk([{ id: "q", question: "Continue?", options: [] }], context);
+  await session.parentState.submitAsk(ask.askId, { answers: [{ id: "q", values: [], otherText: "STRUCTURED-ANSWER" }] }, context);
+  await vi.waitFor(() => { expect(session.getFollowUpMessages().join("\n")).toContain("STRUCTURED-ANSWER"); });
+  await run.restart(1_060_000);
+  await original;
+  await vi.waitFor(async () => {
+    const journal = run.session().journal;
+    expect((await journal.harness.snapshot(ParentAsks, journal.conversation.id, context))?.closed[ask.askId]?.delivery.kind).toBe("admitted");
+  });
+  const messages = (await run.session().journal.conversation.context(context)).messages;
+  expect(messages.filter(message => message.role === "user" && JSON.stringify(message.content).includes("STRUCTURED-ANSWER"))).toHaveLength(1);
 });
