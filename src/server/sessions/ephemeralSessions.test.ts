@@ -1,3 +1,4 @@
+import { DurableSessionRuntime } from "./durableSessionRuntime.js";
 import { BacklogClaimStore } from "../backlog/backlogClaimStore.js";
 import { controlledManagedProcessLauncher } from "../processes/managedProcesses.testSupport.js";
 import { execFile } from "node:child_process";
@@ -11,7 +12,7 @@ import { SessionWorktreeStore } from "../workspaces/sessionWorktreeStore.js";
 import { SessionWorktrees } from "../workspaces/sessionWorktrees.js";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Fastify from "fastify";
 import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, createFauxCore } from "@earendil-works/pi-ai";
@@ -29,10 +30,11 @@ const roots: string[] = [];
 const services: PiSessionService[] = [];
 afterEach(async () => {
   await Promise.all(services.splice(0).map(service => service.dispose()));
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
-async function fixture() {
+async function fixture(options: { ordinarySessionDir?: (root: string, dataDir: string) => string; beforeDelete?: () => Promise<void> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "forgerie-ephemeral-")); roots.push(root);
   const agentDir = join(root, "agent"), cwd = join(root, "project"), dataDir = join(root, "data");
   await Promise.all([agentDir, cwd, dataDir].map(path => mkdir(path, { recursive: true })));
@@ -42,18 +44,18 @@ async function fixture() {
   const modelRuntime = await createTestModelRuntime();
   modelRuntime.registerProvider("faux", { api: "faux", apiKey: "test", baseUrl: "http://localhost:0", streamSimple: provider.streamSimple,
     models: [{ id: "faux-1", name: "Faux", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100_000, maxTokens: 1000 }] });
-  const worktreeStore = new SessionWorktreeStore(join(dataDir, "worktrees.json"));
+  const worktreeStore = new SessionWorktreeStore(join(dataDir, "worktrees.json"), join(dataDir, "ephemeral-sessions"));
   await worktreeStore.initialize();
   const worktrees = new SessionWorktrees(worktreeStore);
-  const archiveStore = new SessionArchiveStore(join(dataDir, "archived-sessions.json"));
+  const archiveStore = new SessionArchiveStore(join(dataDir, "archived-sessions.json"), undefined, join(dataDir, "ephemeral-sessions"));
   const processControl = controlledManagedProcessLauncher();
   const logs: Record<string, unknown>[] = [];
   const claims = new BacklogClaimStore(join(dataDir, "claims.json")); await claims.initialize();
   const hubs = new Map<PiSessionService, CapturingSessionEventHub>();
   const reload = () => {
     const events = new CapturingSessionEventHub();
-    const gateway = createPiSessionManagerGateway({ agentDir, env: { PI_WEB_DATA_DIR: dataDir }, sessionDirEnvKeys: [] });
-    const service = new PiSessionService(events, { agentDir, modelRuntime, sessionManager: gateway, archiveStore, beforeEphemeralDelete: sessionId => claims.releaseSessions([sessionId]), sessionWorktrees: worktrees, logger: { info: details => { logs.push(details); } },
+    const gateway = createPiSessionManagerGateway({ agentDir, env: { PI_WEB_DATA_DIR: dataDir, ...(options.ordinarySessionDir === undefined ? {} : { PI_WEB_AGENT_SESSION_DIR: options.ordinarySessionDir(root, dataDir) }) }, sessionDirEnvKeys: ["PI_WEB_AGENT_SESSION_DIR"] });
+    const service = new PiSessionService(events, { agentDir, modelRuntime, sessionManager: gateway, archiveStore, beforeEphemeralDelete: async sessionId => { await options.beforeDelete?.(); await claims.releaseSessions([sessionId]); }, sessionWorktrees: worktrees, logger: { info: details => { logs.push(details); } },
       managedProcesses: { stateDirectory: dataDir, prepareLauncher: () => Promise.resolve(processControl.launcher) }, heartbeatIntervalMs: 60_000 });
     services.push(service); hubs.set(service, events);
     return { service, events, gateway };
@@ -66,7 +68,7 @@ async function fixture() {
     await service.prompt(ref, text);
     await vi.waitFor(() => { expect(ended()).toBeGreaterThan(before); }, { timeout: 10_000 });
   }
-  return { root, cwd, dataDir, archiveStore, claims, worktrees, worktreeStore, processControl, logs, reload, prompt, ...active };
+  return { root, cwd, dataDir, agentDir, archiveStore, claims, worktrees, worktreeStore, processControl, logs, reload, prompt, ...active };
 }
 
 it("creates an ephemeral session through HTTP, validates the flag, and survives service reload", async () => {
@@ -95,7 +97,7 @@ it("excludes ephemeral transcripts and receipts from search and skips manual and
   await f.prompt(f.service, session);
   expect(await f.service.recap(session, "manual")).toEqual({ kind: "skipped" });
   expect(await f.service.recap(session, "open")).toEqual({ kind: "skipped" });
-  const index = await SessionSearchIndex.open({ filePath: join(f.root, "search.sqlite"), sessionsDir: f.root, log: () => undefined });
+  const index = await SessionSearchIndex.open({ filePath: join(f.root, "search.sqlite"), sessionsDir: f.root, ephemeralSessionsRoot: join(f.dataDir, "ephemeral-sessions"), log: () => undefined });
   try {
     await index.scan(); await index.refreshFile(session.path);
     expect(index.search("private needle").hits).toEqual([]);
@@ -270,3 +272,126 @@ it("retains a managed checkout when its last ephemeral occupant was not the work
   expect(await readFile(join(record.path, "file.txt"), "utf8")).toBe("base");
   expect(await git("branch", "--list", branchBeforeClose)).toContain(branchBeforeClose);
 }, 20_000);
+
+
+it("archives and searches ordinary sessions under an unrelated ephemeral-sessions directory", async () => {
+  const f = await fixture({ ordinarySessionDir: root => join(root, "ordinary", "ephemeral-sessions", "history") });
+  const session = await f.service.start(f.cwd, { ephemeral: false, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session, "ordinary searchable needle");
+  const index = await SessionSearchIndex.open({ filePath: join(f.root, "ordinary-search.sqlite"), sessionsDir: dirname(session.path), ephemeralSessionsRoot: join(f.dataDir, "ephemeral-sessions"), log: () => undefined });
+  let hits: ReturnType<SessionSearchIndex["search"]>["hits"];
+  try { await index.scan(); hits = index.search("ordinary searchable needle").hits; } finally { index.close(); }
+  await f.service.archive(session);
+  const archived = await f.archiveStore.get(session.id);
+  expect(archived?.archivePath).toBeDefined();
+  if (archived?.archivePath === undefined) throw new Error("Ordinary session was not archived");
+  expect(await readFile(archived.archivePath, "utf8")).toContain("ordinary searchable needle");
+  expect(session.ephemeral).not.toBe(true);
+  expect(hits).toContainEqual(expect.objectContaining({ sessionId: session.id }));
+}, 20_000);
+
+it.each(["equal", "inside", "contains"] as const)("rejects ordinary session storage that is %s to the ephemeral root without removing existing files", async overlap => {
+  const f = await fixture();
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session);
+  const before = await readFile(session.path, "utf8");
+  const ephemeralRoot = join(f.dataDir, "ephemeral-sessions");
+  const sessionDir = overlap === "equal" ? ephemeralRoot : overlap === "inside" ? join(ephemeralRoot, "ordinary") : f.dataDir;
+  await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+  await expect(f.service.start(f.cwd, { ephemeral: false, initialModelSpec: "faux/faux-1" })).rejects.toThrow(/ordinary session directory.*overlap/iu);
+  expect(await readFile(session.path, "utf8")).toBe(before);
+});
+
+it("rejects a concurrent snapshot reopen during deletion and never accepts later input", async () => {
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const f = await fixture({ beforeDelete: async () => { entered(); await gate; } });
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session);
+  const closing = f.service.archive(session);
+  void closing.catch(() => undefined);
+  try {
+    await paused;
+    expect(await readFile(session.path, "utf8")).toContain("private needle");
+    await expect(f.service.streamSnapshot(session)).rejects.toThrow(/closing|not found/iu);
+    await expect(f.service.prompt(session, "during delete")).rejects.toThrow(/closing|not found/iu);
+  } finally { release(); await closing; }
+  expect(f.service.activeCount()).toBe(0);
+  await expect(f.service.streamSnapshot(session)).rejects.toThrow(/closing|not found/iu);
+  await expect(f.service.prompt(session, "after delete")).rejects.toThrow(/closing|not found/iu);
+  await expect(readFile(session.path)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+
+it("drains an admitted runtime open before removing ephemeral storage", async () => {
+  const f = await fixture();
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.prompt(f.service, session); await f.service.dispose();
+  const next = f.reload();
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let admitted: DurableSessionRuntime | undefined;
+  const openRuntime = DurableSessionRuntime.open.bind(DurableSessionRuntime);
+  vi.spyOn(DurableSessionRuntime, "open").mockImplementationOnce(async (...args) => {
+    admitted = await openRuntime(...args); entered(); await gate; return admitted;
+  });
+  const opening = next.service.streamSnapshot(session);
+  void opening.catch(() => undefined);
+  await paused;
+  let finished = false;
+  const closing = next.service.archive(session).then(() => { finished = true; });
+  void closing.catch(() => undefined);
+  const probes: Promise<unknown>[] = [];
+  let closingObserved = false;
+  try {
+    await vi.waitFor(() => {
+      probes.push(next.service.streamSnapshot(session).catch((error: unknown) => {
+        closingObserved ||= error instanceof Error && /closing/iu.test(error.message);
+      }));
+      expect(closingObserved).toBe(true);
+    });
+    expect(finished).toBe(false);
+    expect(await readFile(session.path, "utf8")).toContain("private needle");
+  } finally { release(); await Promise.allSettled([closing, opening, ...probes]); }
+  await expect(opening).rejects.toThrow(/closing|not found/iu);
+  await closing;
+  expect(admitted?.session.isClosed).toBe(true);
+  expect(next.service.activeCount()).toBe(0);
+  await expect(next.service.prompt(session, "late input")).rejects.toThrow(/closing|not found/iu);
+  await expect(readFile(session.path)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("rejects an already resolving lookup even when it returns after deletion", async () => {
+  const f = await fixture();
+  const session = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  await f.service.dispose(); const next = f.reload();
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const resolveFile = next.gateway.resolveSessionFile.bind(next.gateway);
+  vi.spyOn(next.gateway, "resolveSessionFile").mockImplementationOnce(async (...args) => {
+    const match = await resolveFile(...args); entered(); await gate; return match;
+  });
+  const opening = next.service.streamSnapshot(session);
+  void opening.catch(() => undefined);
+  await paused;
+  try { await next.service.archive(session); }
+  finally { release(); await Promise.allSettled([opening]); }
+  await expect(opening).rejects.toThrow(/closing|not found/iu);
+  expect(next.service.activeCount()).toBe(0);
+  await expect(next.service.prompt(session, "late input")).rejects.toThrow(/closing|not found/iu);
+  await expect(readFile(session.path)).rejects.toMatchObject({ code: "ENOENT" });
+}, 20_000);
+
+it("uses one alias inventory for a bulk permanent deletion", async () => {
+  const f = await fixture();
+  const first = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  const second = await f.service.start(f.cwd, { ephemeral: true, initialModelSpec: "faux/faux-1" });
+  const inventory = vi.spyOn(f.gateway, "listAll");
+  const result = await f.service.archiveMany([first, second]);
+  expect(result.archivedSessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
+  expect(result.failures).toEqual([]);
+  expect(inventory).toHaveBeenCalledTimes(1);
+});

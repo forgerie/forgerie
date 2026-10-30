@@ -101,6 +101,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
     private readonly lifecycle: SessionCommandLifecycle<TSession> = {},
     private readonly naming: SessionCommandNaming = {},
     private readonly promptLibrary?: PromptLibrary,
+    private readonly ephemeralSessionsRoot?: string,
   ) {}
 
   async run(sessionId: string, text: string, options: SessionCommandRunOptions<TSession> = {}): Promise<ClientCommandResult> {
@@ -210,13 +211,13 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
       return forkResult;
     });
     if (result.cancelled) return { type: "done", presentation: "toast", message: "Fork cancelled" };
-    return { type: "done", presentation: "toast", message: "Session forked", session: clientSessionFromRuntime(active.runtime), ...promptDraft(result.selectedText) };
+    return { type: "done", presentation: "toast", message: "Session forked", session: clientSessionFromRuntime(active.runtime, this.ephemeralSessionsRoot), ...promptDraft(result.selectedText) };
   }
 
   private nameSession(active: CommandActiveSession<TSession>, name: string): ClientCommandResult {
     if (name === "") return { type: "unsupported", message: "Usage: /name <session name>" };
     active.runtime.session.setSessionName(name);
-    return { type: "done", presentation: "toast", message: `Session named: ${name}`, session: clientSessionFromRuntime(active.runtime) };
+    return { type: "done", presentation: "toast", message: `Session named: ${name}`, session: clientSessionFromRuntime(active.runtime, this.ephemeralSessionsRoot) };
   }
 
   private compact(session: TSession, instructions: string): ClientCommandResult {
@@ -303,7 +304,7 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
       return cloneResult;
     });
     if (result.cancelled) return { type: "done", presentation: "toast", message: "Clone cancelled" };
-    return { type: "done", presentation: "toast", message: "Session cloned", session: clientSessionFromRuntime(active.runtime) };
+    return { type: "done", presentation: "toast", message: "Session cloned", session: clientSessionFromRuntime(active.runtime, this.ephemeralSessionsRoot) };
   }
 
   private fork(active: CommandActiveSession<TSession>): ClientCommandResult {
@@ -384,13 +385,13 @@ export class SessionCommandService<TSession extends CommandSession = CommandSess
   }
 }
 
-function clientSessionFromRuntime(runtime: CommandRuntime): ClientSession {
+function clientSessionFromRuntime(runtime: CommandRuntime, ephemeralRoot: string | undefined): ClientSession {
   const session = runtime.session;
   const parentSessionPath = typeof session.sessionManager.getHeader === "function" ? session.sessionManager.getHeader()?.parentSession : undefined;
   return {
     id: session.sessionId,
     path: session.sessionFile ?? "",
-    ...(isEphemeralSessionPath(session.sessionFile) ? { ephemeral: true } : {}),
+    ...(isEphemeralSessionPath(session.sessionFile, ephemeralRoot) ? { ephemeral: true } : {}),
     cwd: runtime.cwd,
     ...(session.sessionName === undefined ? {} : { name: session.sessionName }),
     created: new Date().toISOString(),

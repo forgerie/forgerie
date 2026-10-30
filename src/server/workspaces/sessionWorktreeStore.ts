@@ -19,7 +19,7 @@ export class SessionWorktreeStore {
   private records: SessionWorktreeRecord[] = [];
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly filePath?: string) {}
+  constructor(private readonly filePath?: string, private readonly ephemeralSessionsRoot?: string) {}
 
   async initialize(archivedSessions: readonly ArchivedSessionRecord[] = []): Promise<void> {
     if (this.filePath === undefined) return;
@@ -107,7 +107,7 @@ export class SessionWorktreeStore {
     for (const session of sessions.filter((session) => pathInside(record.path, session.cwd))) {
       const source = session.transcriptSourcePath ?? session.path;
       if (source === "") throw new Error("Cannot remove a worktree with an unpersisted session");
-      if (isEphemeralSessionPath(session.path)) {
+      if (isEphemeralSessionPath(session.path, this.ephemeralSessionsRoot)) {
         snapshots.push({ id: session.id, cwd: session.cwd, transcriptPath: session.path, session: worktreeSessionMetadata(record, session) });
         continue;
       }
@@ -226,7 +226,7 @@ export function indexWorktreeRecords(records: readonly SessionWorktreeRecord[]):
 export function worktreeSessionMetadata(record: SessionWorktreeRecord, session: Pick<SessionInfo, "id" | "cwd" | "path"> & Partial<SessionInfo>): SessionInfo {
   return {
     id: session.id, cwd: session.cwd, path: session.path,
-    ...(session.ephemeral === true || isEphemeralSessionPath(session.path) ? { ephemeral: true } : {}),
+    ...(session.ephemeral === true ? { ephemeral: true } : {}),
     ...(session.name === undefined ? {} : { name: session.name }),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
     ...(session.agentSpawned === undefined ? {} : { agentSpawned: session.agentSpawned }),

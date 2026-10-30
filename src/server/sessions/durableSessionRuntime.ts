@@ -15,6 +15,7 @@ export interface DurableRuntimeOptions {
   handle?: DurableSessionHandle;
   /** Cohort cutover gate. Enable after conversation-specific SDK dispatch and cache binding are wired. */
   nativeForks?: true;
+  ephemeralSessionsRoot?: string;
   cwd: string;
   agentDir: string;
   sessionManager: SessionManager;
@@ -49,7 +50,7 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     const position = options?.position ?? "before";
     const before = await this.session.extensionRunner.emit({ type: "session_before_fork", entryId, position });
     if (before?.cancel === true) return { cancelled: true };
-    if (isEphemeralSessionPath(this.session.sessionFile)) return this.forkEphemeral(entryId, position);
+    if (isEphemeralSessionPath(this.session.sessionFile, this.options.ephemeralSessionsRoot)) return this.forkEphemeral(entryId, position);
     if (this.options.nativeForks === true || this.options.handle !== undefined) return this.forkNative(entryId, position);
     const manager = this.session.sessionManager;
     const entry = manager.getEntry(entryId);

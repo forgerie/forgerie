@@ -813,6 +813,7 @@ interface CreateAgentRuntimeOptions {
   scopedModels: readonly ScopedAgentModel[];
   initialModel?: AgentModel;
   initialThinkingLevel?: ClientThinkingLevel;
+  ephemeralSessionsRoot?: string;
 }
 
 type PiWebRuntimeFactoryOptions = Parameters<CreateAgentSessionRuntimeFactory>[0] & {
@@ -837,6 +838,7 @@ function defaultCreateAgentRuntime(createRuntime: PiWebCreateAgentSessionRuntime
     agentDir: options.agentDir,
     sessionManager: options.sessionManager,
     nativeForks: true,
+    ...(options.ephemeralSessionsRoot === undefined ? {} : { ephemeralSessionsRoot: options.ephemeralSessionsRoot }),
   });
 }
 
@@ -1133,6 +1135,7 @@ interface CachedSessionHeader {
 
 export class PiSessionService implements SessionRouteService {
   private readonly active = new Map<string, ActiveSession<PiSessionRuntime>>();
+  private readonly sessionCloseStates = new Map<string, "closing" | "deleted">();
   private readonly pendingSessionOpens = new Map<string, PendingSessionOpen>();
   private stopping = false;
   /**
@@ -1250,7 +1253,7 @@ export class PiSessionService implements SessionRouteService {
     this.githubTools = deps.github;
     this.durableReader = deps.durableReader;
     this.childReadWorktrees = deps.durableChildAgents?.worktrees ?? deps.sessionWorktrees;
-    this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
+    this.archiveStore = deps.archiveStore ?? new SessionArchiveStore(undefined, undefined, deps.sessionManager.ephemeralSessionsRoot?.());
     this.beforeEphemeralDelete = deps.beforeEphemeralDelete;
     this.pinStore = deps.pinStore ?? new SessionPinStore();
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
@@ -1375,6 +1378,7 @@ export class PiSessionService implements SessionRouteService {
       },
       { listSessionNames: (cwd) => this.listSessionNames(cwd) },
       new AgentDirPromptLibrary(this.agentDir),
+      this.sessionManager.ephemeralSessionsRoot?.(),
     );
   }
 
@@ -1441,11 +1445,11 @@ export class PiSessionService implements SessionRouteService {
     if (trigger === "automatic" && unread !== undefined && this.now().getTime() < Date.parse(unread.completedAt) + RECAP_DELAY_MS) return { kind: "skipped" };
     if (await this.archiveStore.isArchived(ref.id) || await this.sessionWorktrees?.store.readOnly(ref) !== undefined) return { kind: "skipped" };
     const file = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
-    if (isEphemeralSessionPath(file?.path)) return { kind: "skipped" };
+    if (isEphemeralSessionPath(file?.path, this.sessionManager.ephemeralSessionsRoot?.())) return { kind: "skipped" };
     // A timer never opens a runtime: nothing would release it, and a restart would open every unread session at once.
     // A closed session gets its recap when the user opens it.
     const session = trigger === "automatic" ? this.activeForRef(ref)?.runtime.session : await this.getOrOpen(ref);
-    if (!(session instanceof DurableAgentSession) || isEphemeralSessionPath(session.sessionFile)) return { kind: "skipped" };
+    if (!(session instanceof DurableAgentSession) || isEphemeralSessionPath(session.sessionFile, this.sessionManager.ephemeralSessionsRoot?.())) return { kind: "skipped" };
     const handle = session.journal.handle;
     const trackedChild = await verifiedTrackedSubsessionLink(this.sessionManager, {
       sessionId: session.sessionId, sessionFile: session.sessionFile, sessionManager: session.sessionManager, cwd: ref.cwd,
@@ -1639,7 +1643,7 @@ export class PiSessionService implements SessionRouteService {
     const unarchivedSessions = withPinnedFlags(
       listedSessions
         .filter((session) => !archivedById.has(session.id))
-        .map(clientSessionFromListEntry),
+        .map(session => clientSessionFromListEntry(session, this.sessionManager.ephemeralSessionsRoot?.())),
       pinnedSessionIdSet(pinnedRecords),
     );
     const archivedSessions = [...archivedRecords]
@@ -1689,7 +1693,7 @@ export class PiSessionService implements SessionRouteService {
       this.publishNotificationMutations(this.notificationStore.clearSession(record.sessionId, "archive-reconcile"));
     }
     const unarchivedSessions = withPinnedFlags(
-      sessions.filter((session) => !archivedById.has(session.id)).map(clientSessionFromListEntry),
+      sessions.filter((session) => !archivedById.has(session.id)).map(session => clientSessionFromListEntry(session, this.sessionManager.ephemeralSessionsRoot?.())),
       pinnedSessionIdSet(pinnedRecords),
     );
     const savedSessions = await this.withSessionWorktrees([], cwd);
@@ -1726,7 +1730,7 @@ export class PiSessionService implements SessionRouteService {
     // the original path before archive/delete, never the relocated archive copy.
     const path = transcriptPath ?? (await this.archiveStore.get(sessionId))?.originalPath
       ?? (await (this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll())).find((session) => session.id === sessionId)?.path;
-    if (isEphemeralSessionPath(path)) {
+    if (isEphemeralSessionPath(path, this.sessionManager.ephemeralSessionsRoot?.())) {
       const root = this.sessionManager.ephemeralSessionsRoot?.();
       if (root === undefined || path === undefined) throw new Error("Ephemeral storage root is unavailable");
       await assertEphemeralSessionFiles(root, path, sessionId);
@@ -1794,7 +1798,7 @@ export class PiSessionService implements SessionRouteService {
   private async worktreeSessionInventory(cwd: string): Promise<(ClientSession & WorktreeSessionFile)[]> {
     const [catalog, snapshot] = await Promise.all([this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll(), this.machineListing()]);
     // Include delegated children hidden by inbox policy. Cleanup must consider every session, not only visible rows.
-    const inventory = new Map(catalog.map((entry) => [entry.id, clientSessionFromListEntry(entry)]));
+    const inventory = new Map(catalog.map((entry) => [entry.id, clientSessionFromListEntry(entry, this.sessionManager.ephemeralSessionsRoot?.())]));
     for (const session of snapshot.sessions) inventory.set(session.id, session);
     const archives = new Map((await this.archiveStore.list()).map((record) => [record.sessionId, record]));
     return [...inventory.values()].filter((session) => pathInside(cwd, session.cwd)).map((session) => {
@@ -1976,7 +1980,7 @@ export class PiSessionService implements SessionRouteService {
       id: session.sessionId,
       ...(session.modelChain === undefined ? {} : { modelChain: session.modelChain }),
       path: session.sessionFile ?? "",
-      ...(isEphemeralSessionPath(session.sessionFile) ? { ephemeral: true } : {}),
+      ...(isEphemeralSessionPath(session.sessionFile, this.sessionManager.ephemeralSessionsRoot?.()) ? { ephemeral: true } : {}),
       cwd,
       persisted: sessionFileExists(session.sessionFile),
       created: new Date().toISOString(),
@@ -3086,11 +3090,13 @@ export class PiSessionService implements SessionRouteService {
 
   /** Production native admission is active-only. A reader never chooses execution options. */
   activeDurableRead(ref: PiSessionRef): { address: DurableSessionAddress; sessionFile: string | undefined } | undefined {
+    this.assertSessionAdmission(ref);
     const session = this.activeForRef(ref)?.runtime.session;
     return session instanceof DurableAgentSession ? { address: session.durableAddress, sessionFile: session.sessionFile } : undefined;
   }
 
   async attachOpenBrowser(ref: PiSessionRef, send: (open: SessionOpenResult) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment | undefined> {
+    this.assertSessionAdmission(ref);
     if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
     return this.durableReader.attachOpen(ref, this.events, send, onFailure, () => {
       const session = this.activeForRef(ref)?.runtime.session;
@@ -3103,12 +3109,14 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async attachDurableBrowser(ref: PiSessionRef, send: (snapshot: DurableBrowserSnapshot) => Promise<void>, onFailure: (error: Error) => void): Promise<DurableBrowserAttachment> {
+    this.assertSessionAdmission(ref);
     if (this.durableReader === undefined) throw new Error("Native Durable browser reads are not configured");
     return this.durableReader.attach(ref, send, onFailure);
   }
 
   /** Preparation may await. The active classic cut below must not. */
   async open(ref: PiSessionRef, page: SessionOpenPageRequest, trace?: StackLatencyContext): Promise<SessionOpenResult> {
+    this.assertSessionAdmission(ref);
     const phase = <T>(name: StackLatencySpan["phase"], run: (inner?: StackLatencyContext) => Promise<T>): Promise<T> => trace === undefined ? run() : trace.measure(name, run);
     const { active, nativeAddress, catalog, readonly, archived, worktreeInfo } = await phase("admission", async () => {
       // Freeze admission before preparation. A stopped native owner is an error, not a fallback.
@@ -3122,6 +3130,7 @@ export class PiSessionService implements SessionRouteService {
       const worktreeInfo = worktree === undefined ? undefined : await this.sessionWorktrees?.info(worktree, ref.id);
       return { active, nativeAddress, catalog, readonly, archived, worktreeInfo };
     });
+    this.assertSessionAdmission(ref);
     const receiptFor = (id: string, cwd: string) => {
       const unread = catalog.sessions.find(item => item.sessionId === id && item.cwd === canonicalizeStoredCwd(cwd));
       return unread === undefined ? null : { catalogId: catalog.catalogId, throughCompletionOrder: unread.completionOrder };
@@ -3134,6 +3143,7 @@ export class PiSessionService implements SessionRouteService {
         ...(worktreeInfo === undefined ? {} : { worktree: worktreeInfo }) } };
     }, inner));
     if (native !== undefined) {
+      this.assertSessionAdmission(ref);
       const projected = trace?.start("projection");
       const result = { ...native, page: { ...native.page, messages: withImageReferences(ref, native.page.messages) },
         receipt: receiptFor(native.session.id, native.session.cwd) };
@@ -3288,9 +3298,11 @@ export class PiSessionService implements SessionRouteService {
    * signatures; it is `null` when no assistant message is mid-stream.
    */
   async streamSnapshot(ref: PiSessionRef): Promise<SessionStreamSnapshot> {
+    this.assertSessionAdmission(ref);
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
     if (readonly !== undefined) return { seq: this.events.currentSeq(readonly.session.id), partial: null };
     const session = await this.getOrOpen(ref);
+    this.assertSessionAdmission(ref);
     // Single consistent tick: capture the watermark and the partial together so
     // the seq matches the partial the client seeds against.
     const seq = this.events.currentSeq(session.sessionId);
@@ -3553,6 +3565,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async submitPromptUntilPreflight(session: PiAgentSession, text: string, behavior: QueuedPromptKind | undefined, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, onCompletion?: (completion: PromptCompletion) => void, requestId?: string): Promise<boolean> {
+    this.assertSessionAdmission({ id: session.sessionId, cwd: session.sessionManager.getCwd() });
     return await new Promise<boolean>((resolvePreflight, rejectPreflight) => {
       let settled = false;
       const settle = (accepted: boolean) => {
@@ -3578,6 +3591,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private enqueuePromptBehindCompaction(session: PiAgentSession, text: string, kind: QueuedPromptKind, images: ImageContent[] = [], echoUserMessage = true, expandPromptTemplates = true, requestId?: string): void {
+    this.assertSessionAdmission({ id: session.sessionId, cwd: session.sessionManager.getCwd() });
     const prompt = { kind, text, ...(requestId === undefined ? {} : { requestId }), ...(images.length > 0 ? { images } : {}), ...(echoUserMessage ? {} : { echoUserMessage: false }), ...(expandPromptTemplates ? {} : { expandPromptTemplates: false }) };
     this.compactionQueue.enqueuePrompt(session.sessionId, prompt);
     this.publishActivity(session, session.isCompacting ? "message queued during compaction" : "message queued behind compaction", "active");
@@ -3865,7 +3879,7 @@ export class PiSessionService implements SessionRouteService {
   async archive(ref: PiSessionRef): Promise<void> {
     const path = this.activeForRef(ref)?.runtime.session.sessionFile
       ?? (await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader))?.path;
-    if (isEphemeralSessionPath(path)) {
+    if (isEphemeralSessionPath(path, this.sessionManager.ephemeralSessionsRoot?.())) {
       // Closing an inactive chat must not start its tools or follow an unchecked journal locator.
       const result = await this.archiveMany([ref]);
       const failure = result.failures[0];
@@ -3898,6 +3912,7 @@ export class PiSessionService implements SessionRouteService {
         this.scheduleSearchScan();
         await this.forgetUnreadSessions([archiveInput]);
       },
+      "close",
     );
   }
 
@@ -3976,9 +3991,13 @@ export class PiSessionService implements SessionRouteService {
           }
         }
 
+        // Freeze lifetime classification before deleting files; absence later is not ordinary ownership.
+        const ephemeralInputs = readyInputs.filter(input => isEphemeralSessionPath(input.path, this.sessionManager.ephemeralSessionsRoot?.()));
+        const persistentInputs = readyInputs.filter(input => !ephemeralInputs.includes(input));
+        const aliasInventory = ephemeralInputs.length > 0 ? await this.sessionManager.listAll() : undefined;
         const closeBatch = async (inputs: ArchiveSessionInput[]) => {
           try {
-            const archived = await this.archiveStoreArchiveMany(inputs);
+            const archived = await this.archiveStoreArchiveMany(inputs, aliasInventory);
             archivedSessionIds.push(...archived.map(record => record.sessionId));
             unreadArchivedIdentities.push(...archived);
           } catch (error: unknown) {
@@ -3986,9 +4005,10 @@ export class PiSessionService implements SessionRouteService {
           }
         };
         // Permanent deletes must report each successful close even when a neighbour refuses deletion.
-        for (const input of readyInputs.filter(input => isEphemeralSessionPath(input.path))) await closeBatch([input]);
-        await closeBatch(readyInputs.filter(input => !isEphemeralSessionPath(input.path)));
+        for (const input of ephemeralInputs) await closeBatch([input]);
+        await closeBatch(persistentInputs);
       },
+      "close",
     );
     await this.forgetUnreadSessions(unreadArchivedIdentities);
 
@@ -4032,6 +4052,7 @@ export class PiSessionService implements SessionRouteService {
         for (const input of archiveInputs) await this.closeActive(input.sessionId, { kind: "clear", reason: "archive" });
         await this.archiveStoreArchiveMany(archiveInputs);
       },
+      "close",
     );
     await this.forgetUnreadSessions(
       plan.targets
@@ -4501,11 +4522,12 @@ export class PiSessionService implements SessionRouteService {
     });
   }
 
-  private async archiveStoreArchiveMany(inputs: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
+  private async archiveStoreArchiveMany(inputs: readonly ArchiveSessionInput[], aliasInventory?: readonly PiSessionListEntry[]): Promise<ArchivedSessionRecord[]> {
     if (inputs.length === 0) return [];
-    const ephemeral = inputs.filter(input => isEphemeralSessionPath(input.path));
-    const persistent = inputs.filter(input => !isEphemeralSessionPath(input.path));
-    for (const input of ephemeral) await this.deleteEphemeralSession(input);
+    const ephemeral = inputs.filter(input => isEphemeralSessionPath(input.path, this.sessionManager.ephemeralSessionsRoot?.()));
+    const persistent = inputs.filter(input => !isEphemeralSessionPath(input.path, this.sessionManager.ephemeralSessionsRoot?.()));
+    const catalog = ephemeral.length === 0 ? [] : aliasInventory ?? await this.sessionManager.listAll();
+    for (const input of ephemeral) await this.deleteEphemeralSession(input, catalog);
     for (const input of persistent) await this.closeSessionManagedProcesses(input.sessionId, input.path);
     const records: ArchivedSessionRecord[] = [];
     if (persistent.length > 0 && this.archiveStore.archiveMany !== undefined) records.push(...await this.archiveStore.archiveMany(persistent));
@@ -4515,13 +4537,12 @@ export class PiSessionService implements SessionRouteService {
     return [...records, ...ephemeral.map(input => ({ sessionId: input.sessionId, cwd: input.cwd, archivedAt: this.now().toISOString() }))];
   }
 
-  private async deleteEphemeralSession(input: ArchiveSessionInput): Promise<void> {
+  private async deleteEphemeralSession(input: ArchiveSessionInput, catalog: readonly PiSessionListEntry[]): Promise<void> {
     const root = this.sessionManager.ephemeralSessionsRoot?.();
     try {
       if (root === undefined) throw new Error("Ephemeral storage root is unavailable");
       await assertEphemeralSessionFiles(root, input.path, input.sessionId);
       await assertEphemeralJournalOwnership(input.path, input.sessionId);
-      const catalog = await this.sessionManager.listAll();
       for (const other of catalog) {
         if (resolve(other.path) === resolve(input.path)) continue;
         const locator = await readDurableSessionLocator(durableSessionPaths(other.path).directory);
@@ -4535,6 +4556,7 @@ export class PiSessionService implements SessionRouteService {
       await this.sessionManager.forgetSessionFile?.(input.path);
       await this.beforeEphemeralDelete?.(input.sessionId);
       await deleteEphemeralSessionFiles(root, input.path, input.sessionId);
+      this.sessionCloseStates.set(input.sessionId, "deleted");
     } catch (error) {
       this.logger.info({ err: error, sessionId: input.sessionId, path: input.path }, "ephemeral session deletion refused or failed");
       throw error;
@@ -4715,12 +4737,22 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private async assertWritable(ref: PiSessionRef): Promise<void> {
+    this.assertSessionAdmission(ref);
     await this.sessionWorktrees?.store.assertWritable(ref);
     if (await this.getArchived(ref) !== undefined) throw new Error("Archived sessions are read-only. Restore the session to continue.");
   }
 
   private async getOrOpen(ref: PiSessionRef): Promise<PiAgentSession> {
-    return (await this.getActive(ref)).runtime.session;
+    const active = await this.getActive(ref);
+    this.assertSessionAdmission(ref);
+    return active.runtime.session;
+  }
+
+  private assertSessionAdmission(ref: PiSessionRef): void {
+    for (const [id, state] of this.sessionCloseStates) {
+      if (!id.startsWith(ref.id)) continue;
+      throw new Error(state === "deleted" ? "Session not found" : "Session is closing");
+    }
   }
 
   private async historySessionManager(
@@ -4746,7 +4778,9 @@ export class PiSessionService implements SessionRouteService {
 
   private async getActive(ref: PiSessionRef, options: Pick<CreateSessionRuntimeOptions, "notificationGeneration"> = {}, stopped: () => boolean = () => false): Promise<ActiveSession<PiSessionRuntime>> {
     this.assertSessionOpenAllowed(stopped);
+    this.assertSessionAdmission(ref);
     await this.sessionWorktrees?.store.assertWritable(ref);
+    this.assertSessionAdmission(ref);
     const active = this.activeForRef(ref);
     if (active !== undefined) return active;
 
@@ -4770,15 +4804,16 @@ export class PiSessionService implements SessionRouteService {
     return this.openExistingSession(match.id, match.cwd, () => this.sessionManager.open(match.path), options);
   }
 
-  private openExistingSession(
+  private async openExistingSession(
     sessionId: string,
     cwd: string,
     openSessionManager: () => PiSessionManager,
     options: Pick<CreateSessionRuntimeOptions, "notificationGeneration" | "notifications" | "initialModel" | "initialModelChain" | "initialThinkingLevel"> = {},
   ): Promise<ActiveSession<PiSessionRuntime>> {
-    if (this.stopping) return Promise.reject(new Error("Session service is shutting down"));
+    if (this.stopping) throw new Error("Session service is shutting down");
+    this.assertSessionAdmission({ id: sessionId, cwd });
     const active = this.activeForRef({ id: sessionId, cwd });
-    if (active !== undefined) return Promise.resolve(active);
+    if (active !== undefined) return active;
 
     const key = JSON.stringify([canonicalizeStoredCwd(cwd), sessionId]);
     const existing = this.pendingSessionOpens.get(key);
@@ -4901,10 +4936,12 @@ export class PiSessionService implements SessionRouteService {
     const delegationToolsEnabled = await sessionAllowsDelegationTools(sessionManager, this.sessionManager);
     const settings = SettingsManager.create(cwd, this.agentDir);
     const scopedModels = await resolveEnabledModels(settings, this.modelRuntime);
+    const ephemeralSessionsRoot = this.sessionManager.ephemeralSessionsRoot?.();
     const runtime = await this.createAgentRuntime(this.createRuntime, {
       cwd,
       agentDir: this.agentDir,
       sessionManager,
+      ...(ephemeralSessionsRoot === undefined ? {} : { ephemeralSessionsRoot }),
       delegationToolsEnabled,
       scopedModels,
       ...(options.initialModel === undefined ? {} : { initialModel: options.initialModel }),
@@ -4946,6 +4983,7 @@ export class PiSessionService implements SessionRouteService {
     if (notificationGeneration !== undefined) this.notificationGenerationBySession.set(runtime.session, notificationGeneration);
 
     try {
+      this.assertSessionAdmission({ id: runtime.session.sessionId, cwd });
       await this.restoreAttentionHint(runtime.session);
       await this.excludeVerifiedHistoricalChildFromUnread(runtime.session);
       startup.report(STARTUP_PHASE_EXTENSIONS);
@@ -5000,6 +5038,7 @@ export class PiSessionService implements SessionRouteService {
           throw error;
         }
       });
+      this.assertSessionAdmission({ id: runtime.session.sessionId, cwd });
       this.active.set(runtime.session.sessionId, active);
       if (notificationOwnership === "replacement" && notificationGeneration !== undefined) {
         this.publishNotificationMutations(this.notificationStore.commitReplacement(notificationGeneration));
@@ -5349,7 +5388,7 @@ export class PiSessionService implements SessionRouteService {
       // agent_end precedes extension handlers and retries. agent_settled fires
       // after agent_end handlers and transcript projection finish.
       if (eventType === "agent_settled") this.attentionHints.settled(this.attentionSession(session));
-      if (eventType === "agent_settled" && session.sessionFile !== undefined && !isEphemeralSessionPath(session.sessionFile)) {
+      if (eventType === "agent_settled" && session.sessionFile !== undefined && !isEphemeralSessionPath(session.sessionFile, this.sessionManager.ephemeralSessionsRoot?.())) {
         void this.sessionSearch?.refreshFile(session.sessionFile).catch((error: unknown) => {
           this.logger.info({ err: error, sessionId: session.sessionId }, "session search refresh failed");
         });
@@ -5671,6 +5710,7 @@ export class PiSessionService implements SessionRouteService {
     targets: readonly TreeExclusiveOperationTarget[],
     activeError: string,
     operation: () => Promise<T>,
+    admission: "keep-open" | "close" = "keep-open",
   ): Promise<T> {
     const sessionIds = new Set<string>();
     const runtimes = new Set<PiSessionRuntime>();
@@ -5684,6 +5724,10 @@ export class PiSessionService implements SessionRouteService {
       if (session !== undefined) sessions.add(session);
     }
 
+    if (admission === "close") {
+      for (const sessionId of sessionIds) this.assertSessionAdmission({ id: sessionId, cwd: "" });
+      for (const sessionId of sessionIds) this.sessionCloseStates.set(sessionId, "closing");
+    }
     for (const sessionId of sessionIds) {
       this.treeExclusiveSessionOperationCounts.set(sessionId, (this.treeExclusiveSessionOperationCounts.get(sessionId) ?? 0) + 1);
     }
@@ -5695,6 +5739,10 @@ export class PiSessionService implements SessionRouteService {
     try {
       return await operation();
     } finally {
+      if (admission === "close") for (const sessionId of sessionIds) {
+        // Successful permanent deletion keeps its tombstone: an admitted lookup may still hold a stale file result.
+        if (this.sessionCloseStates.get(sessionId) === "closing") this.sessionCloseStates.delete(sessionId);
+      }
       for (const runtime of runtimes) decrementWeakCount(this.treeExclusiveRuntimeOperationCounts, runtime);
       for (const sessionId of sessionIds) decrementMapCount(this.treeExclusiveSessionOperationCounts, sessionId);
       for (const session of sessions) {
@@ -5734,6 +5782,7 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private beginSessionEntryMutation(session: PiAgentSession, action: string): void {
+    this.assertSessionAdmission({ id: session.sessionId, cwd: session.sessionManager.getCwd() });
     this.assertTreeNavigationInactive(session, action);
     this.sessionEntryMutationCounts.set(session, (this.sessionEntryMutationCounts.get(session) ?? 0) + 1);
     this.observeUnreadActivityState(session);
@@ -6158,12 +6207,12 @@ function sessionCatalogIdentity(session: PiAgentSession): string {
   ]);
 }
 
-function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession {
+function clientSessionFromListEntry(session: PiSessionListEntry, ephemeralRoot: string | undefined): ClientSession {
   return {
     id: session.id,
     path: session.path,
     cwd: session.cwd,
-    ...(isEphemeralSessionPath(session.path) ? { ephemeral: true } : {}),
+    ...(isEphemeralSessionPath(session.path, ephemeralRoot) ? { ephemeral: true } : {}),
     persisted: true,
     ...(session.name === undefined ? {} : { name: session.name }),
     created: session.created.toISOString(),

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { EPHEMERAL_SESSIONS_DIRECTORY } from "./sessions/ephemeralSessions.js";
 import { BacklogSuggestionStore } from "./backlog/suggestions/suggestionStore.js";
 import { BacklogSuggestionService } from "./backlog/suggestions/suggestionService.js";
 import { registerBacklogSuggestionRoutes } from "./backlog/suggestions/suggestionRoutes.js";
@@ -160,7 +161,7 @@ async function createSessionDaemonRuntime() {
     },
   });
   await unreadStore.load();
-  const archiveStore = new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment));
+  const archiveStore = new SessionArchiveStore(defaultSessionArchiveFilePath(daemonEnvironment), undefined, join(piWebDataDir(daemonEnvironment), EPHEMERAL_SESSIONS_DIRECTORY));
   await initializeSessionArchive(archiveStore.initialize(), app.log);
   const backlogClaims = new BacklogClaimStore(join(piWebDataDir(daemonEnvironment), "backlog-claims.json"));
   await backlogClaims.initialize();
@@ -210,7 +211,7 @@ async function createSessionDaemonRuntime() {
   // agents may spawn sessions: children can predate a config change, and the
   // session tree should stay honest about them either way.
   const projects = new ProjectService(new ProjectStore(projectStorePath(daemonEnvironment)));
-  const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"));
+  const worktreeStore = new SessionWorktreeStore(join(piWebDataDir(daemonEnvironment), "session-worktrees.json"), join(piWebDataDir(daemonEnvironment), EPHEMERAL_SESSIONS_DIRECTORY));
   await worktreeStore.initialize(await archiveStore.list());
   const workspaceServices = new WorkspaceServices({
     directory: join(piWebDataDir(daemonEnvironment), "workspace-services"), worktrees: worktreeStore,
@@ -253,6 +254,7 @@ async function createSessionDaemonRuntime() {
   const sessionSearch = new SessionSearchService({
     filePath: join(piWebDataDir(daemonEnvironment), "session-search.sqlite"),
     sessionsDir: join(activeAgentProfile.dir, "sessions"),
+    ephemeralSessionsRoot: join(piWebDataDir(daemonEnvironment), EPHEMERAL_SESSIONS_DIRECTORY),
     catalog: async () => (await sessions.machineListing()).sessions,
     positions: (ref) => sessions.searchMessagePositions(ref),
     log: (message) => { app.log.warn(message); },

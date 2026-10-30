@@ -1,3 +1,4 @@
+import { assertOrdinarySessionDirectory, configuredOrdinarySessionDirectory, EPHEMERAL_SESSIONS_DIRECTORY } from "./server/sessions/ephemeralSessions.js";
 import { ModelChainsSchema, ModelChainReferenceSchema } from "./shared/modelChains.js";
 import { Check } from "typebox/value";
 import { AzureDevopsGlobalConfigSchema, type AzureDevopsGlobalConfig } from "./shared/azureDevopsConfig.js";
@@ -140,12 +141,17 @@ export function piWebConfigPath(env: NodeJS.ProcessEnv = process.env, cwd = proc
 export function loadPiWebConfig(options: LoadOptions = {}): LoadedPiWebConfig {
   const env = options.env ?? process.env;
   const path = piWebConfigPath(env, options.cwd ?? process.cwd());
-  if (!existsSync(path)) return { path, exists: false, config: {} };
+  if (!existsSync(path)) {
+    assertSessionDirectoryConfiguration(effectiveAgentConfig(env), env, options.cwd ?? process.cwd());
+    return { path, exists: false, config: {} };
+  }
 
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!isRecord(parsed)) throw new Error(`Forgerie config must be a JSON object: ${path}`);
 
-  return { path, exists: true, config: parsePiWebConfig(parsed, path, options.onWarning) };
+  const config = parsePiWebConfig(parsed, path, options.onWarning);
+  assertSessionDirectoryConfiguration(effectiveAgentConfig(env, config), env, options.cwd ?? process.cwd());
+  return { path, exists: true, config };
 }
 
 export function effectivePiWebConfig(options: LoadOptions = {}): LoadedEffectivePiWebConfig {
@@ -158,6 +164,7 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
   const port = env["PI_WEB_PORT"] ?? env["PORT"];
   const maxUpload = env["PI_WEB_MAX_UPLOAD_BYTES"];
   const agent = effectiveAgentConfig(env, loaded.config);
+  assertSessionDirectoryConfiguration(agent, env, options.cwd ?? process.cwd());
   return {
     ...loaded,
     config: {
@@ -182,6 +189,13 @@ export function resolveEffectivePiWebConfig(loaded: LoadedPiWebConfig, options: 
       agent: { command: agent.command, dir: agent.dir },
     },
   };
+}
+
+function assertSessionDirectoryConfiguration(agent: EffectivePiWebAgentConfig, env: NodeJS.ProcessEnv, cwd: string): void {
+  const ephemeralRoot = join(piWebDataDir(env, cwd), EPHEMERAL_SESSIONS_DIRECTORY);
+  assertOrdinarySessionDirectory(join(agent.dir, "sessions"), ephemeralRoot);
+  const sessionDir = configuredOrdinarySessionDirectory(agent.dir, cwd, env["HOME"] ?? homedir(), agent.sessionDirEnvKeys.map(key => env[key]).find(value => value !== undefined && value !== ""));
+  if (sessionDir !== undefined) assertOrdinarySessionDirectory(sessionDir.sessionDir, ephemeralRoot);
 }
 
 export function savePiWebConfig(config: PiWebConfig, options: LoadOptions = {}): LoadedPiWebConfig {

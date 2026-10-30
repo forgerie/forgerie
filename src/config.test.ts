@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -446,5 +446,28 @@ describe("automatic session recaps", () => {
       await writeFile(configPath, JSON.stringify({ autoRecap }));
       expect(() => loadPiWebConfig(testOptions())).toThrow("autoRecap must be a boolean");
     }
+  });
+});
+
+
+describe("ephemeral session storage separation", () => {
+  it.each(["equal", "inside", "contains"] as const)("rejects an environment ordinary directory %s to the ephemeral root on config load", async overlap => {
+    const dataDir = join(tempDir, "data");
+    const ephemeralRoot = join(dataDir, "ephemeral-sessions");
+    await mkdir(ephemeralRoot, { recursive: true });
+    const existing = join(ephemeralRoot, "existing.jsonl"); await writeFile(existing, "keep unchanged");
+    const directory = overlap === "equal" ? ephemeralRoot : overlap === "inside" ? join(ephemeralRoot, "ordinary") : dataDir;
+    expect(() => effectivePiWebConfig({ env: { PI_WEB_CONFIG: configPath, PI_WEB_DATA_DIR: dataDir, PI_WEB_AGENT_DIR: join(tempDir, "agent"), PI_WEB_AGENT_SESSION_DIR: directory } })).toThrow(/ordinary session directory.*overlap/iu);
+    expect(() => loadPiWebConfig({ env: { PI_WEB_CONFIG: configPath, PI_WEB_DATA_DIR: dataDir, PI_WEB_AGENT_DIR: join(tempDir, "agent"), PI_WEB_AGENT_SESSION_DIR: directory } })).toThrow(/ordinary session directory.*overlap/iu);
+    expect(await readFile(existing, "utf8")).toBe("keep unchanged");
+  });
+  it("rejects a settings directory through a canonical alias before its descendants exist", async () => {
+    const dataDir = join(tempDir, "data"), agentDir = join(tempDir, "agent");
+    await mkdir(dataDir); await mkdir(agentDir);
+    const alias = join(tempDir, "alias"); await symlink(dataDir, alias);
+    const settings = JSON.stringify({ sessionDir: join(alias, "ephemeral-sessions", "ordinary") });
+    await writeFile(join(agentDir, "settings.json"), settings);
+    expect(() => effectivePiWebConfig({ env: { PI_WEB_CONFIG: configPath, PI_WEB_DATA_DIR: dataDir, PI_WEB_AGENT_DIR: agentDir } })).toThrow(/ordinary session directory.*overlap/iu);
+    expect(await readFile(join(agentDir, "settings.json"), "utf8")).toBe(settings);
   });
 });

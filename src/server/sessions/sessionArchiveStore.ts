@@ -53,6 +53,7 @@ export class SessionArchiveStore {
   constructor(
     private readonly filePath = defaultSessionArchiveFilePath(),
     private readonly archiveDir = join(dirname(filePath), "archived-sessions"),
+    private readonly ephemeralSessionsRoot?: string,
   ) {}
 
   initialize(): Promise<SessionArchiveInitializationResult> {
@@ -80,7 +81,7 @@ export class SessionArchiveStore {
 
   async archiveMany(sessions: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
     if (sessions.length === 0) return [];
-    if (sessions.some(session => isEphemeralSessionPath(session.path))) throw new Error("Ephemeral sessions must be deleted, not archived");
+    if (sessions.some(session => isEphemeralSessionPath(session.path, this.ephemeralSessionsRoot))) throw new Error("Ephemeral sessions must be deleted, not archived");
     return this.exclusive(async () => {
       const data = cloneArchiveFile(await this.snapshot());
       const records: ArchivedSessionRecord[] = [];

@@ -341,7 +341,13 @@ end. Git worktrees, branches, and workspace files stay in place.
 Ephemeral transcripts live in `<app-data>/ephemeral-sessions/`, with their journals
 in that folder's `.durable/` directory. `PI_WEB_DATA_DIR` sets `<app-data>`; the
 default is `~/.forgerie`. Pi session-directory settings do not move ephemeral
-sessions. Forgerie refuses deletion if files are linked, outside this folder,
+sessions. Only canonical paths inside this exact configured root are ephemeral;
+other folders named `ephemeral-sessions` are ordinary storage. Ordinary session
+storage must not equal, contain, or sit inside the ephemeral root. Configuration
+load and session creation reject overlapping settings without moving or deleting
+existing files. Unknown ownership takes the ordinary archive path.
+
+Forgerie refuses deletion if files are linked, outside this folder,
 or share a journal with another session. The daemon logs the refusal and keeps
 the files for inspection.
 
