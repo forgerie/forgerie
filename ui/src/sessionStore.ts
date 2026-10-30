@@ -1,4 +1,5 @@
-import { recapResultSchema } from "@shared/sessionRecap";
+import { createSessionPresence, browserPresence, composerHasFocusedText, type PresenceEnvironment } from "./sessionPresence";
+import { recapResultSchema, sessionSeenResultSchema } from "@shared/sessionRecap";
 import type { RecapRequestState } from "./recap/recapModel";
 import type { SessionModelSelection } from "@shared/sessionModelSelection";
 import type { EarlierHistory } from "./historyPaging";
@@ -92,6 +93,7 @@ interface RecoveryTiming {
   /** How long a message waits for the connection to return before it goes back to the message box. */
   connectionWaitMs?: number;
   now?: () => number;
+  presence?: PresenceEnvironment;
 }
 interface Join {
   identity: symbol;
@@ -175,18 +177,33 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
   let earlierRead: Promise<void> | undefined;
   let pendingReceipt: ReadReceipt | undefined;
   let activation = new AbortController();
-  let selectedVisible = reads === undefined;
-  let openRecap: Promise<void> | undefined;
-  let attemptedRecapReceipt: string | undefined;
-  function maybeOpenRecap() {
-    if (!pendingReceipt || !selectedVisible || state.status?.readOnly || state.connection.type !== "ready") return;
-    const key = `${pendingReceipt.catalogId}:${pendingReceipt.throughCompletionOrder}`;
-    if (attemptedRecapReceipt === key || openRecap !== undefined) return;
-    attemptedRecapReceipt = key;
-    openRecap = requestRecap("open").finally(() => { openRecap = undefined; acknowledge(); });
-  }
+  let selectedVisible = false;
+  let seenThrough: string | undefined;
+  const presence = createSessionPresence({
+    environment: timing.presence ?? browserPresence,
+    arrive: async active => {
+      const session = state.session;
+      if (!session) return;
+      const eligible = !state.transcript.isRunning && !isBashRunning(state) && !state.status?.isCompacting && !state.sending && !composerHasFocusedText();
+      // This fast handshake snapshots pre-arrival state and sends the first heartbeat atomically.
+      const result = await request(`${root}/seen`, sessionSeenResultSchema, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, seenThrough, arrival: true, active }),
+      }, lifetime.signal, 10_000);
+      if (result.arrivalId !== undefined && eligible && selectedVisible && (timing.presence ?? browserPresence).visible() && !state.transcript.isRunning && !composerHasFocusedText()) void requestRecap("open", result.arrivalId);
+    },
+    seen: async keepalive => {
+      const session = state.session;
+      if (!session) return;
+      const response = await transport.request(`${root}/seen`, {
+        method: "POST", keepalive, signal: AbortSignal.timeout(10_000), headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd: session.cwd, ...(seenThrough === undefined ? {} : { seenThrough }) }),
+      });
+      if (!response.ok) throw new Error(`Session presence failed: HTTP ${response.status}`);
+    },
+    failed: (error: unknown) => { update(withProblem(state, "Could not record session presence", messageOf(error))); },
+  });
   function acknowledge() {
-    if (openRecap !== undefined) return;
     if (!reads || !pendingReceipt || readRefreshRequested || !selectedVisible || !reads.isVisible()) return;
     const receipt = pendingReceipt;
     const signal = AbortSignal.any([activation.signal, lifetime.signal]);
@@ -220,6 +237,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     next = { ...next, completedRuns: state.completedRuns + (busy(state) && !busy(next) ? 1 : 0) };
     const error = next.transcript.error;
     state = error !== undefined && error !== state.transcript.error ? withProblem(next, "Pi reported an error", error) : next;
+    // Cached history remains on screen during reconnects and in-place refreshes.
+    if (state.connection.type === "ready") presence.setReady(true);
     for (const listener of listeners) listener();
   };
   const current = (attempt: Join) => join === attempt && !lifetime.signal.aborted;
@@ -349,6 +368,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     return event.type === "command.output" || event.type === "session.error" || event.type.startsWith("shell.");
   }
   function applyOpen(previous: SessionState, open: SessionOpen, buffered: readonly UiEvent[]): SessionState {
+    seenThrough = open.page.messages.findLast(message => message.id !== undefined)?.id;
     if (open.readPath === "native") buffered = buffered.filter(nativeHostEvent);
     const running = open.status.isStreaming || open.status.isCompacting;
     const hostSeq = open.cut === "sequential" ? open.statusSeq ?? open.seq : open.seq;
@@ -530,7 +550,6 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       statusVersion++; retryDelay = initialDelay; attempts = 0;
       if (capturedCatalogVersion === catalogVersion) readRefreshRequested = false;
       update({ ...joined, connection: { type: "ready" }, lastReadyAt: now() });
-      maybeOpenRecap();
       acknowledge();
       void loadCommands();
       scheduleReadRefresh();
@@ -606,13 +625,13 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       });
     } finally { update({ ...state, sending: false, waitingToSend: false }); }
   }
-  async function requestRecap(trigger: "open" | "manual") {
+  async function requestRecap(trigger: "open" | "manual", arrivalId?: string) {
     const session = state.session;
     if (!session || state.recap?.kind === "writing" || state.status?.readOnly) return;
     update({ ...state, recap: { kind: "writing" } });
     try {
       const result = await request(`${root}/recap`, recapResultSchema, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd, trigger }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cwd: session.cwd, trigger, ...(arrivalId === undefined ? {} : { arrivalId }) }),
       }, lifetime.signal, 60_000);
       update({ ...state, recap: result.kind === "failed" ? { kind: "failed", message: result.message } : { kind: "idle" } });
       // The native publisher already sends the committed entry. Classic readers need a new cut.
@@ -908,7 +927,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     },
     setVisible: (visible: boolean) => {
       activation.abort(); activation = new AbortController(); selectedVisible = visible;
-      if (visible) { maybeOpenRecap(); acknowledge(); scheduleReadRefresh(); }
+      presence.setSelected(visible);
+      if (visible) { acknowledge(); scheduleReadRefresh(); }
     },
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -990,7 +1010,7 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
     cancel: () => command("abort"),
     submitAsk: (answers: AskAnswer[]) => closeAsk("submit", answers),
     dismissAsk: () => closeAsk("dismiss"),
-    dispose: () => { activation.abort(); lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); unwatchUnread?.(); listeners.clear(); },
+    dispose: () => { presence.dispose(); activation.abort(); lifetime.abort(); clearTimeout(retryTimer); closeJoin(); unwatch?.(); unwatchUnread?.(); listeners.clear(); },
   };
 }
 export type SessionStore = ReturnType<typeof createSessionStore>;

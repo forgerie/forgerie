@@ -92,7 +92,7 @@ export interface PiWebConfigValues {
    * not available with credentials, the session's own model is used.
    */
   sessionTitleModel?: string;
-  /** Write catch-up recaps for unread completed sessions. Defaults to true. */
+  /** Write catch-up recaps on arrival after time away and unseen work. Defaults to true. */
   autoRecap?: boolean;
   /** Ordered model lists for sessions, child agents, workflow workers and titles. */
   modelChains?: ModelChains;

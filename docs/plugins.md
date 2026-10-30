@@ -95,22 +95,29 @@ their goal and next step.
 
 Ephemeral sessions have no recaps, including manual `/recap`. See [ephemeral sessions](config.md#ephemeral-sessions).
 
-Forgerie checks unread completions after ten minutes. Automatic recaps require
-an idle, writable parent session with at least three completed user turns and,
-after its first recap, at least two new user turns. Opening an unread session
-can write its recap immediately under the same guards, without waiting for the
-ten-minute timer. Reading the completion, sending a message or stopping the
-session cancels its timer. The timer only writes a recap for a session that is
-still open in the daemon; it never opens one. After a daemon restart, or after
-you stop a session, the recap is written when you open the session instead.
+Forgerie checks for a recap only when you arrive: you select the session or
+return to its visible page. It does not add recaps while you read replies.
+You must have been away for at least 30 minutes. At least two completed turns,
+or one assistant reply with at least 2,000 visible characters, must be unseen.
+The session must have at least three completed turns and be an idle, writable
+parent session. A recap that already covers the latest entry is not repeated.
+There is no background recap timer. Unread badges do not control recaps.
 
-Type `/recap` in the composer to write one now. It ignores the delay and turn
+A visible, selected session counts as seen only while you have used a pointer,
+key, scroll, touch or wheel in the last two minutes. The browser reports this
+at once, every 30 seconds, and when you leave. Any device counts, including
+while a run is active. The daemon saves the time and the latest visible history
+marker. Sessions never seen since this feature was added count as away. An
+unknown history marker falls back to the exchanges after the last recap.
+No arrival recap starts while the composer has focus with text.
+
+Type `/recap` in the composer to write one now. It ignores absence and turn
 counts, but requires at least one exchange and an idle session. While writing,
-a quiet line replaces the pending note. Manual and on-open failures show a
-short error; an automatic failure retries once after 30 seconds, then stops.
+a quiet line replaces the pending note. Manual and arrival failures show a
+short error. Recap requests do not delay marking a visible completion read.
 
 Each recap uses up to eight recent visible exchanges, bounded to about 32 KB.
 Tools, thinking, skill blocks and file blocks are excluded. A source line names
 the model and the number of messages. Recaps stay where they were written when the chat
 continues. They are display-only Durable entries and do not enter model context.
-[Configure automatic recaps](config.md#session-recaps) with `autoRecap`.
+[Configure arrival recaps](config.md#session-recaps) with `autoRecap`.

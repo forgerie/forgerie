@@ -8,6 +8,8 @@ const session = (id: string) => ({ id, cwd: "/workspace" });
 async function fixture() {
   const server = await createOpenServer(url => {
     if (url.pathname.endsWith("/open")) return openFixture({ session: session(url.pathname.split("/").at(-2) ?? "known") });
+    if (url.pathname.endsWith("/seen")) return { arrivalId: "12345678-1234-4234-8234-123456789abc" };
+    if (url.pathname.endsWith("/recap")) return { kind: "skipped" };
     return Response.json({ error: "Panel unavailable in fixture" }, { status: 404 });
   }); cleanup.push(server.close);
   const registry = createSessionRegistry(server.transport, { isVisible: () => true, afterPaint: async () => {} }); cleanup.push(registry.dispose);
@@ -23,10 +25,10 @@ describe("six-entry session lifetime", () => {
     expect(api.sockets.clients.size).toBe(6);
     expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(6);
     // Hidden entries seed only transcript + commands. The selected entry reads its eight panel routes, backlog suggestions among them.
-    await vi.waitFor(() => expect(api.requests).toHaveLength(20));
+    await vi.waitFor(() => expect(api.requests.filter(url => !/\/(seen|recap)$/u.test(url.pathname))).toHaveLength(20));
     expect(api.requests.filter(url => url.pathname === "/api/backlog/suggestions")).toHaveLength(1);
     expect(api.registry.select(session("s1"))).toBe(prefetched);
-    await vi.waitFor(() => expect(api.requests).toHaveLength(28));
+    await vi.waitFor(() => expect(api.requests.filter(url => !/\/(seen|recap)$/u.test(url.pathname))).toHaveLength(28));
     expect(api.registry.select(session("s1"))).toBe(prefetched);
     const requests = api.requests.length;
     await new Promise(resolve => setTimeout(resolve, 20)); expect(api.requests).toHaveLength(requests);
@@ -130,7 +132,7 @@ it("defers speculative and hidden reconnect panel reads until selection, without
   if (!entry) throw new Error("Missing prefetched entry");
   await vi.waitFor(() => expect(entry.store.getSnapshot().connection.type).toBe("ready"));
   await new Promise(resolve => setTimeout(resolve, 350));
-  const panels = () => api.requests.filter(url => !/\/(open|commands)$/u.test(url.pathname));
+  const panels = () => api.requests.filter(url => !/\/(open|commands|seen|recap)$/u.test(url.pathname));
   expect(panels()).toHaveLength(0);
   for (const socket of api.sockets.clients) socket.close();
   await vi.waitFor(() => expect(api.requests.filter(url => url.pathname.endsWith("/open"))).toHaveLength(2), { timeout: 3000 });

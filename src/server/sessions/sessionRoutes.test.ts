@@ -81,6 +81,26 @@ describe("session connection health", () => {
 });
 
 describe("session routes", () => {
+  it("validates seen heartbeats and returns an identity-bound arrival token without opening a runtime", async () => {
+    const first = await app.inject({ method: "POST", url: "/sessions/test/seen", payload: { cwd: "/workspace", arrival: true, active: false } });
+    expect(first.statusCode).toBe(200);
+    const result: { arrivalId: string } = first.json();
+    expect(result.arrivalId).toMatch(/^[a-f0-9-]{36}$/u);
+    expect(sessionManager.calls.open).toBe(0);
+    // A consumed, missing, or foreign token must not start automatic work.
+    expect((await service.recap({ id: "test", cwd: "/different" }, "open", result.arrivalId)).kind).toBe("skipped");
+    expect((await service.recap({ id: "test", cwd: "/workspace" }, "open")).kind).toBe("skipped");
+    for (const payload of [{ cwd: "" }, { cwd: "/workspace", lastSeenAt: 1 }, { cwd: "/workspace", arrival: true }, { cwd: "/workspace", seenThrough: 3 }]) {
+      expect((await app.inject({ method: "POST", url: "/sessions/test/seen", payload })).statusCode).toBe(400);
+    }
+    const calls: unknown[] = [];
+    service.seen = (ref, request) => { calls.push({ ref, request }); return Promise.resolve({}); };
+    expect((await app.inject({ method: "POST", url: "/sessions/test/seen", payload: { cwd: "/workspace", seenThrough: "latest" } })).json()).toEqual({});
+    expect(calls).toEqual([{ ref: { id: "test", cwd: resolve("/workspace") }, request: { cwd: "/workspace", seenThrough: "latest" } }]);
+    service.seen = () => Promise.reject(new Error("private storage path"));
+    const failure = await app.inject({ method: "POST", url: "/sessions/test/seen", payload: { cwd: "/workspace" } });
+    expect(failure.statusCode).toBe(503); expect(failure.body).not.toContain("private");
+  });
   it("validates recap requests and maps provider failures without exposing raw errors", async () => {
     const calls: unknown[] = [];
     service.recap = (ref, trigger) => { calls.push({ ref, trigger }); return Promise.resolve({ kind: "written" }); };

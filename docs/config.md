@@ -43,7 +43,7 @@ The inherited `PI_WEB_*` names remain supported. They do not enable upstream ins
 | `modelChains` | Named ordered model lists for main sessions, child agents, workflow workers and session titles, 1 to 16 entries each, for example `{"worker": ["anthropic/claude-opus-4", "openai/gpt-5:high"]}`. Edit them in Settings > Models > Model chains, or in the file. Read again at selection and fallback, so a save needs no restart. See [model chains](child-agents.md#model-chains) for validation, precedence, cooldowns, and costs. |
 | `defaultModelChain` | Optional new-session default chain name. Settings > Models writes it when a chain is selected as the default, and keeps Pi's default model on the chain's first concrete entry. An explicit session model overrides it. Selecting a plain default removes it. |
 | `sessionTitleModel` | The `provider/model-id` or chain name that writes a new session's title from its first prompt, for example a small fast model. Unset: each session's own model writes its title. Set it in **Settings → Models → Session titles**. The session daemon reads it for each title, so a change applies to the next new session without a restart. If no signed-in provider offers the model, the session's own model writes the title, and the daemon logs `title_model_unavailable`. A title chain tries each non-cooling entry once, in order, and records provider failures in the shared cooldown registry. If none succeeds, Forgerie uses a deterministic label from the request. |
-| `autoRecap` | Write catch-up recaps for unread completed sessions. Defaults to `true`. Set `false` to disable automatic and on-open recaps, but keep manual `/recap`. See [session recaps](#session-recaps). |
+| `autoRecap` | Write catch-up recaps when you arrive after time away and enough unseen work. Defaults to `true`. Set `false` to disable arrival recaps, but keep manual `/recap`. See [session recaps](#session-recaps). |
 | `plugins` | Current browser-app plugin enablement and settings. See [plugins](plugins.md). |
 | `pathAccess.allowedPaths` | External filesystem roots that file APIs can expose outside a workspace. Workspace access remains subject to path validation. |
 | `uploads.defaultFolder` | Relative folder for saved uploads. Defaults to `.forgerie/uploads`. Absolute paths and parent traversal are rejected. |
@@ -364,8 +364,10 @@ Omitting it creates an ordinary persistent session. Session catalogs report
 ## Session recaps
 
 `autoRecap` defaults to `true`. Set it to `false` in Forgerie's `config.json`
-to disable automatic and on-open recaps. The daemon reads this setting for each
-request; no restart is needed. Manual `/recap` still works for non-ephemeral sessions.
+to disable arrival recaps. These run only when you return after at least 30
+minutes away and enough unseen work has accumulated. There is no background
+timer. The daemon reads this setting for each request; no restart is needed.
+Manual `/recap` still works for non-ephemeral sessions.
 
 Recaps use `sessionTitleModel` when that model is available with credentials,
 otherwise the session's model. When `sessionTitleModel` names a chain, a recap

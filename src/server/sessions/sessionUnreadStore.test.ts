@@ -223,7 +223,7 @@ describe("SessionUnreadStore", () => {
     expect(errors[0]?.error).toBeInstanceOf(Error);
     expect(store.catalogSnapshot()).toEqual({ catalogId: "catalog-reset", catalogRevision: 0, sessions: [] });
     expect(persistence.valueSnapshot()).toMatchObject({
-      version: 1,
+      version: 2,
       catalogId: "catalog-reset",
       catalogRevision: 0,
       nextCompletionOrder: 0,
@@ -454,15 +454,17 @@ describe("FileSessionUnreadPersistence", () => {
     });
     await store.load();
     complete(store, "session-1", "/repo");
+    store.observeSeen("session-1", "/repo", "answer", ["answer"]);
     await store.flush();
 
     const persisted: unknown = JSON.parse(await readFile(filePath, "utf8"));
     expect(persisted).toMatchObject({
-      version: 1,
+      version: 2,
       catalogId: "catalog-a",
       catalogRevision: 1,
       nextCompletionOrder: 1,
       sessions: [{ sessionId: "session-1", cwd: "/repo", completionOrder: 1 }],
+      seen: [{ sessionId: "session-1", cwd: "/repo", seenThrough: "answer", lastSeenAt: Date.parse("2026-07-20T00:00:00.000Z") }],
     });
     // Windows reports synthesized POSIX mode bits and ignores the requested file mode.
     if (process.platform !== "win32") expect((await stat(filePath)).mode & 0o777).toBe(0o600);
@@ -474,6 +476,7 @@ describe("FileSessionUnreadPersistence", () => {
       catalogId: "catalog-a",
       sessions: [{ sessionId: "session-1", completionOrder: 1 }],
     });
+    expect(reloaded.seenState("session-1", "/repo")).toEqual({ lastSeenAt: Date.parse("2026-07-20T00:00:00.000Z"), seenThrough: "answer" });
   });
 });
 
@@ -504,7 +507,8 @@ function currentOrder(store: SessionUnreadStore, sessionId: string, cwd: string)
 
 function emptyPersistedState(catalogId: string): SessionUnreadPersistedState {
   return {
-    version: 1,
+    version: 2,
+    seen: [],
     catalogId,
     catalogRevision: 0,
     nextCompletionOrder: 0,
@@ -592,3 +596,53 @@ async function temporaryRoot(): Promise<string> {
   roots.push(root);
   return root;
 }
+
+describe("persisted session presence", () => {
+  it("keeps time and branch coverage monotonic across devices, including a backward clock", () => {
+    let now = 10_000;
+    const store = new SessionUnreadStore({ now: () => new Date(now) });
+    store.observeSeen("s", "/repo", "b", ["a", "b", "c"]);
+    now = 20_000; store.observeSeen("s", "/repo", "a", ["a", "b", "c"]);
+    expect(store.seenState("s", "/repo")).toEqual({ lastSeenAt: 20_000, seenThrough: "b" });
+    now = 15_000; store.observeSeen("s", "/repo", "c", ["a", "b", "c"]);
+    expect(store.seenState("s", "/repo")).toEqual({ lastSeenAt: 20_000, seenThrough: "c" });
+    store.observeSeen("s", "/repo", "foreign", ["a", "b", "c"]);
+    expect(store.seenState("s", "/repo")?.seenThrough).toBe("c");
+    store.observeSeen("s", "/repo", "a", ["a"], 10_000);
+    expect(store.seenState("s", "/repo")).toEqual({ lastSeenAt: 20_000, seenThrough: "c" });
+    expect(store.seenState("s", "/different")).toBeUndefined();
+    expect(store.catalogSnapshot().sessions).toEqual([]);
+  });
+  it("round-trips presence even after unread was acknowledged, and forgets deleted sessions", async () => {
+    const persistence = new MemoryPersistence(undefined);
+    const store = new SessionUnreadStore({ persistence, now: () => new Date(1000) }); await store.load();
+    store.observeSeen("s", "/repo", "answer", ["answer"]);
+    complete(store, "s", "/repo");
+    store.acknowledge("s", { cwd: "/repo", catalogId: store.catalogSnapshot().catalogId, throughCompletionOrder: 1 });
+    await store.flush();
+    const restored = new SessionUnreadStore({ persistence }); await restored.load();
+    expect(restored.seenState("s", "/repo")).toEqual({ lastSeenAt: 1000, seenThrough: "answer" });
+    expect(restored.catalogSnapshot().sessions).toEqual([]);
+    restored.forgetSession("s", "/repo"); await restored.flush();
+    const deleted = new SessionUnreadStore({ persistence }); await deleted.load();
+    expect(deleted.seenState("s", "/repo")).toBeUndefined();
+  });
+  it("loads version-one unread files without losing badges or inventing presence", async () => {
+    const persistence = new MemoryPersistence({ version: 1, catalogId: "old", catalogRevision: 1, nextCompletionOrder: 1,
+      sessions: [{ sessionId: "s", cwd: "/repo", completionOrder: 1, completedAt: "2026-01-01T00:00:00.000Z" }] });
+    const store = new SessionUnreadStore({ persistence }); await store.load();
+    expect(store.catalogSnapshot()).toMatchObject({ catalogId: "old", sessions: [{ sessionId: "s", completionOrder: 1 }] });
+    expect(store.seenState("s", "/repo")).toBeUndefined();
+    store.observeSeen("s", "/repo", undefined, []); await store.flush();
+    expect(persistence.valueSnapshot()).toMatchObject({ version: 2, seen: [{ sessionId: "s" }] });
+  });
+  it("reconciles presence independently from unread and tolerates an unavailable marker", () => {
+    const store = new SessionUnreadStore({ now: () => new Date(1000) });
+    store.observeSeen("gone", "/repo", undefined, []);
+    store.observeSeen("keep", "/repo", "other-branch", ["other-branch"]);
+    store.observeSeen("keep", "/repo", "current-branch", ["current-branch"]);
+    store.reconcileCwd("/repo", ["keep"]);
+    expect(store.seenState("gone", "/repo")).toBeUndefined();
+    expect(store.seenState("keep", "/repo")).toEqual({ lastSeenAt: 1000, seenThrough: "current-branch" });
+  });
+});

@@ -713,7 +713,8 @@ interface Deferred {
 class RecoveringUnreadPersistence implements SessionUnreadPersistence {
   saveCalls = 0;
   private value: SessionUnreadPersistedState = {
-    version: 1,
+    version: 2,
+    seen: [],
     catalogId: "catalog-test",
     catalogRevision: 0,
     nextCompletionOrder: 0,

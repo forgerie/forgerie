@@ -1,3 +1,4 @@
+import { SESSION_SEEN_MARKER_MAX_LENGTH, type SessionSeenState } from "../../shared/sessionRecap.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -14,7 +15,7 @@ import {
   type SessionUnreadSummary,
 } from "../../shared/apiTypes.js";
 
-const SESSION_UNREAD_STATE_VERSION = 1;
+const SESSION_UNREAD_STATE_VERSION = 2;
 const SESSION_UNREAD_FILE_MODE = 0o600;
 
 export interface SessionUnreadPersistedState {
@@ -23,6 +24,7 @@ export interface SessionUnreadPersistedState {
   catalogRevision: number;
   nextCompletionOrder: number;
   sessions: SessionUnreadSummary[];
+  seen: (SessionSeenState & SessionUnreadIdentity)[];
 }
 
 export interface SessionUnreadPersistence {
@@ -71,6 +73,7 @@ export class SessionUnreadStore {
   private readonly unreadByIdentity = new Map<string, SessionUnreadSummary>();
   private readonly activeByIdentity = new Map<string, SessionUnreadIdentity>();
   private readonly excludedByIdentity = new Map<string, SessionUnreadIdentity>();
+  private readonly seenByIdentity = new Map<string, SessionSeenState & SessionUnreadIdentity>();
   private catalogId: string;
   private catalogRevision = 0;
   private nextCompletionOrder = 0;
@@ -111,6 +114,26 @@ export class SessionUnreadStore {
         .sort((left, right) => right.completionOrder - left.completionOrder)
         .map((summary) => ({ ...summary })),
     };
+  }
+
+  seenState(sessionId: string, cwd: string): SessionSeenState | undefined {
+    this.requireLoaded();
+    const state = this.seenByIdentity.get(sessionIdentityKey(requireIdentity(sessionId, cwd)));
+    return state === undefined ? undefined : { lastSeenAt: state.lastSeenAt, ...(state.seenThrough === undefined ? {} : { seenThrough: state.seenThrough }) };
+  }
+
+  /** Any device counts. A stale marker cannot move coverage backward on the current branch. */
+  observeSeen(sessionId: string, cwd: string, seenThrough: string | undefined, branchIds: readonly (string | undefined)[], observedAt = this.now().getTime()): void {
+    this.requireLoaded();
+    const identity = requireIdentity(sessionId, cwd), key = sessionIdentityKey(identity);
+    const previous = this.seenByIdentity.get(key);
+    const lastSeenAt = Math.max(observedAt, previous?.lastSeenAt ?? 0);
+    const nextIndex = seenThrough === undefined ? -1 : branchIds.indexOf(seenThrough);
+    const previousIndex = previous?.seenThrough === undefined ? -1 : branchIds.indexOf(previous.seenThrough);
+    const currentBranch = previousIndex >= 0 || observedAt >= (previous?.lastSeenAt ?? 0);
+    const marker = currentBranch && nextIndex >= 0 && nextIndex >= previousIndex ? seenThrough : previous?.seenThrough;
+    this.seenByIdentity.set(key, { ...identity, lastSeenAt, ...(marker === undefined ? {} : { seenThrough: marker }) });
+    this.schedulePersist();
   }
 
   observeActivityState(sessionId: string, cwd: string, active: boolean): SessionUnreadMutation[] {
@@ -206,7 +229,11 @@ export class SessionUnreadStore {
 
     this.activeByIdentity.delete(key);
     this.excludedByIdentity.delete(key);
-    if (current === undefined) return [];
+    const removedSeen = this.seenByIdentity.delete(key);
+    if (current === undefined) {
+      if (removedSeen) this.schedulePersist();
+      return [];
+    }
 
     this.unreadByIdentity.delete(key);
     const mutations = [this.mutation(identity, null)];
@@ -229,12 +256,16 @@ export class SessionUnreadStore {
       if (identity.cwd === boundedCwd && !retained.has(identity.sessionId)) this.excludedByIdentity.delete(key);
     }
 
+    let removedSeen = false;
+    for (const [key, identity] of this.seenByIdentity) {
+      if (identity.cwd === boundedCwd && !retained.has(identity.sessionId)) { this.seenByIdentity.delete(key); removedSeen = true; }
+    }
     const mutations: SessionUnreadMutation[] = [];
     for (const [key, summary] of removed) {
       this.unreadByIdentity.delete(key);
       mutations.push(this.mutation(summary, null));
     }
-    if (mutations.length > 0) this.schedulePersist();
+    if (mutations.length > 0 || removedSeen) this.schedulePersist();
     return mutations;
   }
 
@@ -313,6 +344,7 @@ export class SessionUnreadStore {
     this.unreadByIdentity.clear();
     this.activeByIdentity.clear();
     this.excludedByIdentity.clear();
+    this.seenByIdentity.clear();
   }
 
   private mutation(identity: SessionUnreadIdentity, unread: SessionUnreadSummary | null): SessionUnreadMutation {
@@ -414,10 +446,13 @@ export class SessionUnreadStore {
       catalogRevision: this.catalogRevision,
       nextCompletionOrder: this.nextCompletionOrder,
       sessions: [...this.unreadByIdentity.values()].map((summary) => ({ ...summary })),
+      seen: [...this.seenByIdentity.values()].map(state => ({ ...state })),
     };
   }
 
   private installPersistedState(state: SessionUnreadPersistedState): void {
+    this.seenByIdentity.clear();
+    for (const stateSeen of state.seen) this.seenByIdentity.set(sessionIdentityKey(stateSeen), { ...stateSeen });
     this.catalogId = state.catalogId;
     this.catalogRevision = state.catalogRevision;
     this.nextCompletionOrder = state.nextCompletionOrder;
@@ -491,7 +526,7 @@ export function defaultSessionUnreadFilePath(env: NodeJS.ProcessEnv = process.en
 
 function parsePersistedState(value: unknown): SessionUnreadPersistedState {
   const record = requireRecord(value, "Session unread state must be an object");
-  if (record["version"] !== SESSION_UNREAD_STATE_VERSION) throw new Error("Unsupported session unread state version");
+  if (record["version"] !== 1 && record["version"] !== SESSION_UNREAD_STATE_VERSION) throw new Error("Unsupported session unread state version");
   const catalogId = requireCatalogId(record["catalogId"]);
   const catalogRevision = requireNonNegativeSafeInteger(record["catalogRevision"], "catalogRevision");
   const nextCompletionOrder = requireNonNegativeSafeInteger(record["nextCompletionOrder"], "nextCompletionOrder");
@@ -512,12 +547,26 @@ function parsePersistedState(value: unknown): SessionUnreadPersistedState {
   const maxOrder = sessions.reduce((maximum, summary) => Math.max(maximum, summary.completionOrder), 0);
   if (nextCompletionOrder < maxOrder) throw new Error("Session unread completion order is inconsistent");
   if (catalogRevision < nextCompletionOrder) throw new Error("Session unread catalog revision is inconsistent");
+  const rawSeen = record["version"] === 1 ? [] : record["seen"];
+  if (!Array.isArray(rawSeen)) throw new Error("Session seen state must be an array");
+  const seen = rawSeen.map((value: unknown) => {
+    const state = requireRecord(value, "Session seen state must be an object");
+    const identity = requireIdentity(
+      requireBoundedNonEmptyString(state["sessionId"], "sessionId", SESSION_UNREAD_SESSION_ID_MAX_LENGTH),
+      requireBoundedNonEmptyString(state["cwd"], "cwd", SESSION_UNREAD_CWD_MAX_LENGTH),
+    );
+    const lastSeenAt = requireNonNegativeSafeInteger(state["lastSeenAt"], "lastSeenAt");
+    const seenThrough = state["seenThrough"] === undefined ? undefined : requireBoundedNonEmptyString(state["seenThrough"], "seenThrough", SESSION_SEEN_MARKER_MAX_LENGTH);
+    return { ...identity, lastSeenAt, ...(seenThrough === undefined ? {} : { seenThrough }) };
+  });
+  if (new Set(seen.map(sessionIdentityKey)).size !== seen.length) throw new Error("Duplicate session seen identity");
   return {
     version: SESSION_UNREAD_STATE_VERSION,
     catalogId,
     catalogRevision,
     nextCompletionOrder,
     sessions,
+    seen,
   };
 }
 

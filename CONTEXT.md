@@ -110,3 +110,28 @@ A saved, display-only catch-up in a session's transcript, titled **While you wer
 away**. It summarizes recent visible exchanges. Its **Needs you** row reads live
 session obligations; it is not part of the saved summary or the model context.
 _Avoid_: Reply, compaction summary
+
+Recaps run only on arrival: selecting a session or making its page visible.
+They require 30 minutes away, three completed turns in total, and either two
+unseen completed turns or one unseen assistant reply with 2,000 visible
+characters. Idle, writable parent-session and coverage guards still apply.
+Unread badges are separate. Manual `/recap` ignores absence and turn counts.
+`autoRecap: false` disables arrival recaps, not manual requests.
+
+A selected, visible session is seen while input was used in the last two
+minutes, even during a run. Browsers send a heartbeat at once, every 30 seconds,
+and on departure. Any device counts. The daemon keeps `lastSeenAt` and the
+latest stable browser history ID in version 2 of `session-unread.json`.
+This reuses the unread file's atomic writer, without changing badge state.
+Version 1 loads without seen state. Unknown IDs use history after the last recap.
+The store prevents older device markers or backward clocks from moving seen
+state backward on the current branch.
+
+An arrival heartbeat captures the old seen state before recording the new
+presence. It returns a short-lived, identity-bound, one-use token for the
+`open` recap request. Later heartbeats cannot change that snapshot. The token
+lives only in the recap request owner and expires after two minutes. This adds
+one fast handshake, but does not hold up read acknowledgement or wait for the
+recap model. In-place reloads, active runs, and a focused composer with text
+never start arrival recaps. There are no recap timers or automatic retries.
+The saved `automatic` trigger remains readable for older history.

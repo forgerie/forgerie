@@ -1,5 +1,6 @@
 import { createSessionStore, type SessionTransport } from "./sessionStore";
 import type { Session } from "./contracts";
+import { createBrowserPresenceEnvironment, type PresenceEnvironment } from "./sessionPresence";
 import { createReadTracker } from "./readReceipt";
 import { afterTranscriptPaint } from "./readPaint";
 import { createChildAgentsStore } from "./childAgents/childAgentsStore";
@@ -16,6 +17,7 @@ import { createSuggestionsStore } from "./backlog/suggestions/suggestionsStore";
 export interface RegistryReceipt { catalogId: string; throughCompletionOrder: number }
 export function createSessionEntry(session: Session, transport: SessionTransport, options: {
   isVisible?: () => boolean;
+  presence?: PresenceEnvironment;
   onUnread?: (listener: (id: string, receipt?: RegistryReceipt) => void) => () => void;
   afterPaint?: (signal: AbortSignal) => Promise<void>;
 } = {}) {
@@ -40,7 +42,7 @@ export function createSessionEntry(session: Session, transport: SessionTransport
   childAgents.setVisible(false);
   const reads = createReadTracker(transport, { isVisible: () => visible && !store.getSnapshot().transcript.isRunning && (options.isVisible?.() ?? document.visibilityState === "visible"),
     subscribe: options.onUnread, afterRender: options.afterPaint ?? afterTranscriptPaint });
-  const store = createSessionStore(session.id, transport, {}, session.cwd ? session : undefined, reads, event => {
+  const store = createSessionStore(session.id, transport, options.presence === undefined ? {} : { presence: options.presence }, session.cwd ? session : undefined, reads, event => {
     if (event === CHILDREN_CHANGED_EVENT) refreshPanels(childAgents, workflows, taskActivity);
     if (event === WORKFLOW_RUNS_CHANGED_EVENT) refreshPanels(workflows, decisions, gated);
   }, event => {
@@ -83,6 +85,8 @@ export function createSessionRegistry(transport: SessionTransport, options: Para
   machine?: string; capacity?: number; createEntry?: (session: Session) => SessionEntry;
 } = {}) {
   const capacity = options.capacity ?? 6;
+  const ownedPresence = options.presence === undefined ? createBrowserPresenceEnvironment() : undefined;
+  const presence = options.presence ?? ownedPresence;
   let entries: KeptEntry[] = [];
   let selected: string | undefined;
   let visible = true;
@@ -117,7 +121,7 @@ export function createSessionRegistry(transport: SessionTransport, options: Para
         if (!victim) return undefined;
         evict(victim);
       }
-      record = { key, entry: options.createEntry?.(session) ?? createSessionEntry(session, transport, options), selectedAt: -Infinity, selections: 0, visited: false, state: "queued" };
+      record = { key, entry: options.createEntry?.(session) ?? createSessionEntry(session, transport, { ...options, ...(presence === undefined ? {} : { presence }) }), selectedAt: -Infinity, selections: 0, visited: false, state: "queued" };
       entries.push(record);
     }
     if (visit) {
@@ -146,7 +150,7 @@ export function createSessionRegistry(transport: SessionTransport, options: Para
     },
     setVisible: (next: boolean) => { visible = next; for (const record of entries) record.entry.setVisible(next && record.key === selected); },
     forget: (id: string) => { for (const record of [...entries]) if (record.entry.session.id === id) evict(record); publish(); },
-    dispose: () => { if (disposed) return; disposed = true; for (const record of [...entries]) evict(record); publish(); listeners.clear(); },
+    dispose: () => { if (disposed) return; disposed = true; for (const record of [...entries]) evict(record); ownedPresence?.dispose(); publish(); listeners.clear(); },
   };
 }
 export type SessionRegistry = ReturnType<typeof createSessionRegistry>;

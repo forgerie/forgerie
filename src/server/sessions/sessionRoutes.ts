@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { recapRequestSchema } from "../../shared/sessionRecap.js";
+import { recapRequestSchema, sessionSeenRequestSchema } from "../../shared/sessionRecap.js";
 import { sessionModelSelectionSchema, type SessionModelSelection } from "../../shared/sessionModelSelection.js";
 import { sessionEarlierQuerySchema, sessionOpenQuerySchema } from "../../shared/sessionOpen.js";
 import { SessionOpenError } from "./sessionOpen.js";
@@ -168,12 +168,23 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
+  app.post<{ Params: { sessionId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/seen`, async (request, reply) => {
+    const parsed = sessionSeenRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Invalid session seen request" });
+    if (sessions.seen === undefined) return reply.code(501).send({ error: "Session presence is unavailable" });
+    try {
+      return await sessions.seen({ id: request.params.sessionId, cwd: normalizeRequestCwd(parsed.data.cwd) }, parsed.data);
+    } catch {
+      return reply.code(503).send({ error: "Could not record session presence" });
+    }
+  });
+
   app.post<{ Params: { sessionId: string }; Body: unknown }>(`${prefix}/sessions/:sessionId/recap`, async (request, reply) => {
     const parsed = recapRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Invalid recap request" });
     if (sessions.recap === undefined) return reply.code(501).send({ error: "Recaps are unavailable" });
     try {
-      return await sessions.recap({ id: request.params.sessionId, cwd: normalizeRequestCwd(parsed.data.cwd) }, parsed.data.trigger);
+      return await sessions.recap({ id: request.params.sessionId, cwd: normalizeRequestCwd(parsed.data.cwd) }, parsed.data.trigger, parsed.data.arrivalId);
     } catch {
       return reply.code(503).send({ error: "Could not write a recap. Try /recap again." });
     }

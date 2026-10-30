@@ -100,3 +100,46 @@ it("returns nothing when a turn lands while the branch is read, so a stale promp
     expect(history).toBeUndefined();
   } finally { await f.harness.close(context); }
 });
+
+it("counts only completed unseen turns and individual visible long replies after the seen marker", async () => {
+  const f = await fixture();
+  try {
+    const branch: RecapBranchEntry[] = [
+      { ...message("user", "Old"), id: "u1" }, { ...message("assistant", "Old answer"), id: "a1" },
+      { ...message("user", "New"), id: "u2" }, { ...message("assistant", "x".repeat(2000)), id: "a2" },
+      { ...message("user", "Not answered yet"), id: "u3" },
+    ];
+    expect(await readRecapHistory(f.handle, () => Promise.resolve(branch), "a1")).toMatchObject({
+      completedTurns: 2, unseenTurns: 1, longestUnseenReply: 2000,
+    });
+    expect(await readRecapHistory(f.handle, () => Promise.resolve(branch), "a2")).toMatchObject({ unseenTurns: 0, longestUnseenReply: 0 });
+    // A reply whose request was already seen still counts as a long unseen reply.
+    expect(await readRecapHistory(f.handle, () => Promise.resolve(branch), "u2")).toMatchObject({ unseenTurns: 1, longestUnseenReply: 2000 });
+  } finally { await f.harness.close(context); }
+});
+it("falls back to completed turns after the last recap for an unknown or missing seen marker", async () => {
+  const f = await fixture();
+  try {
+    const branch = [message("user", "Before"), message("assistant", "Old"), recapCard,
+      message("user", "One"), message("assistant", "One done"), message("user", "Two"), message("assistant", "Two done"), message("user", "Pending")];
+    for (const marker of [undefined, "not-on-this-branch"]) {
+      expect(await readRecapHistory(f.handle, () => Promise.resolve(branch), marker)).toMatchObject({ completedTurns: 3, unseenTurns: 2 });
+    }
+    expect(await readRecapHistory(f.handle, () => Promise.resolve(branch.slice(3)))).toMatchObject({ unseenTurns: 2 });
+  } finally { await f.harness.close(context); }
+});
+it("relates native browser presentation IDs to the projected branch without counting hidden text", async () => {
+  const f = await fixture();
+  try {
+    const user = await f.user(); const answer = await f.answer();
+    const { durableEntryPresentationId } = await import("./durableNativeHistory.js");
+    const branch: RecapBranchEntry[] = [{ ...message("user", "Please fix it"), id: "sdk-user" },
+      { type: "message", id: "sdk-answer", message: { role: "assistant", content: [
+        { type: "thinking", thinking: "x".repeat(3000) }, { type: "text", text: "Visible" },
+      ] } }];
+    const history = await readRecapHistory(f.handle, () => Promise.resolve(branch), durableEntryPresentationId("recap", user, 0),
+      entry => entry.id === user.id ? "sdk-user" : entry.id === answer.id ? "sdk-answer" : undefined);
+    expect(history).toMatchObject({ unseenTurns: 1, longestUnseenReply: 7 });
+    expect(history?.branchIds).toEqual([durableEntryPresentationId("recap", user, 0), durableEntryPresentationId("recap", answer, 0)]);
+  } finally { await f.harness.close(context); }
+});

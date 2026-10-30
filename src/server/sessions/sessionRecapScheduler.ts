@@ -1,68 +1,64 @@
-import { RECAP_DELAY_MS, type RecapResult, type RecapTrigger } from "../../shared/sessionRecap.js";
-import type { SessionUnreadSummary } from "../../shared/apiTypes.js";
+import { randomUUID } from "node:crypto";
+import { RECAP_AWAY_MS, RECAP_UNSEEN_TURNS, RECAP_LONG_REPLY_CHARS, type RecapResult, type RecapTrigger, type SessionSeenState } from "../../shared/sessionRecap.js";
 
 export interface RecapGuards {
-  enabled: boolean; unread: boolean; idle: boolean; writable: boolean; child: boolean;
-  completedTurns: number; newTurns: number; hasRecap: boolean; covered: boolean; hasExchange: boolean;
+  enabled: boolean; idle: boolean; writable: boolean; child: boolean;
+  completedTurns: number; unseenTurns: number; longestUnseenReply: number;
+  lastSeenAt: number | undefined; now: number; covered: boolean; hasExchange: boolean;
 }
 export function canWriteRecap(guards: RecapGuards, trigger: RecapTrigger): boolean {
   if (!guards.idle || !guards.writable || guards.child || !guards.hasExchange) return false;
   if (trigger === "manual") return true;
-  return guards.enabled && guards.unread && guards.completedTurns >= 3
-    && (!guards.hasRecap || guards.newTurns >= 2) && !guards.covered;
+  // "automatic" is a read-only legacy trigger.
+  return trigger === "open" && guards.enabled && guards.completedTurns >= 3 && !guards.covered
+    && (guards.lastSeenAt === undefined || guards.now - guards.lastSeenAt >= RECAP_AWAY_MS)
+    && (guards.unseenTurns >= RECAP_UNSEEN_TURNS || guards.longestUnseenReply >= RECAP_LONG_REPLY_CHARS);
 }
+export interface RecapArrival { seen: SessionSeenState | undefined; at: number }
 export interface RecapIdentity { id: string; cwd: string }
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const ARRIVAL_TTL_MS = 2 * 60_000;
+const MAX_ARRIVALS = 1000;
 const keyOf = (ref: RecapIdentity) => JSON.stringify([ref.id, ref.cwd]);
 
-/** Daemon-owned timers. The unread catalog is the only persisted scheduling authority. */
+/** Daemon-owned in-flight deduplication and cancellation. Recaps run only on request. */
 export class SessionRecapScheduler {
-  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly flights = new Map<string, { controller: AbortController; promise: Promise<RecapResult> }>();
-  private automaticRunning = 0;
   private stopped = false;
-  constructor(private readonly generate: (ref: RecapIdentity, trigger: RecapTrigger, signal: AbortSignal) => Promise<RecapResult>,
-    private readonly now: () => number = Date.now) {}
+  private readonly arrivals = new Map<string, { key: string; snapshot: RecapArrival }>();
+  constructor(private readonly generate: (ref: RecapIdentity, trigger: RecapTrigger, signal: AbortSignal, arrival?: RecapArrival) => Promise<RecapResult>) {}
 
-  rearm(summaries: readonly SessionUnreadSummary[]): void {
-    summaries.forEach((summary, index) => { this.schedule(summary, Math.max(0, Date.parse(summary.completedAt) + RECAP_DELAY_MS - this.now()) + index * 1000); });
+  /** Short-lived, identity-bound, one-use snapshots make heartbeat/request ordering irrelevant. */
+  arrive(ref: RecapIdentity, snapshot: RecapArrival): string {
+    for (const [id, arrival] of this.arrivals) if (snapshot.at - arrival.snapshot.at > ARRIVAL_TTL_MS) this.arrivals.delete(id);
+    if (this.arrivals.size >= MAX_ARRIVALS) {
+      const oldest = this.arrivals.keys().next().value;
+      if (oldest !== undefined) this.arrivals.delete(oldest);
+    }
+    const id = randomUUID();
+    this.arrivals.set(id, { key: keyOf(ref), snapshot });
+    return id;
   }
-  schedule(summary: SessionUnreadSummary, delay = Math.max(0, Date.parse(summary.completedAt) + RECAP_DELAY_MS - this.now()), retry = false): void {
-    if (this.stopped) return;
-    const ref = { id: summary.sessionId, cwd: summary.cwd }, key = keyOf(ref);
-    this.cancel(ref);
-    const timer = setTimeout(() => {
-      // A wall-clock correction can put a persisted completion beyond Node's timer range.
-      if (delay > MAX_TIMER_DELAY_MS) { this.schedule(summary, delay - MAX_TIMER_DELAY_MS, retry); return; }
-      if (this.automaticRunning >= 2) { this.schedule(summary, 1000, retry); return; }
-      this.automaticRunning++;
-      void this.request(ref, "automatic").then(result => {
-        if (this.timers.get(key) !== timer) return;
-        this.timers.delete(key);
-        if (result.kind === "failed" && !retry && !this.stopped) this.schedule(summary, 30_000, true);
-      }).finally(() => { this.automaticRunning--; });
-    }, Math.min(delay, MAX_TIMER_DELAY_MS));
-    timer.unref();
-    this.timers.set(key, timer);
+  takeArrival(ref: RecapIdentity, id: string | undefined, now: number): RecapArrival | undefined {
+    if (id === undefined) return undefined;
+    const arrival = this.arrivals.get(id);
+    if (arrival?.key !== keyOf(ref)) return undefined;
+    this.arrivals.delete(id);
+    return now - arrival.snapshot.at <= ARRIVAL_TTL_MS ? arrival.snapshot : undefined;
   }
-  /** Reading cancels timers. A new prompt also invalidates any in-flight request. */
   cancel(ref: RecapIdentity, abort = false): void {
-    const key = keyOf(ref);
-    clearTimeout(this.timers.get(key)); this.timers.delete(key);
-    if (abort) this.flights.get(key)?.controller.abort();
+    if (abort) this.flights.get(keyOf(ref))?.controller.abort();
   }
-  /** Closing a runtime ends its recap work in every cwd: a timer must not reopen what the user stopped. */
   cancelSession(id: string): void {
     const prefix = `${JSON.stringify([id]).slice(0, -1)},`;
-    for (const [key, timer] of this.timers) if (key.startsWith(prefix)) { clearTimeout(timer); this.timers.delete(key); }
     for (const [key, flight] of this.flights) if (key.startsWith(prefix)) flight.controller.abort();
+    for (const [id, arrival] of this.arrivals) if (arrival.key.startsWith(prefix)) this.arrivals.delete(id);
   }
-  request(ref: RecapIdentity, trigger: RecapTrigger): Promise<RecapResult> {
+  request(ref: RecapIdentity, trigger: RecapTrigger, arrival?: RecapArrival): Promise<RecapResult> {
     if (this.stopped) return Promise.resolve({ kind: "skipped" });
     const key = keyOf(ref), existing = this.flights.get(key);
     if (existing !== undefined) return existing.promise;
     const controller = new AbortController();
-    const promise = Promise.resolve().then(() => this.generate(ref, trigger, controller.signal))
+    const promise = Promise.resolve().then(() => this.generate(ref, trigger, controller.signal, arrival))
       .then((result): RecapResult => controller.signal.aborted ? { kind: "skipped" } : result)
       .catch((): RecapResult => controller.signal.aborted ? { kind: "skipped" } : { kind: "failed", message: "Could not write a recap. Try /recap again." })
       .finally(() => { if (this.flights.get(key)?.promise === promise) this.flights.delete(key); });
@@ -71,8 +67,7 @@ export class SessionRecapScheduler {
   }
   dispose(): void {
     this.stopped = true;
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
+    this.arrivals.clear();
     for (const flight of this.flights.values()) flight.controller.abort();
   }
 }

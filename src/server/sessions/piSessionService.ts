@@ -1,7 +1,7 @@
 import { isEphemeralSessionPath } from "./ephemeralSessions.js";
 import { assertEphemeralJournalOwnership, assertEphemeralSessionFiles, assertEphemeralWatchFile, deleteEphemeralSessionFiles } from "./ephemeralSessionStorage.js";
-import { RECAP_DELAY_MS, type RecapResult, type RecapTrigger } from "../../shared/sessionRecap.js";
-import { SessionRecapScheduler, canWriteRecap } from "./sessionRecapScheduler.js";
+import { type RecapResult, type RecapTrigger, type SessionSeenRequest, type SessionSeenResult } from "../../shared/sessionRecap.js";
+import { SessionRecapScheduler, canWriteRecap, type RecapArrival } from "./sessionRecapScheduler.js";
 import { buildRecapPrompt, generateSessionRecap } from "./sessionRecapGenerator.js";
 import { commitSessionRecap, readRecapHistory } from "./durableSessionRecap.js";
 import { firstUsableChainModel, generateChainSessionName } from "./modelChainTitles.js";
@@ -1292,11 +1292,10 @@ export class PiSessionService implements SessionRouteService {
     this.notificationStore = deps.notificationStore ?? new SessionNotificationStore();
     this.unreadStore = deps.unreadStore ?? new SessionUnreadStore();
     this.autoRecap = deps.autoRecap ?? (() => true);
-    this.recaps = new SessionRecapScheduler((ref, trigger, signal) => this.writeRecap(ref, trigger, signal).catch(() => {
+    this.recaps = new SessionRecapScheduler((ref, trigger, signal, arrival) => this.writeRecap(ref, trigger, signal, arrival).catch(() => {
       this.logger.info({ sessionId: ref.id, failureKind: "exception" }, "session recap request failed");
       return { kind: "failed", message: "Could not write a recap. Try /recap again." };
-    }), () => this.now().getTime());
-    this.recaps.rearm(this.unreadStore.catalogSnapshot().sessions);
+    }));
     this.sessionAsks = deps.sessionAsks ?? new SessionAsks({
       readResponse: (id) => {
         const session = this.active.get(id)?.runtime.session ?? this.startupSessions.get(id);
@@ -1432,40 +1431,63 @@ export class PiSessionService implements SessionRouteService {
     return this.unreadStore.durableCatalogSnapshot();
   }
 
-  private recapUnread(ref: PiSessionRef) {
-    return this.unreadStore.catalogSnapshot().sessions.find(item => item.sessionId === ref.id && item.cwd === ref.cwd);
+  /** Arrival snapshot and presence share one request. Heartbeats cannot erase an arrival's absence. */
+  async seen(ref: PiSessionRef, request: SessionSeenRequest): Promise<SessionSeenResult> {
+    if (this.stopping) return {};
+    const observedAt = this.now().getTime();
+    const identity = { id: ref.id, cwd: canonicalizeStoredCwd(ref.cwd) };
+    const arrivalId = "arrival" in request ? this.recaps.arrive(identity, {
+      seen: this.unreadStore.seenState(identity.id, identity.cwd), at: observedAt,
+    }) : undefined;
+    const result = arrivalId === undefined ? {} : { arrivalId };
+    if ("arrival" in request && !request.active) return result;
+    // Heartbeats never reopen a stopped runtime. Seeing a running session still counts.
+    const session = this.activeForRef(identity)?.runtime.session;
+    if (!(session instanceof DurableAgentSession)) {
+      this.unreadStore.observeSeen(identity.id, identity.cwd, undefined, [], observedAt);
+      await this.unreadStore.flush();
+      return result;
+    }
+    const history = await readRecapHistory(session.journal.handle,
+      async () => { await session.journal.project(); return session.sessionManager.getBranch(); }, undefined,
+      (entry, index) => session.journal.sdkEntryId(entry, index));
+    if (this.activeForRef(identity)?.runtime.session !== session) return result;
+    this.unreadStore.observeSeen(identity.id, identity.cwd, request.seenThrough, history?.branchIds ?? [], observedAt);
+    await this.unreadStore.flush();
+    return result;
   }
 
   private recapStopped(signal: AbortSignal): boolean { return this.stopping || signal.aborted; }
 
-  recap(ref: PiSessionRef, trigger: "open" | "manual"): Promise<RecapResult> {
-    return this.recaps.request({ id: ref.id, cwd: canonicalizeStoredCwd(ref.cwd) }, trigger);
+  recap(ref: PiSessionRef, trigger: "open" | "manual", arrivalId?: string): Promise<RecapResult> {
+    const identity = { id: ref.id, cwd: canonicalizeStoredCwd(ref.cwd) };
+    const arrival = trigger === "open" ? this.recaps.takeArrival(identity, arrivalId, this.now().getTime()) : undefined;
+    if (trigger === "open" && arrival === undefined) return Promise.resolve({ kind: "skipped" });
+    return this.recaps.request(identity, trigger, arrival);
   }
 
-  private async writeRecap(ref: PiSessionRef, trigger: RecapTrigger, signal: AbortSignal): Promise<RecapResult> {
+  private async writeRecap(ref: PiSessionRef, trigger: RecapTrigger, signal: AbortSignal, arrival?: RecapArrival): Promise<RecapResult> {
     if (this.stopping || signal.aborted) return { kind: "skipped" };
-    const unread = this.recapUnread(ref);
-    if (trigger !== "manual" && (!this.autoRecap() || unread === undefined)) return { kind: "skipped" };
-    if (trigger === "automatic" && unread !== undefined && this.now().getTime() < Date.parse(unread.completedAt) + RECAP_DELAY_MS) return { kind: "skipped" };
+    if (trigger !== "manual" && (!this.autoRecap() || trigger !== "open" || arrival === undefined)) return { kind: "skipped" };
     if (await this.archiveStore.isArchived(ref.id) || await this.sessionWorktrees?.store.readOnly(ref) !== undefined) return { kind: "skipped" };
     const file = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
     if (isEphemeralSessionPath(file?.path, this.sessionManager.ephemeralSessionsRoot?.())) return { kind: "skipped" };
-    // A timer never opens a runtime: nothing would release it, and a restart would open every unread session at once.
-    // A closed session gets its recap when the user opens it.
-    const session = trigger === "automatic" ? this.activeForRef(ref)?.runtime.session : await this.getOrOpen(ref);
-    if (!(session instanceof DurableAgentSession) || isEphemeralSessionPath(session.sessionFile, this.sessionManager.ephemeralSessionsRoot?.())) return { kind: "skipped" };
+    // Only manual /recap may open a runtime. An arrival reads the runtime the browser already opened.
+    const session = trigger === "manual" ? await this.getOrOpen(ref) : this.activeForRef(ref)?.runtime.session;
+    if (!(session instanceof DurableAgentSession) || this.recapStopped(signal)
+      || isEphemeralSessionPath(session.sessionFile, this.sessionManager.ephemeralSessionsRoot?.())) return { kind: "skipped" };
     const handle = session.journal.handle;
     const trackedChild = await verifiedTrackedSubsessionLink(this.sessionManager, {
       sessionId: session.sessionId, sessionFile: session.sessionFile, sessionManager: session.sessionManager, cwd: ref.cwd,
     });
-    const history = await readRecapHistory(handle, async () => { await session.journal.project(); return session.sessionManager.getBranch(); });
+    const history = await readRecapHistory(handle, async () => { await session.journal.project(); return session.sessionManager.getBranch(); },
+      arrival?.seen?.seenThrough, (entry, index) => session.journal.sdkEntryId(entry, index));
     if (history === undefined) return trigger === "manual" ? { kind: "failed", message: "The chat changed while the recap was read. Try /recap again." } : { kind: "skipped" };
-    if (trigger !== "manual" && this.recapUnread(ref)?.completionOrder !== unread?.completionOrder) return { kind: "skipped" };
     if (trigger === "manual" && !history.hasExchange) return { kind: "failed", message: "A recap needs at least one exchange." };
     if (trigger === "manual" && this.hasActiveWork(session)) return { kind: "failed", message: "Wait for this run to finish, then try /recap again." };
-    if (!canWriteRecap({ enabled: this.autoRecap(), unread: unread !== undefined, idle: !this.hasActiveWork(session), writable: true,
-      child: trackedChild !== undefined || history.child, completedTurns: history.completedTurns, newTurns: history.newTurns,
-      hasRecap: history.lastRecap !== undefined, covered: history.lastRecap?.coversThroughEntryId === history.newestEntryId,
+    if (!canWriteRecap({ enabled: this.autoRecap(), lastSeenAt: arrival?.seen?.lastSeenAt, now: arrival?.at ?? this.now().getTime(), idle: !this.hasActiveWork(session), writable: true,
+      child: trackedChild !== undefined || history.child, completedTurns: history.completedTurns, unseenTurns: history.unseenTurns, longestUnseenReply: history.longestUnseenReply,
+      covered: history.lastRecap?.coversThroughEntryId === history.newestEntryId,
       hasExchange: history.hasExchange }, trigger)) return { kind: "skipped" };
     const input = buildRecapPrompt(history.messages), model = await this.recapModelFor(session);
     if (input === undefined || this.recapStopped(signal)) return { kind: "skipped" };
@@ -1473,13 +1495,13 @@ export class PiSessionService implements SessionRouteService {
     const result = await generateSessionRecap(session.agent.streamFunction, model, input.prompt, signal, failureKind => {
       this.logger.info({ sessionId: ref.id, failureKind }, "session recap generation failed");
     });
-    const fresh = (trigger === "manual" || this.autoRecap() && this.recapUnread(ref)?.completionOrder === unread?.completionOrder)
+    const fresh = (trigger === "manual" || this.autoRecap())
       && !this.recapStopped(signal) && this.activeForRef(ref)?.runtime.session === session
       && !this.hasActiveWork(session) && !await this.archiveStore.isArchived(ref.id)
       && await this.sessionWorktrees?.store.readOnly(ref) === undefined;
     const data = result.content === undefined || !fresh ? undefined : { ...result.content, trigger, model: `${model.provider}/${model.id}`,
       messageCount: input.messageCount, coversThroughEntryId: history.newestEntryId,
-      runEndedAt: unread?.completedAt ?? this.now().toISOString(), generatedAt: this.now().toISOString() };
+      runEndedAt: this.now().toISOString(), generatedAt: this.now().toISOString() };
     const written = await commitSessionRecap(handle, history.leafId, data, result.usage, `${model.provider}/${model.id}`);
     await session.journal.project();
     this.publishStatus(session);
@@ -5246,10 +5268,6 @@ export class PiSessionService implements SessionRouteService {
   }
 
   private publishUnreadMutations(mutations: readonly SessionUnreadMutation[]): Promise<void> {
-    for (const { event } of mutations) {
-      if (event.unread === null) this.recaps.cancel({ id: event.sessionId, cwd: event.cwd });
-      else this.recaps.schedule(event.unread);
-    }
     this.enqueueUnreadMutations(mutations);
     this.unreadPublicationFlushRequested = true;
     if (this.unreadPublication === undefined && this.unreadPublicationRetryTimer !== undefined) {

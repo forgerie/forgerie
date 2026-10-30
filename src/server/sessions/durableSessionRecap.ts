@@ -4,10 +4,12 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { RECAP_ENTRY_KIND, recapDataSchema, type RecapData } from "../../shared/sessionRecap.js";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { recapExchanges } from "./sessionRecapGenerator.js";
+import { durableEntryPresentationId } from "./durableNativeHistory.js";
+import { extractSearchMessage } from "./sessionSearchText.js";
 import { SessionBindings } from "./durableSessionBindings.js";
 
 /** The parts of a projected SDK session entry that a recap reads. */
-export interface RecapBranchEntry { type: string; message?: unknown; customType?: string }
+export interface RecapBranchEntry { id?: string; type: string; message?: unknown; customType?: string }
 
 /**
  * Conversation comes from the session's projected SDK branch, the same source as session search: only
@@ -18,7 +20,8 @@ export interface RecapBranchEntry { type: string; message?: unknown; customType?
  * The branch must describe the same history as the leaf that later guards the commit. The leaf is read
  * before the branch and again after the scan; if a turn landed in between, the result is `undefined`.
  */
-export async function readRecapHistory(handle: DurableSessionHandle, readBranch: () => Promise<readonly RecapBranchEntry[]>) {
+export async function readRecapHistory(handle: DurableSessionHandle, readBranch: () => Promise<readonly RecapBranchEntry[]>, seenThrough?: string,
+  sdkEntryId?: (entry: EntryRecord, index: number) => string | undefined) {
   const leafBefore = (await handle.conversation.entries({ order: "descending" }, 1, undefined, context)).items[0]?.id;
   const branch = await readBranch();
   const entries: EntryRecord[] = [];
@@ -35,11 +38,36 @@ export async function readRecapHistory(handle: DurableSessionHandle, readBranch:
   const messages = messagesOf(branch);
   const exchanges = recapExchanges(messages);
   const recapAt = branch.map(entry => entry.type === "custom_message" && entry.customType === RECAP_ENTRY_KIND).lastIndexOf(true);
+  // Browser IDs are Durable presentation IDs; the projected branch uses SDK IDs.
+  const presentationIds = new Map<string, string>();
+  for (const entry of entries) for (let index = 0; index < Math.max(1, entry.model?.length ?? 0); index++) {
+    const sdk = sdkEntryId?.(entry, index);
+    if (sdk !== undefined) presentationIds.set(sdk, durableEntryPresentationId(handle.address.journalId, entry, index));
+  }
+  const branchIds = branch.map(entry => entry.id === undefined ? undefined : presentationIds.get(entry.id) ?? entry.id);
+  const seenAt = seenThrough === undefined ? -1 : branchIds.indexOf(seenThrough);
+  const unseenAfter = seenAt < 0 ? recapAt : seenAt;
+  let unseenTurns = 0, longestUnseenReply = 0;
+  let hasUser = false, lastAnswer = -1;
+  for (const [index, entry] of branch.entries()) {
+    const visible = entry.type === "message" ? extractSearchMessage({ type: "message", id: entry.id ?? "", message: entry.message }) : undefined;
+    if (visible?.role === "user") {
+      if (lastAnswer >= 0) {
+        if (lastAnswer > unseenAfter) unseenTurns++;
+        lastAnswer = -1;
+      }
+      hasUser = true;
+    } else if (visible?.role === "assistant") {
+      if (hasUser) lastAnswer = index;
+      if (index > unseenAfter) longestUnseenReply = Math.max(longestUnseenReply, visible.text.trim().length);
+    }
+  }
+  if (lastAnswer > unseenAfter) unseenTurns++;
   const view = await handle.conversation.viewState(context);
   const child = view.value.conversation.owner !== undefined;
   view.dispose();
   return {
-    child, messages, leafId: entries.at(-1)?.id,
+    child, messages, branchIds, unseenTurns, longestUnseenReply, leafId: entries.at(-1)?.id,
     newestEntryId: String([...entries].reverse().find(entry => entry.kind !== RECAP_ENTRY_KIND)?.id ?? ""),
     lastRecap,
     completedTurns: exchanges.filter(exchange => exchange.assistant !== "").length,
