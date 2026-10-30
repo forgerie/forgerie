@@ -1,4 +1,4 @@
-import { ArchiveIcon, ArrowLeftIcon, CalendarClockIcon, ChevronsUpIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, SearchIcon, Trash2Icon, XIcon,
+import { ArchiveIcon, GhostIcon, ArrowLeftIcon, CalendarClockIcon, ChevronsUpIcon, FlagIcon, FolderTreeIcon, ListTodoIcon, Maximize2Icon, Minimize2Icon, SettingsIcon, SquarePenIcon, ArchiveRestoreIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon, EllipsisIcon, HashIcon, PinIcon, PinOffIcon, SearchIcon, Trash2Icon, XIcon,
   type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { navigable, type Row, type Section } from "../picker/board";
@@ -195,6 +195,7 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
     <span className="picker-time" data-live={row.working || undefined}>{row.time}</span>
     <span className="picker-sub">
       <span className="picker-where" title={session.cwd}>{location.project}{location.branch ? <> · <span className="picker-branch">{location.branch}</span></> : null}</span>
+      {session.ephemeral ? <span className="picker-from-backlog" title="Ephemeral session: permanently deleted when closed" aria-label="Ephemeral session"><GhostIcon aria-hidden /></span> : null}
       {attentionTag(row)}
       {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
       {session.pullRequests?.length ? <PullRequestRowMark links={session.pullRequests} /> : null}
@@ -353,7 +354,7 @@ export function Picker({ view, prefs, onPrefs, actions, shelves, filter, search,
     else if (key === "a") change({ ...prefs, showArchived: !prefs.showArchived });
     else if (selectedRow && actions.onCommand) {
       const command = commandForKey(selectedRow, key);
-      if (command) { event.preventDefault(); actions.onCommand(selectedRow, command.kind); }
+      if (command) { event.preventDefault(); if (command.danger) openRowMenu(selectedRow.session.id); else actions.onCommand(selectedRow, command.kind); }
     }
   };
   useEffect(() => {

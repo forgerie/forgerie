@@ -1,3 +1,4 @@
+import { isEphemeralSessionPath } from "./ephemeralSessions.js";
 import crypto from "node:crypto";
 import type { SessionUiEvent } from "../../shared/apiTypes.js";
 import { parseLeadingSlashCommand } from "../../shared/promptResourceCommand.js";
@@ -389,6 +390,7 @@ function clientSessionFromRuntime(runtime: CommandRuntime): ClientSession {
   return {
     id: session.sessionId,
     path: session.sessionFile ?? "",
+    ...(isEphemeralSessionPath(session.sessionFile) ? { ephemeral: true } : {}),
     cwd: runtime.cwd,
     ...(session.sessionName === undefined ? {} : { name: session.sessionName }),
     created: new Date().toISOString(),

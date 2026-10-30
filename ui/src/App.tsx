@@ -421,11 +421,14 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
   // Archive and next. With nothing left waiting, the list is the next thing to read.
   const { archiveAndNext } = picker;
   const archiveNext = useCallback(async (id: string) => {
+    const ephemeral = picker.find(id)?.ephemeral === true;
     const outcome = await archiveAndNext(id);
-    if (readSelected() !== id) return; // The reader moved on while the archive ran.
+    const stillSelected = readSelected() === id;
+    if (ephemeral && outcome.type !== "refused") onDeleted(id);
+    if (!stillSelected) return; // The reader moved on while the archive ran.
     if (outcome.type === "next") switchSession(outcome.session);
     else if (outcome.type === "allClear") { closeSession(); setOpen(true); }
-  }, [archiveAndNext, switchSession, closeSession]);
+  }, [archiveAndNext, switchSession, closeSession, picker.find, onDeleted]);
   // Settings take the thread's place; the session stays in the URL underneath.
   const placeSettings = useCallback((place: SettingsPlace | undefined, replace = false) => {
     const url = new URL(window.location.href);
@@ -590,7 +593,7 @@ export function App({ shelves, projectScope, projectCatalog, projectFilter, proj
     const id = entry.session.id;
     const visible = transcriptVisible && selectedId === id;
     return <Activity key={record.key} mode={visible ? "visible" : "hidden"}>
-      <ForgerieSession entry={entry} visible={visible} id={id} known={entry.session} found={id === selectedId ? sessionFound : undefined}
+      <ForgerieSession entry={entry} visible={visible} id={id} known={picker.find(id) ?? entry.session} found={id === selectedId ? sessionFound : undefined}
         relatedWork={relatedWork} resourceLens={resourceLens}
         initialDraft={commandSelection?.session.id === id ? commandSelection.draft : undefined}
         initialError={commandSelection?.session.id === id ? commandSelection.error : undefined}

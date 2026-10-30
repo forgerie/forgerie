@@ -97,6 +97,13 @@ export class SessionNameIndex {
     });
   }
 
+  forget(filePath: string): Promise<void> {
+    return this.runExclusive(async () => {
+      await this.load();
+      if (this.entries.delete(filePath)) await this.save();
+    });
+  }
+
   async flush(): Promise<void> {
     await this.work;
   }

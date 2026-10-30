@@ -29,7 +29,7 @@ export type LaunchOutcome = Exclude<LaunchState, { type: "starting" }>;
 export type StartupListener = (event: { startupToken?: string | undefined; activity: { phase: string; label: string; detail?: string | undefined } }) => void;
 export type WorktreeListener = (record: WorktreeRecord) => void;
 /** Where a start goes beyond its folder: a fresh worktree, or the folder itself, and a failed setup to retry. */
-export interface Placement { destination?: NewSessionDestination | undefined; setupId?: string | undefined;
+export interface Placement { ephemeral?: boolean | undefined; destination?: NewSessionDestination | undefined; setupId?: string | undefined;
   /** The backlog item the session takes. */
   item?: ItemRef | undefined;
   /** The stand-in name until Pi names the session. Absent: the first line. */
@@ -118,6 +118,7 @@ export function createLaunchStore<D>(api: Pick<NewSessionApi, "start">, options:
         if (launch?.state.type === "starting") patch(id, { ...launch.state, sessionId: session.id });
       };
       const done = api.start(cwd, prompt, choice, { startupToken: id, onCreated: created,
+        ...(placement.ephemeral === true ? { ephemeral: true } : {}),
         ...(placement.destination ? { destination: placement.destination } : {}), ...(placement.setupId ? { setupId: placement.setupId } : {}),
         ...(placement.item ? { item: placement.item } : {}) })
         .then(async (result): Promise<LaunchOutcome> => {

@@ -15,7 +15,7 @@ Schemas and wire types live in `src/shared/sessionWorktree.ts`. Session projecti
 | Request | Result |
 | --- | --- |
 | `GET /sessions/worktree-options?cwd=<absolute path>` | `{kind:"git",repo,defaultBranch,defaultCwd?,defaultDestination:"existing-workspace"}` or `{kind:"non-git"}`. |
-| `POST /sessions` | Accepts `{cwd,startupToken?,modelSpec?,thinkingLevel?,destination?,setupId?}`. Returns `SessionInfo` with the actual new cwd and `worktree` for a fresh session. |
+| `POST /sessions` | Accepts `{cwd,startupToken?,modelSpec?,thinkingLevel?,ephemeral?,destination?,setupId?}`. Returns `SessionInfo` with the actual new cwd and `worktree` for a fresh session. |
 | `GET /sessions/worktrees?cwd=<absolute path>` | `{worktrees: SessionWorktreeRecord[]}`. The optional filter matches the main repo path or exact worktree path. Without it, returns the machine inventory. |
 | `GET /sessions/worktrees/:worktreeId` | `{worktree: SessionWorktreeRecord,info: SessionWorktreeInfo}` with fresh Git status. |
 | `POST /sessions/worktrees/:worktreeId/land` | `WorktreeActionResult`. No request body is required. |

@@ -21,6 +21,7 @@ export interface SessionServiceDependencyInput {
   sessionSearch?: PiSessionServiceDependencies["sessionSearch"];
   /** Daemon-lifetime session archive, constructed against the captured daemon environment. */
   archiveStore: NonNullable<PiSessionServiceDependencies["archiveStore"]>;
+  beforeEphemeralDelete?: PiSessionServiceDependencies["beforeEphemeralDelete"];
   /** Daemon-lifetime pinned-session catalog, constructed against the captured daemon environment. */
   pinStore: NonNullable<PiSessionServiceDependencies["pinStore"]>;
   /** Daemon-lifetime promoted-tab catalog, constructed against the captured daemon environment. */
@@ -84,6 +85,7 @@ export function sessionServiceDependencies(input: SessionServiceDependencyInput)
     ...(input.managedProcesses === undefined ? {} : { managedProcesses: input.managedProcesses }),
     ...(input.sessionSearch === undefined ? {} : { sessionSearch: input.sessionSearch }),
     archiveStore: input.archiveStore,
+    ...(input.beforeEphemeralDelete === undefined ? {} : { beforeEphemeralDelete: input.beforeEphemeralDelete }),
     pinStore: input.pinStore,
     tabsStore: input.tabsStore,
     workspaceActivity: input.workspaceActivity,

@@ -2,6 +2,14 @@
 
 Forgerie is a browser control surface for persistent Pi coding agent sessions on the user's own server.
 
+## Sessions
+
+**Ephemeral session**:
+A normal chat whose transcript and journal survive restarts but are permanently
+deleted when the session closes. It has no session search text or recaps. Its
+forks are also ephemeral; its Git worktrees and branches stay on disk.
+_Avoid_: Temporary chat, private mode
+
 ## Search
 
 **Session search**:

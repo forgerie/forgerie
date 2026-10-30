@@ -23,16 +23,16 @@ type StartResult = Awaited<ReturnType<NewSessionApi["start"]>>;
 
 /** A configurable new-session API: real promises, scripted outcomes. */
 function scriptedApi(outcome: (cwd: string, text: string, choice: AgentChoice) => StartResult | Promise<StartResult> = (cwd) => ({ type: "started", session: { id: "s-new", cwd } })) {
-  const starts: { cwd: string; text: string; choice: AgentChoice; prompt: FirstPrompt }[] = [];
+  const starts: { cwd: string; text: string; choice: AgentChoice; prompt: FirstPrompt; ephemeral?: boolean | undefined }[] = [];
   const modelReads: string[] = [];
   const api: NewSessionApi = {
     projects: async () => projects,
     workspaces: async (projectId) => workspaces[projectId] ?? [],
     models: async (cwd) => { modelReads.push(cwd); return { models: cwd === "/code/korri" ? [haiku] : [opus, haiku], model: cwd === "/code/korri" ? haiku : opus, thinkingLevel: "high" }; },
     promptResources: async () => [testing],
-    start: async (cwd, first, choice) => {
+    start: async (cwd, first, choice, options) => {
       const prompt = typeof first === "string" ? { text: first } : first;
-      starts.push({ cwd, text: prompt.text, choice, prompt });
+      starts.push({ cwd, text: prompt.text, choice, prompt, ...(options?.ephemeral === true ? { ephemeral: true } : {}) });
       return outcome(cwd, prompt.text, choice);
     },
   };
@@ -168,6 +168,18 @@ describe("the new-session dialog", () => {
 });
 
 describe("starting a new session", () => {
+  it("starts as persistent by default and passes the Ephemeral toggle through the launch", async () => {
+    const script = scriptedApi();
+    await render(script.api);
+    const toggle = button("Ephemeral");
+    expect(toggle?.getAttribute("aria-pressed")).toBe("false");
+    await click(toggle);
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle?.title).toContain("permanently deleted");
+    await type("temporary task"); await send();
+    expect(script.starts).toMatchObject([{ ephemeral: true, text: "temporary task" }]);
+  });
+
   it("creates the session with the first message, then hands it over", async () => {
     const script = scriptedApi();
     const onStarted = vi.fn();

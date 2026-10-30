@@ -24,6 +24,17 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("row actions", () => {
+  it("deletes ephemeral sessions through close without offering Undo", async () => {
+    const onDeleted = vi.fn();
+    const { store, calls } = actions({ onDeleted });
+    await store.run("archive", { ...target, ephemeral: true });
+    expect(calls).toEqual(["archive:a:true"]);
+    expect(store.getSnapshot().toast).toEqual({ type: "info", text: "Deleted Alpha" });
+    expect(onDeleted).toHaveBeenCalledWith("a");
+    await store.undo();
+    expect(calls).toEqual(["archive:a:true"]);
+  });
+
   it("reports whether an archive went through, for callers that move on after it", async () => {
     expect(await actions().store.archive(target)).toBe(true);
     const refused = actions({ failWith: new MutationError("Stop current session activity before archiving", 400) });

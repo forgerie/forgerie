@@ -53,6 +53,22 @@ const list = () => host.querySelector<HTMLElement>('[role="listbox"]');
 const press = (key: string) => act(() => { list()?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
 
 describe("picker", () => {
+  it("marks ephemeral rows and confirms permanent deletion, including the E shortcut", () => {
+    const onCommand = vi.fn();
+    act(() => root.render(<Picker view={view([S("temp", { ephemeral: true }), S("saved")], { selectedId: "temp" })}
+      prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onCommand }} />));
+    expect(host.querySelector('[data-session="temp"] [aria-label="Ephemeral session"]')).not.toBeNull();
+    expect(host.querySelector('[data-session="saved"] [aria-label="Ephemeral session"]')).toBeNull();
+    press("e");
+    expect(onCommand).not.toHaveBeenCalled();
+    const remove = host.querySelector<HTMLButtonElement>('[data-command="archive"]');
+    expect(remove?.textContent).toContain("Delete permanently");
+    act(() => remove?.click()); expect(onCommand).not.toHaveBeenCalled();
+    expect(remove?.textContent).toContain("Delete for good?");
+    act(() => remove?.click());
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ session: expect.objectContaining({ id: "temp" }) }), "archive");
+  });
+
   it("draws groups in triage order with counts, and live work as counts", () => {
     render(view([S("ask"), S("run"), S("idle")], { statuses: { ask: { ...idle, blocked: true }, run: { ...idle, isStreaming: true, workingAgents: 3, runningProcesses: 1 } } }));
     const labels = [...host.querySelectorAll(".picker-group-label")].map((node) => node.textContent);

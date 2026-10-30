@@ -408,8 +408,9 @@ export function createCatalogStore(transport: SessionTransport, options: { timin
       update(applyCatalogEvent(state, { type: "session.pinned", sessionId: ref.id, pinned }));
     },
     async setArchived(ref: SessionRef, archived: boolean) {
+      const ephemeral = archived && state.sessions.find(session => session.id === ref.id)?.ephemeral === true;
       await write(sessionPath(ref, archived ? "archive" : "restore"), { cwd: ref.cwd }, accepted);
-      record({ type: "local.archived", sessionId: ref.id, archived });
+      record(ephemeral ? { type: "local.deleted", sessionId: ref.id } : { type: "local.archived", sessionId: ref.id, archived });
     },
     /** Delete one archived session for good. The route is a bulk one that reports per-session failures with HTTP 200. */
     async deleteArchived(ref: SessionRef) {

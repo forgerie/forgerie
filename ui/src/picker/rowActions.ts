@@ -10,7 +10,7 @@ export interface SessionWrites {
   setArchived: (ref: SessionRef, archived: boolean) => Promise<void>;
   deleteArchived: (ref: SessionRef) => Promise<void>;
 }
-export interface Target extends SessionRef { name?: string | undefined }
+export interface Target extends SessionRef { ephemeral?: boolean | undefined; name?: string | undefined }
 /** What a command left behind: a short title that always shows, and the reason, shown on request. */
 export interface Note { title: string; text: string }
 export type Toast =
@@ -73,7 +73,9 @@ export function createRowActions(deps: {
     const done = await guarded(target, () => deps.writes.setArchived({ id: target.id, cwd: target.cwd }, true));
     // The note can arrive before the archive's own reply.
     const note = notes.get(target.id);
-    if (done) show({ type: "undo", target, ...(note ? { note } : {}) });
+    if (done && target.ephemeral) {
+      show({ type: "info", text: `Deleted ${titleOf(target)}` });
+    } else if (done) show({ type: "undo", target, ...(note ? { note } : {}) });
     return done;
   }
 
@@ -88,7 +90,7 @@ export function createRowActions(deps: {
           await guarded(target, () => deps.writes.setPinned(ref, kind === "pin"));
           return;
         case "archive":
-          await archive(target);
+          if (await archive(target) && target.ephemeral) deps.onDeleted?.(target.id);
           return;
         case "restore":
           if (await guarded(target, () => deps.writes.setArchived(ref, false))) show({ type: "info", text: `Restored ${titleOf(target)}` });

@@ -2,7 +2,7 @@
 
 Session search reads user text and assistant replies from every branch of active
 and archived sessions in the active agent profile. It does not search thinking,
-tools, images, custom messages, injected blocks, or agent-spawned child sessions.
+tools, images, custom messages, injected blocks, ephemeral sessions, or agent-spawned child sessions.
 The implementation belongs to GitHub issue `forgerie/forgerie#37`.
 
 ## Browser contract

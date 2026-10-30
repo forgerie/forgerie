@@ -16,9 +16,10 @@ const idle = { isStreaming: false, isCompacting: false, isBashRunning: false };
 
 /** A real HTTP + WebSocket server whose catalog the test can change between joins. */
 async function machine(options: { holdListing?: Promise<void>; badListing?: boolean; pulls?: unknown[]; runs?: unknown[] } = {}) {
+  const lifetime: { ephemeral?: boolean } = {};
   let listing = {
     sessions: [
-      { id: "a", cwd: "/code/forgerie", name: "Alpha", modified: "2026-09-29T18:00:00.000Z" },
+      { id: "a", cwd: "/code/forgerie", name: "Alpha", ...lifetime, modified: "2026-09-29T18:00:00.000Z" },
       { id: "b", cwd: "/code/forgerie", modified: "2026-09-29T17:00:00.000Z", archived: true },
     ],
     statuses: [{ sessionId: "a", ...idle, workingAgents: 2 }],
@@ -386,6 +387,16 @@ describe("machine catalog", () => {
     expect(store.getSnapshot().sessions.map((session) => session.id)).toEqual(["a", "b"]);
     await until(store, () => store.getSnapshot().connection.type === "ready" && store.getSnapshot().sessions[0]?.id === "z");
     expect(api.reads()).toBe(2);
+  });
+
+  it("removes an ephemeral session after close instead of marking it archived", async () => {
+    const api = await machine();
+    api.setListing({ sessions: [{ id: "temp", cwd: "/code/forgerie", name: "Temporary", ephemeral: true, modified: "now" }], statuses: [], activities: [] });
+    const store = start(api);
+    await until(store, () => store.getSnapshot().connection.type === "ready");
+    await store.setArchived({ id: "temp", cwd: "/code/forgerie" }, true);
+    expect(store.getSnapshot().sessions).toEqual([]);
+    expect(api.writes).toEqual([{ path: "/api/sessions/temp/archive", body: { cwd: "/code/forgerie" } }]);
   });
 
   it("pins, archives, restores, and deletes through the server, and shows each result", async () => {

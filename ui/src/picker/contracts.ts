@@ -6,6 +6,7 @@ import { worktreeInfoSchema } from "../worktrees/worktreeApi";
 
 // Only the fields the picker consumes. Everything else stays server-owned.
 export const pickerSessionSchema = z.object({
+  ephemeral: z.boolean().optional(),
   id: z.string().min(1),
   cwd: z.string().min(1),
   name: z.string().optional(),

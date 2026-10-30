@@ -1,3 +1,6 @@
+import { isEphemeralSessionPath } from "./ephemeralSessions.js";
+import { writeFile } from "node:fs/promises";
+import type { Cursor } from "@earendil-works/pi-durable";
 import type { DurableSessionHandle } from "./durableSessionAddress.js";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -46,6 +49,7 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     const position = options?.position ?? "before";
     const before = await this.session.extensionRunner.emit({ type: "session_before_fork", entryId, position });
     if (before?.cancel === true) return { cancelled: true };
+    if (isEphemeralSessionPath(this.session.sessionFile)) return this.forkEphemeral(entryId, position);
     if (this.options.nativeForks === true || this.options.handle !== undefined) return this.forkNative(entryId, position);
     const manager = this.session.sessionManager;
     const entry = manager.getEntry(entryId);
@@ -73,6 +77,53 @@ export class DurableSessionRuntime implements PiSessionRuntime {
     catch (error) { await this.closeResult(candidate); throw error; }
     this.result = candidate;
     await this.rebind?.(this.session);
+    return { cancelled: false, ...(selectedText === undefined ? {} : { selectedText }) };
+  }
+  /** Ephemeral forks own independent journals: closing either chat must not erase the other. */
+  private async forkEphemeral(entryId: string, position: "before" | "at"): Promise<{ cancelled: boolean; selectedText?: string }> {
+    const outgoing = this.result;
+    const session = outgoing.session;
+    await session.journal.project();
+    const target = await session.nativeHistory.prepareFork(entryId, BACKGROUND_CONTEXT);
+    const conversation = await session.journal.harness.conversation(target.conversationId, BACKGROUND_CONTEXT);
+    if (conversation === undefined) throw new Error("Missing ephemeral fork conversation");
+    let cursor: Cursor | undefined;
+    let sdkId: string | undefined;
+    let found = false;
+    do {
+      const page = await conversation.entries({ order: "ascending" }, 256, cursor, BACKGROUND_CONTEXT);
+      for (const item of page.items) {
+        sdkId = session.journal.sdkEntryId(item, item.id === target.entryId ? target.messageIndex : Math.max(0, (item.model?.length ?? 1) - 1)) ?? sdkId;
+        if (item.id === target.entryId) { found = true; break; }
+      }
+      cursor = page.next;
+    } while (cursor !== undefined && !found);
+    const entry = sdkId === undefined ? undefined : session.sessionManager.getEntry(sdkId);
+    if (!found || position === "before" && entry === undefined) throw new Error("Missing ephemeral fork transcript entry");
+    if (position === "before" && entry !== undefined && (entry.type !== "message" || entry.message.role !== "user")) throw new Error("Only a user message can be forked before its entry");
+    const leaf = entry === undefined ? null : position === "before" ? entry.parentId : entry.id;
+    const selectedText = position === "before" && entry?.type === "message" && entry.message.role === "user"
+      ? typeof entry.message.content === "string" ? entry.message.content : entry.message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n") : undefined;
+    const manager = SessionManager.create(this.cwd, session.sessionManager.getSessionDir());
+    const file = manager.getSessionFile();
+    if (file === undefined) throw new Error("Ephemeral fork requires persistent storage");
+    const branch = leaf === null ? [] : session.sessionManager.getBranch(leaf);
+    await writeFile(file, [manager.getHeader(), ...branch].map(value => JSON.stringify(value)).join("\n") + "\n", { flag: "wx", mode: 0o600 });
+    const replacement = SessionManager.open(file, dirname(file));
+    // Do not pass the source's handle: import the copied branch into its own journal.
+    const options = { ...this.options };
+    delete options.handle;
+    const candidate = await this.create({ ...options, sessionManager: replacement,
+      sessionStartEvent: { type: "session_start", reason: "fork", ...(session.sessionFile === undefined ? {} : { previousSessionFile: session.sessionFile }) } });
+    try {
+      this.result = candidate;
+      await this.rebind?.(this.session);
+    } catch (error) {
+      this.result = outgoing;
+      await this.closeResult(candidate);
+      throw error;
+    }
+    await this.closeResult(outgoing);
     return { cancelled: false, ...(selectedText === undefined ? {} : { selectedText }) };
   }
   private async forkNative(entryId: string, position: "before" | "at"): Promise<{ cancelled: boolean; selectedText?: string }> {

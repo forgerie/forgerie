@@ -1,3 +1,4 @@
+import { isEphemeralSessionPath } from "./ephemeralSessions.js";
 import { chmod, mkdir, open, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -95,6 +96,7 @@ export class SessionSearchIndex {
     // instead of making its still-present files look deleted.
     const seen = new Set(unique.map((file) => file.sessionId));
     for (const row of this.db.prepare("SELECT sessionId,path FROM files").all()) {
+      if (isEphemeralSessionPath(String(row["path"]))) { this.db.prepare("DELETE FROM files WHERE sessionId=?").run(String(row["sessionId"])); continue; }
       if (seen.has(String(row["sessionId"]))) continue;
       const present = await stat(String(row["path"])).then(() => true, (error: unknown) => searchRecord(error)?.["code"] !== "ENOENT");
       if (!present) this.db.prepare("DELETE FROM files WHERE sessionId=?").run(String(row["sessionId"]));
@@ -128,6 +130,7 @@ export class SessionSearchIndex {
   }
 
   async refreshFile(path: string): Promise<void> {
+    if (isEphemeralSessionPath(path)) { this.db.prepare("DELETE FROM files WHERE path=?").run(path); return; }
     const file = await this.describeFile(path);
     if (file === undefined) return;
     const existed = this.db.prepare("SELECT 1 FROM files WHERE sessionId=?").get(file.sessionId) !== undefined;
@@ -230,6 +233,7 @@ export class SessionSearchIndex {
     }
     for (const item of items) {
       const path = join(dir, item.name);
+      if (isEphemeralSessionPath(path)) continue;
       if (item.isDirectory()) files.push(...await this.listFiles(path));
       else if (item.name.endsWith(".jsonl")) files.push(path);
     }

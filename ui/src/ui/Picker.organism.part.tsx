@@ -171,3 +171,10 @@ export function FilterMenuNone() { return <Filtered initial={[]} menu />; }
 export function FilterMenuOne() { return <Filtered initial={ONE} menu />; }
 /** The ⋯ menu with three ticks; a long name is cut short inside the list's width. */
 export function FilterMenuThree() { return <Filtered initial={THREE} menu />; }
+
+/** The existing row mark and permanent-delete command alongside a persistent chat. */
+export function EphemeralSessions() {
+  const temporary = row("temporary", "Check the deployment logs", "open", "2m");
+  temporary.session.ephemeral = true;
+  return <Stateful all={[section("hour", "Last hour", "band", [temporary, row("saved", "A persistent project chat", "open", "4m")])]} initialSelected="temporary" />;
+}

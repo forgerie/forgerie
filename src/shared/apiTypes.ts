@@ -311,6 +311,8 @@ export interface SessionNotificationSummaryEvent {
 }
 
 export interface SessionInfo extends SessionRef {
+  /** Survives restarts; closing permanently deletes its transcript and journal. */
+  ephemeral?: boolean;
   modelChain?: string;
   /** An opt-in PR watch remains Working while the agent is idle. */
   watchingPullRequest?: boolean;

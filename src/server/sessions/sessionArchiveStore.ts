@@ -1,3 +1,4 @@
+import { isEphemeralSessionPath } from "./ephemeralSessions.js";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
@@ -79,6 +80,7 @@ export class SessionArchiveStore {
 
   async archiveMany(sessions: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
     if (sessions.length === 0) return [];
+    if (sessions.some(session => isEphemeralSessionPath(session.path))) throw new Error("Ephemeral sessions must be deleted, not archived");
     return this.exclusive(async () => {
       const data = cloneArchiveFile(await this.snapshot());
       const records: ArchivedSessionRecord[] = [];

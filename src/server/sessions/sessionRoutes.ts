@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { recapRequestSchema } from "../../shared/sessionRecap.js";
 import { sessionModelSelectionSchema, type SessionModelSelection } from "../../shared/sessionModelSelection.js";
 import { sessionEarlierQuerySchema, sessionOpenQuerySchema } from "../../shared/sessionOpen.js";
@@ -89,7 +90,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
     }
   });
 
-  app.post<{ Body: { cwd?: unknown; startupToken?: unknown; modelSpec?: unknown; thinkingLevel?: unknown } | undefined }>(`${prefix}/sessions`, async (request, reply) => {
+  app.post<{ Body: { cwd?: unknown; startupToken?: unknown; modelSpec?: unknown; thinkingLevel?: unknown; ephemeral?: unknown } | undefined }>(`${prefix}/sessions`, async (request, reply) => {
     try {
       if (userSessions !== undefined) return await userSessions.start(parseUserSessionStart(request.body));
       const body = requireRecord(request.body);
@@ -102,6 +103,7 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionRou
       const modelSpec = body["modelSpec"] === undefined ? undefined : requireNonEmptyString(body, "modelSpec");
       const thinkingLevel = body["thinkingLevel"] === undefined ? undefined : requireKnownThinkingLevel(body);
       return await sessions.start(normalizeRequestCwd(requireString(body, "cwd")), {
+        ...optionalField("ephemeral", body["ephemeral"] === undefined ? undefined : z.boolean().parse(body["ephemeral"])),
         ...optionalField("startupToken", startupToken),
         ...optionalField("initialModelSpec", modelSpec),
         ...optionalField("initialThinkingLevel", thinkingLevel),

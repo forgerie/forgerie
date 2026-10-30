@@ -275,6 +275,7 @@ async function createSessionDaemonRuntime() {
     managedProcesses: { stateDirectory: piWebDataDir(daemonEnvironment), environment: daemonEnvironment },
     sessionSearch,
     archiveStore: withBacklogClaimRelease(archiveStore, backlogClaims),
+    beforeEphemeralDelete: sessionId => backlogClaims.releaseSessions([sessionId]),
     pinStore,
     tabsStore,
     workspaceActivity,

@@ -71,7 +71,7 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   const recent = useMemo(() => state.sessions.filter((session) => !session.archived).map((session) => ({ cwd: session.cwd, modified: session.modified })), [state.sessions]);
   const find = useCallback((id: string) => {
     const session = state.sessions.find((candidate) => candidate.id === id);
-    return session ? { id: session.id, cwd: session.cwd, ...(session.name ? { name: session.name } : {}), ...(session.worktree ? { worktree: session.worktree } : {}),
+    return session ? { id: session.id, cwd: session.cwd, ...(session.ephemeral ? { ephemeral: true } : {}), ...(session.name ? { name: session.name } : {}), ...(session.worktree ? { worktree: session.worktree } : {}),
       ...(session.pullRequests ? { pullRequests: session.pullRequests } : {}), ...(session.actionRuns ? { actionRuns: session.actionRuns } : {}) } : undefined;
   }, [state.sessions]);
   // An archive can keep its worktree. Its reason arrives as a worktree event and joins the archive's message.
@@ -105,14 +105,14 @@ export function usePicker(selectedId: string | undefined, options: { onDeleted?:
   const archiveAndNext = useCallback(async (id: string): Promise<ArchiveOutcome> => {
     const row = latestRows.current.find((candidate) => candidate.session.id === id);
     if (!row || archiveAvailability(row).type !== "ready") return { type: "refused" };
-    if (!await commands.archive({ id, cwd: row.session.cwd, name: row.session.name })) return { type: "refused" };
+    if (!await commands.archive({ id, cwd: row.session.cwd, name: row.session.name, ephemeral: row.session.ephemeral })) return { type: "refused" };
     const next = nextWaiting(latestRows.current, id);
     return next ? { type: "next", session: { id: next.session.id, cwd: next.session.cwd, ...(next.session.name ? { name: next.session.name } : {}) } }
       : { type: "allClear" };
   }, [commands]);
   const rowActions: Omit<PickerActions, "onSelect" | "onClose"> = useMemo(() => ({
     onRetry: store.retry,
-    onCommand: (row: Row, kind: RowCommandKind) => void commands.run(kind, { id: row.session.id, cwd: row.session.cwd, name: row.session.name }),
+    onCommand: (row: Row, kind: RowCommandKind) => void commands.run(kind, { id: row.session.id, cwd: row.session.cwd, name: row.session.name, ephemeral: row.session.ephemeral }),
     onUndo: () => void commands.undo(),
     onDismissToast: commands.dismiss,
   }), [store, commands]);

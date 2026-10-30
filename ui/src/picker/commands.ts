@@ -33,7 +33,7 @@ export function rowCommands(row: Row): RowCommand[] {
   if (row.session.pinned === true) return [{ kind: "unpin", label: "Unpin" }, ...copy];
   return [
     { kind: "pin", label: "Pin to top" },
-    { kind: "archive", label: "Archive", key: "E", ...(row.busy ? { disabled: "Stop the run first" } : {}) },
+    { kind: "archive", label: row.session.ephemeral ? "Delete permanently" : "Archive", ...(row.session.ephemeral ? { danger: true } : {}), key: "E", ...(row.busy ? { disabled: "Stop the run first" } : {}) },
     ...copy,
   ];
 }

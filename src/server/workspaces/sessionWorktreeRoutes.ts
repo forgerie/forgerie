@@ -32,6 +32,7 @@ export class UserSessionWorktrees {
     const requestedDestination: NewSessionDestination | undefined = input.destination;
     if (input.thinkingLevel !== undefined && !isKnownThinkingLevel(input.thinkingLevel)) throw new Error("Unknown thinkingLevel");
     const choices = {
+      ...(input.ephemeral === undefined ? {} : { ephemeral: input.ephemeral }),
       ...(input.startupToken === undefined ? {} : { startupToken: input.startupToken }),
       ...(input.modelSpec === undefined ? {} : { initialModelSpec: input.modelSpec }),
       ...(input.thinkingLevel === undefined || !isKnownThinkingLevel(input.thinkingLevel) ? {} : { initialThinkingLevel: input.thinkingLevel }),

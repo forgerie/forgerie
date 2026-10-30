@@ -12,6 +12,7 @@ const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOStr
 let root: Root;
 let server: WebSocketServer;
 let archived: Set<string>;
+let ephemeral: Set<string>;
 let posts: string[];
 /** What POST /archive answers for a session: accepted, or a refusal. */
 let refuse: (id: string) => string | undefined;
@@ -38,13 +39,13 @@ function listing() {
     { id: "c", cwd: "/w", name: "Charlie", modified: at(60) },
     { id: "d", cwd: "/w", name: "Delta", modified: at(2) },
     { id: "w", cwd: "/w", name: "Working", modified: at(3) },
-  ].map((session) => ({ ...session, ...(archived.has(session.id) ? { archived: true } : {}) }));
+  ].filter(session => !(ephemeral.has(session.id) && archived.has(session.id))).map((session) => ({ ...session, ...(ephemeral.has(session.id) ? { ephemeral: true } : {}), ...(archived.has(session.id) ? { archived: true } : {}) }));
   return { sessions, statuses: [{ sessionId: "w", ...idle, isStreaming: true }], activities: [] };
 }
 
 beforeEach(async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  archived = new Set(); posts = []; running = new Set();
+  archived = new Set(); ephemeral = new Set(); posts = []; running = new Set();
   refuse = () => undefined;
   hold = undefined; catalogResponse = undefined;
   window.history.replaceState({}, "", "/?session=a");
@@ -94,6 +95,19 @@ async function start() {
 }
 
 describe("archive and next", () => {
+  it("confirms deleting an ephemeral session loaded from a direct URL, then opens the next session without Undo", async () => {
+    ephemeral.add("a");
+    await act(async () => root.render(<App />));
+    const remove = () => document.querySelector<HTMLButtonElement>('[aria-label="Delete and next"]');
+    await until(() => connected() && remove()?.disabled === false);
+    await press(remove()); expect(posts).toEqual([]);
+    await press(document.querySelector(".wt-dialog .wt-primary"));
+    await until(() => openId() === "c");
+    expect(posts).toEqual(["/api/sessions/a/archive"]);
+    expect(document.querySelector(".toast")?.textContent).toContain("Deleted Alpha");
+    expect(document.querySelector(".toast")?.textContent).not.toContain("Undo");
+  });
+
   it("walks the sessions that want you, most urgent first, then shows the list", async () => {
     await start();
     await press(archiveButton());

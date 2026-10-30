@@ -1,3 +1,5 @@
+import { isEphemeralSessionPath } from "./ephemeralSessions.js";
+import { assertEphemeralJournalOwnership, assertEphemeralSessionFiles, assertEphemeralWatchFile, deleteEphemeralSessionFiles } from "./ephemeralSessionStorage.js";
 import { RECAP_DELAY_MS, type RecapResult, type RecapTrigger } from "../../shared/sessionRecap.js";
 import { SessionRecapScheduler, canWriteRecap } from "./sessionRecapScheduler.js";
 import { buildRecapPrompt, generateSessionRecap } from "./sessionRecapGenerator.js";
@@ -362,6 +364,7 @@ interface PersistedChildSubsessionLink {
 type SessionCreationProvenance = "detached-handoff";
 
 interface StartSessionOptions {
+  ephemeral?: boolean;
   parentSession?: string;
   initialModel?: AgentModel;
   /** Strict `provider/model-id` chosen before the session existed. */
@@ -491,7 +494,7 @@ export interface PiSessionManagerGateway {
    * told explicitly.
    */
   invalidateSessionFile(sessionFile: string): void;
-  create(cwd: string, options?: { parentSession?: string; sessionId?: string }): PiSessionManager;
+  create(cwd: string, options?: { parentSession?: string; sessionId?: string; ephemeral?: boolean }): PiSessionManager;
   /**
    * Cross-project listing of Pi's session stores (the default store plus any
    * env-configured session dir). Session cleanup scans every project at once;
@@ -506,6 +509,7 @@ export interface PiSessionManagerGateway {
    */
   listCatalog?(): Promise<PiSessionListEntry[]>;
   rememberSessionName?(sessionFile: string, name: string | undefined): Promise<void>;
+  forgetSessionFile?(filePath: string): Promise<void>;
   flushSessionNames?(): Promise<void>;
   /**
    * The directory Pi stores sessions in. Used to confine a path-keyed write to
@@ -513,6 +517,7 @@ export interface PiSessionManagerGateway {
    * a caller that needs confinement must refuse when it is absent.
    */
   defaultSessionsRoot?(): string;
+  ephemeralSessionsRoot?(): string;
   open(path: string): PiSessionManager;
   /** Non-persistent SDK view; never repairs or migrates the source file. */
   openReadOnly?(path: string): Promise<PiSessionManager>;
@@ -1035,6 +1040,8 @@ export interface PiSessionServiceDependencies extends ModelChainRuntime {
   workspaceServices?: WorkspaceServices;
   triggers?: () => TriggerService;
   archiveStore?: SessionArchiveRepository;
+  /** Release external session associations before permanent ephemeral file deletion. */
+  beforeEphemeralDelete?: (sessionId: string) => Promise<void>;
   /** Pinned-session catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
   pinStore?: SessionPinRepository;
   /** Per-session promoted-tab catalog; defaults to an in-memory store in tests. Production wiring injects the durable store. */
@@ -1191,6 +1198,7 @@ export class PiSessionService implements SessionRouteService {
   private readonly pendingSessionHeaderReads = new Map<string, Promise<SessionHeaderSummary | undefined>>();
   private readonly managedProcesses: ManagedProcessRegistry | undefined;
   private readonly archiveStore: SessionArchiveRepository;
+  private readonly beforeEphemeralDelete: ((sessionId: string) => Promise<void>) | undefined;
   private readonly pinStore: SessionPinRepository;
   private readonly tabsStore: SessionTabsRepository;
   private readonly agentDir: string;
@@ -1243,6 +1251,7 @@ export class PiSessionService implements SessionRouteService {
     this.durableReader = deps.durableReader;
     this.childReadWorktrees = deps.durableChildAgents?.worktrees ?? deps.sessionWorktrees;
     this.archiveStore = deps.archiveStore ?? new SessionArchiveStore();
+    this.beforeEphemeralDelete = deps.beforeEphemeralDelete;
     this.pinStore = deps.pinStore ?? new SessionPinStore();
     this.tabsStore = deps.tabsStore ?? new SessionTabsStore();
     this.agentDir = deps.agentDir;
@@ -1431,10 +1440,12 @@ export class PiSessionService implements SessionRouteService {
     if (trigger !== "manual" && (!this.autoRecap() || unread === undefined)) return { kind: "skipped" };
     if (trigger === "automatic" && unread !== undefined && this.now().getTime() < Date.parse(unread.completedAt) + RECAP_DELAY_MS) return { kind: "skipped" };
     if (await this.archiveStore.isArchived(ref.id) || await this.sessionWorktrees?.store.readOnly(ref) !== undefined) return { kind: "skipped" };
+    const file = await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader);
+    if (isEphemeralSessionPath(file?.path)) return { kind: "skipped" };
     // A timer never opens a runtime: nothing would release it, and a restart would open every unread session at once.
     // A closed session gets its recap when the user opens it.
     const session = trigger === "automatic" ? this.activeForRef(ref)?.runtime.session : await this.getOrOpen(ref);
-    if (!(session instanceof DurableAgentSession)) return { kind: "skipped" };
+    if (!(session instanceof DurableAgentSession) || isEphemeralSessionPath(session.sessionFile)) return { kind: "skipped" };
     const handle = session.journal.handle;
     const trackedChild = await verifiedTrackedSubsessionLink(this.sessionManager, {
       sessionId: session.sessionId, sessionFile: session.sessionFile, sessionManager: session.sessionManager, cwd: ref.cwd,
@@ -1715,6 +1726,12 @@ export class PiSessionService implements SessionRouteService {
     // the original path before archive/delete, never the relocated archive copy.
     const path = transcriptPath ?? (await this.archiveStore.get(sessionId))?.originalPath
       ?? (await (this.sessionManager.listCatalog?.() ?? this.sessionManager.listAll())).find((session) => session.id === sessionId)?.path;
+    if (isEphemeralSessionPath(path)) {
+      const root = this.sessionManager.ephemeralSessionsRoot?.();
+      if (root === undefined || path === undefined) throw new Error("Ephemeral storage root is unavailable");
+      await assertEphemeralSessionFiles(root, path, sessionId);
+      await assertEphemeralWatchFile(root, sessionId);
+    }
     await this.managedProcesses.closeSession(sessionId);
     if (path !== undefined) await rm(join(dirname(path), `${sessionId}.process-watches.json`), { force: true });
   }
@@ -1942,6 +1959,7 @@ export class PiSessionService implements SessionRouteService {
       this.sessionManager.create(cwd, {
         ...(options.parentSession === undefined ? {} : { parentSession: options.parentSession }),
         ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+        ...(options.ephemeral === true ? { ephemeral: true } : {}),
       }),
       cwd,
       {
@@ -1958,6 +1976,7 @@ export class PiSessionService implements SessionRouteService {
       id: session.sessionId,
       ...(session.modelChain === undefined ? {} : { modelChain: session.modelChain }),
       path: session.sessionFile ?? "",
+      ...(isEphemeralSessionPath(session.sessionFile) ? { ephemeral: true } : {}),
       cwd,
       persisted: sessionFileExists(session.sessionFile),
       created: new Date().toISOString(),
@@ -3743,7 +3762,8 @@ export class PiSessionService implements SessionRouteService {
     const session = await this.getOrOpen(ref);
     this.assertHandoffDestinationAcceptsInput(session);
     if (this.hasActiveWork(session)) throw new Error("Stop current session activity before forking the session tree");
-    if (session.sessionManager.getLeafId() !== request.expectedLeafId) {
+    const leafId = session instanceof DurableAgentSession ? (await session.getDurableTree()).activeLeafId : session.sessionManager.getLeafId();
+    if (leafId !== request.expectedLeafId) {
       throw new Error("The session changed since /tree was opened. Reopen /tree and try again.");
     }
 
@@ -3843,16 +3863,24 @@ export class PiSessionService implements SessionRouteService {
   }
 
   async archive(ref: PiSessionRef): Promise<void> {
+    const path = this.activeForRef(ref)?.runtime.session.sessionFile
+      ?? (await this.sessionManager.resolveSessionFile(ref.cwd, ref.id, this.readCachedSessionHeader))?.path;
+    if (isEphemeralSessionPath(path)) {
+      // Closing an inactive chat must not start its tools or follow an unchecked journal locator.
+      const result = await this.archiveMany([ref]);
+      const failure = result.failures[0];
+      if (failure !== undefined) throw new Error(failure.error);
+      return;
+    }
     // Archive only the JSONL file. Its .durable/<name>/ journal can still own live forks.
     const readonly = await this.sessionWorktrees?.store.readOnly(ref);
     if (readonly !== undefined) {
       if (await this.isPinned(readonly.session.id)) throw new Error("Unpin session before archiving");
       if (await this.getArchived(ref) !== undefined) return;
-      await this.closeSessionManagedProcesses(readonly.session.id, readonly.session.path);
-      await this.archiveStore.archive({
+      await this.archiveStoreArchiveMany([{
         sessionId: readonly.session.id, ...readonly.session,
         path: sessionFileExists(readonly.session.path) ? readonly.session.path : readonly.transcriptPath,
-      });
+      }]);
       this.scheduleSearchScan();
       await this.forgetUnreadSessions([{ sessionId: readonly.session.id, cwd: readonly.session.cwd }]);
       return;
@@ -3866,8 +3894,7 @@ export class PiSessionService implements SessionRouteService {
       async () => {
         const archiveInput = await this.archiveInputForSession(session);
         await this.closeActive(session.sessionId, { kind: "clear", reason: "archive" });
-        await this.closeSessionManagedProcesses(archiveInput.sessionId, archiveInput.path);
-        await this.archiveStore.archive(archiveInput);
+        await this.archiveStoreArchiveMany([archiveInput]);
         this.scheduleSearchScan();
         await this.forgetUnreadSessions([archiveInput]);
       },
@@ -3949,13 +3976,18 @@ export class PiSessionService implements SessionRouteService {
           }
         }
 
-        try {
-          const archived = await this.archiveStoreArchiveMany(readyInputs);
-          archivedSessionIds.push(...archived.map((record) => record.sessionId));
-          unreadArchivedIdentities.push(...archived);
-        } catch (error: unknown) {
-          for (const input of readyInputs) failures.push({ sessionId: input.sessionId, error: errorMessage(error) });
-        }
+        const closeBatch = async (inputs: ArchiveSessionInput[]) => {
+          try {
+            const archived = await this.archiveStoreArchiveMany(inputs);
+            archivedSessionIds.push(...archived.map(record => record.sessionId));
+            unreadArchivedIdentities.push(...archived);
+          } catch (error: unknown) {
+            for (const input of inputs) failures.push({ sessionId: input.sessionId, error: errorMessage(error) });
+          }
+        };
+        // Permanent deletes must report each successful close even when a neighbour refuses deletion.
+        for (const input of readyInputs.filter(input => isEphemeralSessionPath(input.path))) await closeBatch([input]);
+        await closeBatch(readyInputs.filter(input => !isEphemeralSessionPath(input.path)));
       },
     );
     await this.forgetUnreadSessions(unreadArchivedIdentities);
@@ -4471,16 +4503,42 @@ export class PiSessionService implements SessionRouteService {
 
   private async archiveStoreArchiveMany(inputs: readonly ArchiveSessionInput[]): Promise<ArchivedSessionRecord[]> {
     if (inputs.length === 0) return [];
-    for (const input of inputs) await this.closeSessionManagedProcesses(input.sessionId, input.path);
-    if (this.archiveStore.archiveMany !== undefined) {
-      const records = await this.archiveStore.archiveMany(inputs);
-      this.scheduleSearchScan();
-      return records;
-    }
+    const ephemeral = inputs.filter(input => isEphemeralSessionPath(input.path));
+    const persistent = inputs.filter(input => !isEphemeralSessionPath(input.path));
+    for (const input of ephemeral) await this.deleteEphemeralSession(input);
+    for (const input of persistent) await this.closeSessionManagedProcesses(input.sessionId, input.path);
     const records: ArchivedSessionRecord[] = [];
-    for (const input of inputs) records.push(await this.archiveStore.archive(input));
+    if (persistent.length > 0 && this.archiveStore.archiveMany !== undefined) records.push(...await this.archiveStore.archiveMany(persistent));
+    else for (const input of persistent) records.push(await this.archiveStore.archive(input));
     this.scheduleSearchScan();
-    return records;
+    // Keep the archive endpoint's closed-id contract without saving ephemeral archive records.
+    return [...records, ...ephemeral.map(input => ({ sessionId: input.sessionId, cwd: input.cwd, archivedAt: this.now().toISOString() }))];
+  }
+
+  private async deleteEphemeralSession(input: ArchiveSessionInput): Promise<void> {
+    const root = this.sessionManager.ephemeralSessionsRoot?.();
+    try {
+      if (root === undefined) throw new Error("Ephemeral storage root is unavailable");
+      await assertEphemeralSessionFiles(root, input.path, input.sessionId);
+      await assertEphemeralJournalOwnership(input.path, input.sessionId);
+      const catalog = await this.sessionManager.listAll();
+      for (const other of catalog) {
+        if (resolve(other.path) === resolve(input.path)) continue;
+        const locator = await readDurableSessionLocator(durableSessionPaths(other.path).directory);
+        if (locator !== undefined && resolve(locator.databasePath) === resolve(durableSessionPaths(input.path).database)) throw new Error("Ephemeral journal is shared by another transcript");
+      }
+      await this.closeSessionManagedProcesses(input.sessionId, input.path);
+      await this.closeActive(input.sessionId, { kind: "clear", reason: "delete" });
+      await this.sessionWorktrees?.store.forgetEphemeralSession(input.sessionId, input.cwd);
+      await this.forgetUnreadSessions([input]);
+      await this.tabsStore.set({ sessionId: input.sessionId, cwd: input.cwd, tabs: [] });
+      await this.sessionManager.forgetSessionFile?.(input.path);
+      await this.beforeEphemeralDelete?.(input.sessionId);
+      await deleteEphemeralSessionFiles(root, input.path, input.sessionId);
+    } catch (error) {
+      this.logger.info({ err: error, sessionId: input.sessionId, path: input.path }, "ephemeral session deletion refused or failed");
+      throw error;
+    }
   }
 
   private async archiveStoreDeleteArchivedMany(sessionIds: readonly string[]): Promise<string[]> {
@@ -5291,7 +5349,7 @@ export class PiSessionService implements SessionRouteService {
       // agent_end precedes extension handlers and retries. agent_settled fires
       // after agent_end handlers and transcript projection finish.
       if (eventType === "agent_settled") this.attentionHints.settled(this.attentionSession(session));
-      if (eventType === "agent_settled" && session.sessionFile !== undefined) {
+      if (eventType === "agent_settled" && session.sessionFile !== undefined && !isEphemeralSessionPath(session.sessionFile)) {
         void this.sessionSearch?.refreshFile(session.sessionFile).catch((error: unknown) => {
           this.logger.info({ err: error, sessionId: session.sessionId }, "session search refresh failed");
         });
@@ -6105,6 +6163,7 @@ function clientSessionFromListEntry(session: PiSessionListEntry): ClientSession 
     id: session.id,
     path: session.path,
     cwd: session.cwd,
+    ...(isEphemeralSessionPath(session.path) ? { ephemeral: true } : {}),
     persisted: true,
     ...(session.name === undefined ? {} : { name: session.name }),
     created: session.created.toISOString(),

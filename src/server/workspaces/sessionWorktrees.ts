@@ -325,6 +325,7 @@ export class SessionWorktrees {
     return this.withMainCheckout(record.repo, async () => {
       const current = await this.store.require(id);
       if (current.cleanup.kind === "done") return { kind: "removed" };
+      if (current.retainAfterSessionClose === true) return { kind: "kept", reason: "retained" };
       if (current.operation !== undefined) return { kind: "kept", reason: "in-use" };
       if (current.setup.phase !== "done" || current.pendingRename !== undefined) return { kind: "kept", reason: "setup-incomplete" };
       const keep = async (): Promise<Extract<WorktreeCleanupOutcome, { kind: "kept" }> | undefined> => {

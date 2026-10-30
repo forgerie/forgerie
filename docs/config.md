@@ -325,11 +325,41 @@ An unset address or a service that does not answer disables dictation, not the r
 The separate `prototypes/voice-content` experiment owns its own speech stack. The production cleanup does not change it.
 
 
+## Ephemeral sessions
+
+Turn on **Ephemeral** in the new-session dialog before starting a chat. The
+session list marks these chats with a ghost. They have the same working folder,
+tools, and child agents as other sessions. They survive browser disconnects and
+Forgerie restarts.
+
+**Delete permanently** replaces Archive for an ephemeral session. Confirm it a
+second time to close the chat. Closing, including through bulk archive, deletes
+its transcript, durable journal, unread state, notifications, and worktree
+session associations. It creates no archive and has no Undo. Managed processes
+end. Git worktrees, branches, and workspace files stay in place.
+
+Ephemeral transcripts live in `<app-data>/ephemeral-sessions/`, with their journals
+in that folder's `.durable/` directory. `PI_WEB_DATA_DIR` sets `<app-data>`; the
+default is `~/.forgerie`. Pi session-directory settings do not move ephemeral
+sessions. Forgerie refuses deletion if files are linked, outside this folder,
+or share a journal with another session. The daemon logs the refusal and keeps
+the files for inspection.
+
+Ephemeral chats have no session search text or recaps, including manual `/recap`.
+A fork or clone stays ephemeral and gets an independent journal. A requested
+handoff can carry context into another chat. Usage cost totals may remain.
+This is a retention choice, not a sandbox or secure erasure: model providers,
+backups, tools, and files the agent writes can retain copies outside the chat.
+
+The creation API accepts optional `ephemeral: true` in `POST /api/sessions`.
+Omitting it creates an ordinary persistent session. Session catalogs report
+`ephemeral: true` for ephemeral rows.
+
 ## Session recaps
 
 `autoRecap` defaults to `true`. Set it to `false` in Forgerie's `config.json`
 to disable automatic and on-open recaps. The daemon reads this setting for each
-request; no restart is needed. Manual `/recap` still works.
+request; no restart is needed. Manual `/recap` still works for non-ephemeral sessions.
 
 Recaps use `sessionTitleModel` when that model is available with credentials,
 otherwise the session's model. When `sessionTitleModel` names a chain, a recap

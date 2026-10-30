@@ -1,4 +1,7 @@
-import { writeFileSync, type Dirent } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { piWebDataDir } from "../../config.js";
+import { EPHEMERAL_SESSIONS_DIRECTORY } from "./ephemeralSessions.js";
+import { mkdirSync, writeFileSync, type Dirent } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -84,6 +87,7 @@ export function createPiSessionManagerGateway(options: PiSessionManagerGatewayOp
       ...(options.sessionNameIndexFilePath === undefined ? {} : { filePath: options.sessionNameIndexFilePath }),
       ...(options.onSessionNameIndexPersistenceError === undefined ? {} : { onPersistenceError: options.onSessionNameIndexPersistenceError }),
     }),
+    join(piWebDataDir(options.env), EPHEMERAL_SESSIONS_DIRECTORY),
     options.onTriggerHeaderCreated,
   );
 }
@@ -101,6 +105,7 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
   constructor(
     private readonly resolver: SessionDirResolver,
     private readonly catalogScanner: SessionCatalogScanner,
+    private readonly ephemeralDir: string,
     private readonly onTriggerHeaderCreated?: () => void,
   ) {}
 
@@ -108,13 +113,15 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
     return this.resolver.defaultSessionsRoot();
   }
 
+  ephemeralSessionsRoot(): string { return this.ephemeralDir; }
+
   async list(cwd: string): Promise<PiSessionListEntry[]> {
     const resolution = this.resolver.resolve(cwd);
     // Lightweight streaming summaries instead of the SDK's full-transcript
     // listing: same fields, but message bodies are never parsed once the first
     // user message is found. The cross-project cleanup listing (listAll) keeps
     // the SDK path.
-    const sessions = (await this.summaryScanner.scanSessionSummariesInDir(resolution.sessionDir)).map((session) => ({
+    const sessions = (await Promise.all([resolution.sessionDir, this.ephemeralDir].map(dir => this.summaryScanner.scanSessionSummariesInDir(dir)))).flat().map((session) => ({
       ...session,
       cwd: canonicalizeStoredCwd(session.cwd),
     }));
@@ -123,12 +130,13 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
 
   async listParentSessionPaths(cwd: string, readHeader: SessionHeaderReader): Promise<string[]> {
     const resolution = this.resolver.resolve(cwd);
-    return listParentSessionPathsInDir(resolution.sessionDir, cwd, readHeader);
+    return (await Promise.all([resolution.sessionDir, this.ephemeralDir].map(dir => listParentSessionPathsInDir(dir, cwd, readHeader)))).flat();
   }
 
   async resolveSessionFile(cwd: string, sessionId: string, readHeader: SessionHeaderReader): Promise<ResolvedSessionFile | undefined> {
     const resolution = this.resolver.resolve(cwd);
-    return resolveSessionFileInDir(resolution.sessionDir, cwd, sessionId, readHeader);
+    return await resolveSessionFileInDir(resolution.sessionDir, cwd, sessionId, readHeader)
+      ?? await resolveSessionFileInDir(this.ephemeralDir, cwd, sessionId, readHeader);
   }
 
   invalidateSessionFile(sessionFile: string): void {
@@ -138,41 +146,50 @@ class SettingsAwarePiSessionManagerGateway implements PiSessionManagerGateway {
     this.summaryScanner.invalidate(sessionFile);
   }
 
-  create(cwd: string, options?: { parentSession?: string; sessionId?: string }): PiSessionManager {
+  create(cwd: string, options?: { parentSession?: string; sessionId?: string; ephemeral?: boolean }): PiSessionManager {
     const resolution = this.resolver.resolve(cwd);
-    const manager = SessionManager.create(cwd, resolution.sessionDir, {
+    const sessionDir = options?.ephemeral === true ? this.ephemeralDir : resolution.sessionDir;
+    const sessionId = options?.sessionId ?? (options?.ephemeral === true ? randomUUID() : undefined);
+    if (options?.ephemeral === true) mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    const manager = SessionManager.create(cwd, sessionDir, {
       ...(options?.parentSession === undefined ? {} : { parentSession: options.parentSession }),
-      ...(options?.sessionId === undefined ? {} : { id: options.sessionId }),
+      ...(sessionId === undefined ? {} : { id: sessionId }),
     });
-    if (options?.sessionId === undefined) return manager;
+    if (sessionId === undefined) return manager;
     // The SDK defers a new file until conversation messages exist. Persist the identity before opening
     // its Durable journal, so a restart cannot create an orphan journal under a new timestamped path.
     const file = manager.getSessionFile();
     if (file === undefined) throw new Error("A trigger requires persistent session storage");
     writeFileSync(file, `${JSON.stringify(manager.getHeader())}\n`, { flag: "wx", mode: 0o600 });
-    this.onTriggerHeaderCreated?.();
-    return SessionManager.open(file, resolution.sessionDir);
+    if (options?.sessionId !== undefined) this.onTriggerHeaderCreated?.();
+    return SessionManager.open(file, sessionDir);
   }
 
   async listAll(): Promise<PiSessionListEntry[]> {
     const envSessionDir = this.resolver.globalEnvSessionDir();
-    const [defaultSessions, envSessions] = await Promise.all([
+    const [defaultSessions, envSessions, ephemeralSessions] = await Promise.all([
       listSessionsInDefaultPiStore(this.resolver.defaultSessionsRoot()),
       envSessionDir === undefined ? Promise.resolve([]) : listSessionsInDir(envSessionDir),
+      listSessionsInDir(this.ephemeralDir),
     ]);
-    return uniqueSessionsByPath([...defaultSessions, ...envSessions]);
+    return uniqueSessionsByPath([...defaultSessions, ...envSessions, ...ephemeralSessions]);
   }
 
   async listCatalog(): Promise<PiSessionListEntry[]> {
     const defaultDirs = await listDefaultPiSessionDirs(this.resolver.defaultSessionsRoot());
     const envSessionDir = this.resolver.globalEnvSessionDir();
     const dirs = envSessionDir === undefined ? defaultDirs : [...defaultDirs, envSessionDir];
-    const sessions = await this.catalogScanner.scanDirectories(dirs);
+    const sessions = await this.catalogScanner.scanDirectories([...dirs, this.ephemeralDir]);
     return sessions.map((session) => ({ ...session, cwd: canonicalizeStoredCwd(session.cwd) }));
   }
 
   rememberSessionName(sessionFile: string, name: string | undefined): Promise<void> {
     return this.catalogScanner.rememberSessionName(sessionFile, name);
+  }
+
+  forgetSessionFile(filePath: string): Promise<void> {
+    this.summaryScanner.invalidate(filePath);
+    return this.catalogScanner.forgetSessionFile(filePath);
   }
 
   flushSessionNames(): Promise<void> {

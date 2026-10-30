@@ -265,7 +265,6 @@
   "ui/MentionPopover.tsx",
   "ui/Messages.tsx",
   "ui/ModelPicker.tsx",
-  "ui/NewSessionDialog.tsx",
   "ui/NoteTray.tsx",
   "ui/PullNoticeRow.tsx",
   "ui/PullRequestReview.tsx",

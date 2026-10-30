@@ -114,6 +114,7 @@ export const backlogErrorSchema = z.object({
 
 /** What the launch route takes beyond the item: the new-session choices, as `/api/sessions` takes them. */
 export interface BacklogStart {
+  ephemeral?: boolean | undefined;
   cwd: string; modelSpec?: string | undefined; thinkingLevel?: string | undefined;
   destination?: { kind: "fresh-worktree" | "existing-workspace" } | undefined; setupId?: string | undefined;
 }

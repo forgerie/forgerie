@@ -666,7 +666,8 @@ export function ForgerieSession({ entry: retainedEntry, visible = true, id, know
           onPress={() => { processes.refresh(); setProcessesOpen(true); }} />}
         {changes && !readOnly && <ChangesOpener notes={notes.length} onOpen={() => setReview({})} />}
         <TreeOpener idle={treeAvailable} onOpen={() => onIdleAction("tree")} />
-        {archive && <ArchiveNextButton onArchive={archive.onArchive}
+        {archive && <ArchiveNextButton key={id} deletion={known?.ephemeral ? { title: "Delete this ephemeral session?",
+          message: "This permanently deletes the chat and its journal. It cannot be undone. Git worktrees, branches, and workspace files stay in place." } : undefined} onArchive={archive.onArchive}
           // The catalog's status can lag the live one; the server refuses an archive during any run.
           availability={isBashRunning(state) || state.status?.isStreaming === true || state.status?.isCompacting === true
             ? { type: "blocked", reason: "Stop the run first" } : archive.availability} />}

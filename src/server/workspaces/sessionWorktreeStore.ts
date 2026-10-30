@@ -1,3 +1,4 @@
+import { isEphemeralSessionPath } from "../sessions/ephemeralSessions.js";
 import { randomUUID, createHash } from "node:crypto";
 import { access, chmod, copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -106,6 +107,10 @@ export class SessionWorktreeStore {
     for (const session of sessions.filter((session) => pathInside(record.path, session.cwd))) {
       const source = session.transcriptSourcePath ?? session.path;
       if (source === "") throw new Error("Cannot remove a worktree with an unpersisted session");
+      if (isEphemeralSessionPath(session.path)) {
+        snapshots.push({ id: session.id, cwd: session.cwd, transcriptPath: session.path, session: worktreeSessionMetadata(record, session) });
+        continue;
+      }
       const folder = this.filePath === undefined ? join(dirname(session.path), "worktree-transcripts", id) : join(dirname(this.filePath), "worktree-transcripts", id);
       await mkdir(folder, { recursive: true });
       const target = join(folder, `${createHash("sha256").update(session.id).digest("hex")}.jsonl`);
@@ -124,6 +129,22 @@ export class SessionWorktreeStore {
     // receipts rather than losing their history when a retry sees fewer runtimes.
     const retained = record.transcripts.filter((saved) => !snapshots.some((next) => next.id === saved.id && cwdPathsEqual(next.cwd, saved.cwd)));
     await this.update(id, { transcripts: [...retained, ...snapshots] });
+  }
+
+  /** Forget only associations. Ephemeral file deletion belongs to the session storage owner. */
+  async forgetEphemeralSession(sessionId: string, cwd: string): Promise<void> {
+    await this.exclusive(async () => {
+      const records = this.records.map(record => {
+        const associated = pathInside(record.path, cwd) || record.sessionId === sessionId || record.relatedSession?.id === sessionId || record.childOwner?.id === sessionId
+          || record.transcripts.some(item => item.id === sessionId);
+        const next = { ...record, ...(associated ? { retainAfterSessionClose: true } : {}), transcripts: record.transcripts.filter(item => item.id !== sessionId) };
+        if (next.sessionId === sessionId) { delete next.sessionId; delete next.ownerSession; }
+        if (next.relatedSession?.id === sessionId) delete next.relatedSession;
+        if (next.childOwner?.id === sessionId) delete next.childOwner;
+        return next;
+      });
+      await this.persist(records);
+    });
   }
 
   async forgetTranscripts(sessionIds: readonly string[]): Promise<void> {
@@ -205,6 +226,7 @@ export function indexWorktreeRecords(records: readonly SessionWorktreeRecord[]):
 export function worktreeSessionMetadata(record: SessionWorktreeRecord, session: Pick<SessionInfo, "id" | "cwd" | "path"> & Partial<SessionInfo>): SessionInfo {
   return {
     id: session.id, cwd: session.cwd, path: session.path,
+    ...(session.ephemeral === true || isEphemeralSessionPath(session.path) ? { ephemeral: true } : {}),
     ...(session.name === undefined ? {} : { name: session.name }),
     ...(session.parentSessionPath === undefined ? {} : { parentSessionPath: session.parentSessionPath }),
     ...(session.agentSpawned === undefined ? {} : { agentSpawned: session.agentSpawned }),

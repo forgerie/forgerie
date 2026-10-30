@@ -66,6 +66,7 @@ export interface SessionRouteService {
    */
   start(cwd: string, options?: {
     startupToken?: string;
+    ephemeral?: boolean;
     /** Strict `provider/model-id` chosen before the session existed. */
     initialModelSpec?: string;
     initialThinkingLevel?: ClientThinkingLevel;

@@ -13,6 +13,8 @@ import { openChildQuestions } from "./durableChildAgents.js";
 export interface DurableNativeHistory {
   tree(context: Context): Promise<SessionTreeSnapshot>;
   resolve(entryId: string, context: Context): Promise<DurableEntryTarget>;
+  /** Admit an independent transcript/import fork under the same native idle policy. */
+  prepareFork(entryId: string, context: Context): Promise<DurableEntryTarget>;
   fork(entryId: string, position: "before" | "at", newSessionId: string, context: Context): Promise<{ handle: DurableSessionHandle; selectedText?: string }>;
   select(entryId: string, options: { summarize?: boolean; customInstructions?: string }, context: Context): Promise<{ handle: DurableSessionHandle; cancelled: boolean; editorText?: string }>;
 }
@@ -85,6 +87,10 @@ class NativeHistory implements DurableNativeHistory {
   async resolve(entryId: string, context: Context): Promise<DurableEntryTarget> {
     const { entry, index } = await this.target(entryId, context);
     return { journalId: this.handle.address.journalId, conversationId: entry.conversationId, entryId: entry.id, messageIndex: index };
+  }
+  async prepareFork(entryId: string, context: Context): Promise<DurableEntryTarget> {
+    await this.assertAdmission(context);
+    return this.resolve(entryId, context);
   }
   async tree(context: Context): Promise<SessionTreeSnapshot> {
     const targets = await this.targets(context, true);

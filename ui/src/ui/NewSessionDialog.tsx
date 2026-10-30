@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ComposerPrimitive, unstable_useTriggerPopoverRootContext, useAuiState } from "@assistant-ui/react";
-import { ChevronRightIcon, XIcon, ZapIcon } from "lucide-react";
+import { ChevronRightIcon, GhostIcon, XIcon, ZapIcon } from "lucide-react";
 import type { MentionSource } from "../mentionSource";
 import { MAX_ATTACHMENTS } from "../attachments";
 import { PortalLayerProvider } from "./portalLayer";
@@ -38,7 +38,8 @@ export interface Carry {
   blocked?: boolean | undefined;
 }
 
-export function NewSessionDialog({ destination, model, mentions, commands, rapidfire, phase, carry, onRapidfire, onDiscard, onClose, hidden = false }: {
+export function NewSessionDialog({ ephemeral, destination, model, mentions, commands, rapidfire, phase, carry, onRapidfire, onDiscard, onClose, hidden = false }: {
+  ephemeral?: { enabled: boolean; onToggle: () => void } | undefined;
   hidden?: boolean;
   /** The destination chip and its picker. */
   destination: ReactNode;
@@ -84,14 +85,15 @@ export function NewSessionDialog({ destination, model, mentions, commands, rapid
     }}>
     <PortalLayerProvider value={dialog}>
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        <Window titleId={titleId} destination={destination} model={model} mentions={mentions} commands={commands}
+        <Window ephemeral={ephemeral} titleId={titleId} destination={destination} model={model} mentions={mentions} commands={commands}
           rapidfire={rapidfire} phase={phase} carry={carry} onRapidfire={onRapidfire} onDiscard={onDiscard} onClose={close} />
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </PortalLayerProvider>
   </dialog>, document.body);
 }
 
-function Window({ titleId, destination, model, mentions, commands, rapidfire, phase, carry, onRapidfire, onDiscard, onClose }: {
+function Window({ ephemeral, titleId, destination, model, mentions, commands, rapidfire, phase, carry, onRapidfire, onDiscard, onClose }: {
+  ephemeral?: { enabled: boolean; onToggle: () => void } | undefined;
   titleId: string; destination: ReactNode; carry?: Carry | undefined; model: ModelBinding; mentions: MentionSource; commands: CommandBinding;
   rapidfire: boolean; phase: StartPhase; onRapidfire: () => void; onDiscard: () => void; onClose: () => void;
 }) {
@@ -163,6 +165,9 @@ function Window({ titleId, destination, model, mentions, commands, rapidfire, ph
       <button type="button" className="ns-chip" aria-pressed={rapidfire} disabled={busy} onClick={onRapidfire}
         title={rapidfire ? "Rapidfire: each start opens its pending session" : "Rapidfire: start in background and show progress"}>
         <ZapIcon aria-hidden size={14} />Rapidfire</button>
+      {ephemeral && <button type="button" className="ns-chip" aria-pressed={ephemeral.enabled} disabled={busy} onClick={ephemeral.onToggle}
+        title="Ephemeral session: kept across restarts, permanently deleted when closed. No search or recaps.">
+        <GhostIcon aria-hidden size={14} />Ephemeral</button>}
       <ComposerDictation disabled={busy} />
     </div>
     {carry?.note}

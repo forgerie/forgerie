@@ -47,6 +47,11 @@ export class SessionCatalogScanner {
     return this.names.remember(filePath, name);
   }
 
+  forgetSessionFile(filePath: string): Promise<void> {
+    this.memo.delete(filePath);
+    return this.names.forget(filePath);
+  }
+
   flushSessionNames(): Promise<void> {
     return this.names.flush();
   }

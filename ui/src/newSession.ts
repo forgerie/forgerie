@@ -182,6 +182,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
      */
     async start(cwd: string, first: string | FirstPrompt, choice: AgentChoice, options: {
       startupToken?: string;
+      ephemeral?: boolean;
       /** The session exists; its files and first message follow. */
       onCreated?: (session: Session) => void;
       /** A fresh worktree or the folder itself. Absent: the server's default for the folder. */
@@ -200,7 +201,7 @@ export function createNewSessionApi(fetchFn: Fetch) {
       let promptImages = prompt.images ?? [];
       // A chain is named by its name alone: a spec without a slash.
       const modelSpec = choice.modelChain ?? (choice.model?.provider && choice.model.id ? `${choice.model.provider}/${choice.model.id}` : undefined);
-      const start = { cwd, ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
+      const start = { cwd, ...(options.ephemeral === true ? { ephemeral: true } : {}), ...(modelSpec ? { modelSpec } : {}), ...(choice.thinkingLevel ? { thinkingLevel: choice.thinkingLevel } : {}),
         ...(options.destination ? { destination: options.destination } : {}), ...(options.setupId ? { setupId: options.setupId } : {}) };
       try {
         if (options.item) {

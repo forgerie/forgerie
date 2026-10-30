@@ -4,7 +4,7 @@ const text = Type.String({ minLength: 1 });
 const identity = { id: text, repo: text, path: text, branch: text };
 export const WorktreeKeepReasonSchema = Type.Union([
   Type.Literal("dirty"), Type.Literal("unmerged"), Type.Literal("in-use"),
-  Type.Literal("setup-incomplete"), Type.Literal("checkout-changed"), Type.Literal("error"),
+  Type.Literal("retained"), Type.Literal("setup-incomplete"), Type.Literal("checkout-changed"), Type.Literal("error"),
 ]);
 export const WorktreeCleanupOutcomeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("removed") }),

@@ -93,6 +93,8 @@ Resolving an obligation removes it from the note, including notes kept in
 history. Recaps saved in the older goal, done, left and next form show only
 their goal and next step.
 
+Ephemeral sessions have no recaps, including manual `/recap`. See [ephemeral sessions](config.md#ephemeral-sessions).
+
 Forgerie checks unread completions after ten minutes. Automatic recaps require
 an idle, writable parent session with at least three completed user turns and,
 after its first recap, at least two new user turns. Opening an unread session

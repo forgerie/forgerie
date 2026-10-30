@@ -28,6 +28,7 @@ export const WorktreeSetupSchema = Type.Object({
 const savedSession = Type.Object({
   id: text, cwd: text, path: Type.String(), created: text, modified: text,
   messageCount: Type.Integer({ minimum: 0 }), firstMessage: Type.String(),
+  ephemeral: Type.Optional(Type.Boolean()),
   name: Type.Optional(text), parentSessionPath: Type.Optional(text), agentSpawned: Type.Optional(Type.Boolean()),
 });
 const savedTranscript = Type.Object({ id: text, cwd: text, transcriptPath: text, session: savedSession });
@@ -63,6 +64,8 @@ export const SessionWorktreeRecordSchema = Type.Object({
   discardedBranchTip: Type.Optional(text),
   operation: Type.Optional(Type.Union([Type.Literal("land"), Type.Literal("discard"), Type.Literal("archive")])),
   archiveCleanup: Type.Optional(archiveCleanup),
+  /** An ephemeral session closed here. Only an explicit Land or Discard may remove this checkout. */
+  retainAfterSessionClose: Type.Optional(Type.Boolean()),
   cleanup: WorktreeCleanupSchema,
   transcripts: Type.Array(savedTranscript),
   createdAt: text,
@@ -136,6 +139,7 @@ export type WorktreeArchiveCleanupResult =
   | { kind: "retained"; reason: string };
 
 export const UserSessionStartSchema = Type.Object({
+  ephemeral: Type.Optional(Type.Boolean()),
   cwd: text,
   startupToken: Type.Optional(text),
   modelSpec: Type.Optional(text),

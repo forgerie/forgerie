@@ -17,6 +17,7 @@ export interface PickerSession {
   name?: string | undefined;
   modified: string;
   archived?: boolean | undefined;
+  ephemeral?: boolean | undefined;
   pinned?: boolean | undefined;
   agentSpawned?: boolean | undefined;
   /** A start this browser made, before Pi has listed the session. It has no server identity yet. */

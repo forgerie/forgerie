@@ -50,6 +50,7 @@ export const piMessageSchema = z.object({
 });
 export type PiMessage = z.infer<typeof piMessageSchema>;
 export const sessionSchema = z.object({
+  ephemeral: z.boolean().optional(),
   id: z.string().min(1), cwd: z.string().min(1), name: z.string().optional(),
 });
 export type Session = z.infer<typeof sessionSchema>;

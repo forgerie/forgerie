@@ -145,7 +145,9 @@ it("shows the failure instead of startup when Forward returns to a failed backgr
   expect(dialog()).toBeNull();
 });
 
-it("keeps a failed pending page and restores exact text and model only when requested", async () => {
+it("keeps a failed pending page and restores exact text, model and ephemeral choice only when requested", async () => {
+  await until(() => document.querySelector(".destination-value")?.textContent === "Workspace");
+  await act(async () => button("Ephemeral").click());
   const destination = document.querySelector(".destination-value")?.textContent;
   const modelLabel = document.querySelector(".model-trigger")?.textContent;
   const text = "  Fix the build\n\nKeep this whitespace.  \n";
@@ -156,7 +158,13 @@ it("keeps a failed pending page and restores exact text and model only when requ
   expect(dialog()).toBeNull(); expect(params().get("launch")).toBe(token);
   expect(document.getElementById(`picker-row-${token}`)?.getAttribute("data-state")).toBe("errored");
   await act(async () => button("Restore draft").click());
+  // Project names load independently of the restored composer and its saved model.
   await until(() => dialog()?.open === true && input().value === text);
+  await expect.poll(async () => {
+    await act(async () => {});
+    return document.querySelector(".destination-value")?.textContent;
+  }, { timeout: 3000 }).toBe(destination);
+  expect(button("Ephemeral").getAttribute("aria-pressed")).toBe("true");
   expect(document.querySelector(".destination-value")?.textContent).toBe(destination);
   expect(document.querySelector(".model-trigger")?.textContent).toBe(modelLabel);
   expect(document.querySelector(".ns-tray")).toBeNull();
