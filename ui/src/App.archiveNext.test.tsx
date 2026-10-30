@@ -57,6 +57,7 @@ beforeEach(async () => {
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(async (path, init) => {
     if (path.endsWith("/unread/acknowledge")) return Response.json({ catalogId: "test", sessions: [] });
+    if (path.endsWith("/seen")) return Response.json({});
     if (init.method === "POST") {
       posts.push(path);
       const id = /\/api\/sessions\/([^/]+)\/(archive|restore)$/u.exec(path);

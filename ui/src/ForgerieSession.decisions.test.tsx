@@ -49,7 +49,7 @@ async function sessionWithDecisions(status: SessionStatus, options: { decisions?
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
-    if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
+    if (init.method === "POST" && !path.endsWith("/seen")) posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith(`/decisions/${GUESS.id}/confirm`)) {
       const done: Decision = { ...GUESS, state: { kind: "confirmed", at: LOG_NOW } };

@@ -56,7 +56,7 @@ async function chat({ cwd = "/work", projects = { "p-forgerie": "/work" }, recor
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
-    if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
+    if (init.method === "POST" && !path.endsWith("/seen")) posts.push({ path, body: JSON.parse(String(init.body)) });
     const pressed = /^\/api\/backlog\/suggestions\/([^/]+)\/(file|file-and-act|dismiss|restore)$/u.exec(path);
     if (pressed) {
       const next = answer(state.records.find((entry) => entry.id === pressed[1])!, pressed[2] as "file" | "file-and-act");

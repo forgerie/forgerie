@@ -201,7 +201,8 @@ export function createSessionStore(id: string, transport: SessionTransport, timi
       });
       if (!response.ok) throw new Error(`Session presence failed: HTTP ${response.status}`);
     },
-    failed: (error: unknown) => { update(withProblem(state, "Could not record session presence", messageOf(error))); },
+    // Presence is best effort. A missed heartbeat only makes a later recap more likely, so it is not a problem to show.
+    failed: (error: unknown) => { if (!lifetime.signal.aborted) console.debug("Could not record session presence", messageOf(error)); },
   });
   function acknowledge() {
     if (!reads || !pendingReceipt || readRefreshRequested || !selectedVisible || !reads.isVisible()) return;

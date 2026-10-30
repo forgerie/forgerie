@@ -54,7 +54,7 @@ async function sessionWithGate(status: SessionStatus, options: { records?: Gated
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
-    if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
+    if (init.method === "POST" && !path.endsWith("/seen")) posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith(`/gated-actions/${encodeURIComponent(RESET.id)}/approve`)) {
       state.records = state.records.map((record) => record.id === RESET.id ? { ...RESET, state: { kind: "approved" } } : record);

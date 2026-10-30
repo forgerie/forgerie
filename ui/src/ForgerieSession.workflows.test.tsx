@@ -51,7 +51,7 @@ async function sessionWithProposal(status: SessionStatus = idle) {
   vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
   vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
   vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
-    if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
+    if (init.method === "POST" && !path.endsWith("/seen")) posts.push({ path, body: JSON.parse(String(init.body)) });
     if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
     if (path.endsWith(`/workflow-proposals/${PROPOSAL.id}/start`)) {
       state.runs = [PROPOSAL_RUN];
@@ -134,7 +134,7 @@ describe("a running workflow's sheet", () => {
     vi.spyOn(browserTransport, "connect").mockImplementation(() => new Socket(`ws://127.0.0.1:${address.port}`) as unknown as WebSocket);
     vi.spyOn(browserTransport, "watchRecovery").mockImplementation(() => () => {});
     vi.spyOn(browserTransport, "request").mockImplementation(withOpenFixture(async (path, init) => {
-      if (init.method === "POST") posts.push({ path, body: JSON.parse(String(init.body)) });
+      if (init.method === "POST" && !path.endsWith("/seen")) posts.push({ path, body: JSON.parse(String(init.body)) });
       if (path === "/api/sessions/unread") return Response.json({ catalogId: "test", sessions: [] });
       if (path.endsWith("/workers/api/model")) return Response.json({ ...RUN_WORKING, stages: setWorkerModel(RUN_WORKING.stages ?? [], "api", undefined) });
       if (path.includes("/workflow-proposals?")) return Response.json([]);
