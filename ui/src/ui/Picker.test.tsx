@@ -57,7 +57,7 @@ describe("picker", () => {
     const onCommand = vi.fn();
     act(() => root.render(<Picker view={view([S("temp", { ephemeral: true }), S("saved")], { selectedId: "temp" })}
       prefs={defaults} onPrefs={() => {}} actions={{ onSelect: () => {}, onRetry: () => {}, onCommand }} />));
-    expect(host.querySelector('[data-session="temp"] [aria-label="Ephemeral session"]')).not.toBeNull();
+    expect(host.querySelector('[data-session="temp"] [role="img"][aria-label="Ephemeral session"]')).not.toBeNull();
     expect(host.querySelector('[data-session="saved"] [aria-label="Ephemeral session"]')).toBeNull();
     press("e");
     expect(onCommand).not.toHaveBeenCalled();

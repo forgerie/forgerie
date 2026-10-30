@@ -195,7 +195,7 @@ function PickerRow({ row, selected, pending, held, showPin, menuOpen, onSelect, 
     <span className="picker-time" data-live={row.working || undefined}>{row.time}</span>
     <span className="picker-sub">
       <span className="picker-where" title={session.cwd}>{location.project}{location.branch ? <> · <span className="picker-branch">{location.branch}</span></> : null}</span>
-      {session.ephemeral ? <span className="picker-from-backlog" title="Ephemeral session: permanently deleted when closed" aria-label="Ephemeral session"><GhostIcon aria-hidden /></span> : null}
+      {session.ephemeral ? <span className="picker-from-backlog" role="img" title="Ephemeral session: permanently deleted when closed" aria-label="Ephemeral session"><GhostIcon aria-hidden /></span> : null}
       {attentionTag(row)}
       {session.worktree ? <WorktreeRowMark info={session.worktree} /> : null}
       {session.pullRequests?.length ? <PullRequestRowMark links={session.pullRequests} /> : null}
